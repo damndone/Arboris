@@ -26,6 +26,8 @@ from typing import Any, BinaryIO, Mapping
 
 import pandas as pd
 
+from .export_writers import write_csv as write_csv_natively
+from .export_writers import write_dta as write_dta_natively
 from .user_missing import code_mask
 
 STATISTICAL_FORMATS: dict[str, str] = {".sav": "sav", ".zsav": "zsav", ".dta": "dta"}
@@ -314,6 +316,7 @@ def prepare_export(
     value_label_mode: str = "labels",
     missing_code_mode: str = "as_missing",
     dta_version: int = DEFAULT_DTA_VERSION,
+    take_ownership: bool = False,
 ) -> PreparedExport:
     """Translate declared metadata into what ``fmt`` can hold; report the rest.
 
@@ -322,6 +325,9 @@ def prepare_export(
     codes only. ``missing_code_mode``: ``as_missing`` writes declared missing
     codes as missing (SPSS keeps them as native user-missing where it can),
     ``keep_codes`` writes them as ordinary values.
+
+    An exclusively owned projection may be passed with ``take_ownership``.
+    Preparation can then replace its columns and names in place.
     """
 
     if fmt not in EXPORT_FORMATS:
@@ -334,7 +340,7 @@ def prepare_export(
         raise StatisticalFileError(f"dta_version must be one of {sorted(DTA_VERSIONS)}")
     statistical = fmt in {"sav", "zsav", "dta"}
     report = ExportReport(format=fmt)
-    data = frame.copy()
+    data = frame if take_ownership else frame.copy()
     if statistical:
         names = _safe_names([str(column) for column in data.columns], fmt, report)
         data.columns = [names[str(column)] for column in data.columns]
@@ -487,11 +493,13 @@ def write_prepared(prepared: PreparedExport, path: Path) -> ExportReport:
                 raise StatisticalFileError(
                     "Stata 13 cannot hold this dataset's non-ASCII names or labels; export for Stata 14-18"
                 )
-            _pyreadstat().write_dta(prepared.data, str(tmp), **options)
+            if not write_dta_natively(prepared.data, tmp, options, _pyreadstat()):
+                _pyreadstat().write_dta(prepared.data, str(tmp), **options)
         elif fmt in {"sav", "zsav"}:
             _pyreadstat().write_sav(prepared.data, str(tmp), compress=(fmt == "zsav"), **options)
         elif fmt == "csv":
-            prepared.data.to_csv(tmp, index=False, encoding="utf-8")
+            if not write_csv_natively(prepared.data, tmp):
+                prepared.data.to_csv(tmp, index=False, encoding="utf-8")
         else:
             prepared.data.to_excel(tmp, index=False, engine="openpyxl")
         tmp.replace(path)

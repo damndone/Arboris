@@ -8,8 +8,8 @@ export const DataView = lazy(() => import("../dataView/DataView").then((m) => ({
 export const TableView = lazy(() => import("./views/TableView").then((m) => ({ default: m.TableView })));
 export const PipelineView = lazy(() => import("./views/PipelineView").then((m) => ({ default: m.PipelineView })));
 export const ReportView = lazy(() => import("../report/ReportView").then((m) => ({ default: m.ReportView })));
-export const NotebookRouteView = lazy(() =>
-  import("../notebook/NotebookRouteView").then((m) => ({ default: m.NotebookRouteView })),
+export const ComparePlansView = lazy(() =>
+  import("../notebook/ComparePlansView").then((m) => ({ default: m.ComparePlansView })),
 );
 
 export function ViewLoading() {

@@ -241,7 +241,7 @@ def test_proposal_tool_schema_is_projected_from_registered_capability(tmp_path) 
     proposal_tool = next(
         item
         for item in orchestrator.tool_registry("chain-a").descriptors()
-        if item["tool_id"] == "propose_operation"
+        if item["tool_id"] == "run_operation"
     )
     schemas = proposal_tool["input_schema"]["oneOf"]
 

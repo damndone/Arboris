@@ -1,0 +1,51 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentExtensionsPanel } from "./AgentExtensionsPanel";
+import * as api from "./agent/extensionApi";
+import * as sharing from "../dataView/dataViewApi";
+vi.mock("../dataView/dataViewApi");
+vi.mock("./agent/extensionApi");
+const doc = {schema:"arboris.extensions.v1" as const,tools:[{id:"papers",version:"1",origin:"test:fixture",endpoint:"https://example.test/search",input_schema:{type:"object"},output_schema:{type:"object"}}],hooks:[]};
+const catalog = {manifest:doc,sha256:"sha256:reviewed",disabled:[]};
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(sharing.fetchEgress).mockResolvedValue({project_root:"/p",policy:{version:1,providers:{},columns:{}},policy_source:"default",content_classes:["extension"],sensitivity_levels:[],defaults:{local:[],remote:[]},active_provider:null});
+  vi.mocked(sharing.replaceEgressPolicy).mockResolvedValue({project_root:"/p",policy:{version:1,providers:{"external:papers":{allow:["extension"]}},columns:{}},policy_source:"project",content_classes:["extension"],sensitivity_levels:[],defaults:{local:[],remote:[]},active_provider:null});
+  vi.mocked(api.getExtensions).mockResolvedValue({manifest:{...doc,tools:[]},sha256:null,disabled:[]});
+  vi.mocked(api.reviewExtensions).mockResolvedValue(catalog);
+  vi.mocked(api.admitExtensions).mockResolvedValue(catalog);
+  vi.mocked(api.disableExtension).mockResolvedValue({...catalog,disabled:["papers"]});
+});
+describe("explicit extension admission", () => {
+  it("reviews exact content, separately admits, and disables", async () => {
+    render(<AgentExtensionsPanel projectRoot="/p" />);
+    fireEvent.change(await screen.findByLabelText("Extension manifest JSON"),{target:{value:JSON.stringify(doc)}});
+    fireEvent.click(screen.getByRole("button",{name:"Review manifest"}));
+    await screen.findByText("sha256:reviewed");
+    expect(api.admitExtensions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"Admit reviewed manifest"}));
+    await screen.findByText("https://example.test/search");
+    expect(api.admitExtensions).toHaveBeenCalledWith("/p",{manifest:doc,expected_sha256:"sha256:reviewed",previous_sha256:null});
+    const allow=await screen.findByRole("button",{name:"Allow query sharing to papers"});
+    expect(sharing.replaceEgressPolicy).not.toHaveBeenCalled();
+    fireEvent.click(allow);
+    await screen.findByRole("button",{name:"Block query sharing to papers"});
+    expect(sharing.replaceEgressPolicy).toHaveBeenCalledWith("/p",{version:1,providers:{"external:papers":{allow:["extension"]}},columns:{}});
+    fireEvent.click(screen.getByRole("button",{name:"Disable papers"}));
+    await waitFor(()=>expect(api.disableExtension).toHaveBeenCalledWith("/p","papers",true,"sha256:reviewed"));
+    await screen.findByRole("button",{name:"Enable papers"});
+  });
+  it("editing invalidates review and switching projects hides the old review", async () => {
+    const {rerender} = render(<AgentExtensionsPanel projectRoot="/p" />);
+    const editor = await screen.findByLabelText("Extension manifest JSON");
+    fireEvent.change(editor,{target:{value:JSON.stringify(doc)}});
+    fireEvent.click(screen.getByRole("button",{name:"Review manifest"}));
+    await screen.findByText("sha256:reviewed");
+    fireEvent.change(editor,{target:{value:"{}"}});
+    expect(screen.queryByRole("button",{name:"Admit reviewed manifest"})).not.toBeInTheDocument();
+    rerender(<AgentExtensionsPanel projectRoot="/q" />);
+    expect(screen.queryByText("sha256:reviewed")).not.toBeInTheDocument();
+    expect(api.admitExtensions).not.toHaveBeenCalled();
+    await screen.findByLabelText("Extension manifest JSON");
+  });
+});

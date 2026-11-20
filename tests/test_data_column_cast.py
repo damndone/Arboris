@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import json
 import asyncio
 from pathlib import Path
@@ -57,6 +59,17 @@ def _source_project(tmp_path: Path, frame: pd.DataFrame) -> tuple[Path, str, str
         )
     )
     return project, run_id, artifact_id
+
+
+def _register_source_node_identity(project: Path, run_id: str) -> None:
+    """Make this source fixture addressable through the real typed-node writer."""
+    from workbench.data_operations.graph import _ensure_node_index_entry
+
+    root = project / "runs" / run_id
+    node = GraphStore(project / "runs").read(run_id).nodes["stage:source"]
+    _ensure_node_index_entry(root, child_node_id=node.id,
+        node_hash=sha256_file(root / node.payload_ref), artifact_rel=node.payload_ref,
+        producing_stage="fixture.source", create_if_missing=True)
 
 
 def test_column_cast_preview_is_strict_and_deterministic(tmp_path: Path) -> None:
@@ -269,7 +282,7 @@ def test_column_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) -
         main_session_id="agent_main",
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.column.cast",
         target={
@@ -377,7 +390,7 @@ def test_column_cast_lifecycle_reconciles_without_duplicate_child_effect(
         failpoint=CrashOnce(),
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.column.cast",
         target={

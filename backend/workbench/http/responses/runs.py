@@ -387,6 +387,10 @@ class ArtifactGroups(TypedDict):
     groups: list[ArtifactGroup]
 
 
+class FiguresDrawn(TypedDict):
+    figures: int
+
+
 DatasetExportFormat = Literal["sav", "zsav", "dta", "csv", "xlsx"]
 
 

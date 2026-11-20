@@ -17,10 +17,18 @@ def _assert_json_safe(value):
         assert pd.notna(value)
 
 
-def test_profile_frame_records_missing_and_correlation():
+def test_profile_frame_records_missing_and_correlation(monkeypatch):
     frame = pd.DataFrame(
         {"x": [1.0, 2.0, None], "y": [2.0, 4.0, 6.0], "group": ["a", "b", "b"]}
     )
+    nunique = pd.Series.nunique
+    counted = []
+
+    def count_unique(series, dropna=True):
+        counted.append((series.name, dropna))
+        return nunique(series, dropna=dropna)
+
+    monkeypatch.setattr(pd.Series, "nunique", count_unique)
     profile = profile_frame(frame)
     assert profile["row_count"] == 3
     assert profile["columns"]["x"]["missing_rate"] == 1 / 3
@@ -29,6 +37,7 @@ def test_profile_frame_records_missing_and_correlation():
     assert profile["columns"]["x"]["mean"] == 1.5
     assert "x" in profile["correlations"]
     assert profile["correlations"]["x"]["y"] == 1.0
+    assert counted == [(name, True) for name in frame.columns]
 
 
 def test_profile_frame_keeps_undefined_numeric_stats_json_safe():

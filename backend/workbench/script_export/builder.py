@@ -198,12 +198,15 @@ def _export_covariance(executed, packet, form, kernel, layout, *, request_summar
             refuse("Executed covariance cannot be proved from the owner record")
     labels = {'unadjusted': {'nonrobust','unadjusted'}, 'robust': {'robust','HC1'},
               'clustered': {'cluster','clustered'}, 'hac': {'HAC'}}
+    if kernel.get('model_type') == 'iv_2sls':
+        labels['hac'].add('kernel')
+        labels['kernel'] = {'kernel'}
     if layout.intrinsic_covariance:
         labels[layout.intrinsic_covariance] = {layout.intrinsic_covariance}
     if not isinstance(packet.get('survey_design'), dict) and covariance is not None:
         if kernel['covariance_estimator'] not in labels.get(covariance, set()):
             refuse("Executed covariance input disagrees with its actual inference kernel")
-    return covariance
+    return 'hac' if kernel.get('model_type') == 'iv_2sls' and covariance == 'kernel' else covariance
 
 
 class _Builder:

@@ -29,6 +29,45 @@ class IdleAdapter:
             yield request
 
 
+@pytest.mark.parametrize(("artifact_type", "source"), [
+    ("statistical_exploration", {"source_artifact_id": "filtered_table", "source_sha256": "a" * 64}),
+    ("workflow_capability_result", {"source": {"artifact_id": "filtered_table", "sha256": "a" * 64,
+                                              "path": "/private/source.csv"}}),
+])
+def test_public_operation_result_keeps_the_producers_input_binding(artifact_type: str, source: dict) -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, _ = _public_operation_artifact_result(artifact_type, {
+        **source, "result": {"filtered_row_count": 12, "filters": []},
+    })
+
+    assert public["dataset_source"] == {"artifact_id": "filtered_table", "sha256": "a" * 64}
+    assert public["filtered_row_count"] == 12 and public["filters"] == []
+
+
+def test_public_proportions_result_keeps_estimands_and_sample_bindings() -> None:
+    from workbench.agent.context_tools import _public_operation_artifact_result
+
+    public, _ = _public_operation_artifact_result("workflow_capability_result", {
+        "request": {"options": {"events_column": "events", "non_events_column": "no_events"}},
+        "result": {
+            "operation_id": "test.proportions",
+            "result": {"results": [{"nobs": 200, "effect": {
+                "counts": {"row 1": {"events": 6, "trials": 100}, "row 2": {"events": 10, "trials": 100}},
+                "rate_difference": {"estimate": -0.041, "ci_lower": -0.07, "ci_upper": -0.012},
+                "risk_ratio": {"estimate": 0.81, "ci_lower": 0.79, "ci_upper": 0.83},
+            }}]},
+        },
+    })
+
+    effect = public["results"][0]["effect"]
+    assert effect["rate_difference"] == {"estimate": -0.041, "ci_lower": -0.07, "ci_upper": -0.012}
+    assert effect["risk_ratio"]["estimate"] == 0.81
+    assert effect["counts"]["row 1"] == {"events": 6, "trials": 100}
+    assert public["results"][0]["nobs"] == 200
+    assert public["column_roles"] == {"events_column": "events", "non_events_column": "no_events"}
+
+
 def test_p7_public_projection_preserves_hurdle_approximation_labels() -> None:
     """Agent evidence must not detach an approximate p-value from its method."""
 
@@ -473,7 +512,7 @@ def test_unconfigured_orchestrator_does_not_expose_project_context_tool(
 
     tool_ids = {item["tool_id"] for item in orchestrator.tool_registry("chain-a").descriptors()}
 
-    assert "propose_operation" in tool_ids
+    assert "run_operation" in tool_ids
     assert "inspect_node_context" not in tool_ids
     assert "inspect_operation_contract" not in tool_ids
     assert "inspect_diagnostics" not in tool_ids
@@ -493,7 +532,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
 
     tool_ids = {item["tool_id"] for item in registry.descriptors()}
     assert {
-        "propose_operation",
+        "run_operation",
         "list_project_datasets",
         "inspect_node_context",
         "inspect_operation_contract",
@@ -536,7 +575,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         expected = (
             16384
             if descriptor["tool_id"] == "list_project_datasets"
-            else 262144
+            else 65536
             if descriptor["tool_id"] == "inspect_operation_contract"
             else 12288
             if descriptor["tool_id"] == "inspect_time_series_summary"
@@ -607,8 +646,11 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert contract_result.output["contract"]["op_type"] == "ols"
     assert contract_result.output["contract"]["schema_id"] == "ols@v1"
     assert {item["key"] for item in contract_result.output["contract"]["editable_schema"]} >= {
-        "x",
+        "model_options",
         "model_type",
+    }
+    assert {item["key"] for item in contract_result.output["contract"]["analysis_loop_editable_schema"]} == {
+        "covariance", "entity_col",
     }
 
     diagnostics_result = asyncio.run(
@@ -1050,7 +1092,7 @@ def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
     }
 
 
-def test_workflow_step_contract_is_rejected_before_direct_inspection(
+def test_workflow_step_contract_is_read_through_the_multi_step_contract(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
@@ -1085,14 +1127,9 @@ def test_workflow_step_contract_is_rejected_before_direct_inspection(
         )
     )
 
-    assert result.ok is False
-    assert result.error == "invalid_tool_arguments"
-    assert result.error_details is not None
-    assert any(
-        "model.joint_f_test" in detail["message"]
-        and "is not one of" in detail["message"]
-        for detail in result.error_details
-    )
+    assert result.ok is True
+    assert "is a workflow step" in result.output["workbench_notes"][0]
+    assert list(result.output["contract"]["step_vocabulary"]["step_operations"]) == ["model.joint_f_test"]
 
 
 def test_operation_contract_tool_only_advertises_top_level_operations(
@@ -1155,6 +1192,7 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
                     "active_head_run_id": "run-a",
                     "operation_id": "operation.multi_step",
                     "operation_version": "v1",
+                    "step_operation_ids": ["diagnostics.vif"],
                 },
             },
             session_id="chain-session",
@@ -1165,6 +1203,9 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
     contract = result.output["contract"]
     assert contract["contract_owner"] == "operation_registry"
     vocabulary = contract["step_vocabulary"]
+    # Only the requested step's full specification, without implementation keys.
+    assert list(vocabulary["step_operations"]) == ["diagnostics.vif"]
+    assert "dispatcher_key" not in vocabulary["step_operations"]["diagnostics.vif"]
     diagnostics_vif = vocabulary["step_operations"]["diagnostics.vif"]
     assert diagnostics_vif["required"] == [
         "input_mode",
@@ -1172,6 +1213,39 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
         "options",
     ]
     assert diagnostics_vif["field_enums"]["input_mode"] == ["typed"]
+
+
+def test_multi_step_contract_without_step_ids_indexes_every_step_compactly(tmp_path: Path) -> None:
+    """v1.9.1 M0: the full vocabulary was 250 KB per call; the index keeps every step discoverable."""
+    import json as _json
+
+    from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    from workbench.agent.operations import OperationRegistry
+
+    for definition in provider.tool_definitions(chain_id="chain-a", session_id="chain-session",
+                                                operation_registry=OperationRegistry()):
+        registry.register(definition)
+    arguments = {"owner_run_id": "run-a", "op_node_id": "model:ols_1", "active_head_run_id": "run-a",
+                 "operation_id": "operation.multi_step"}
+    index = asyncio.run(registry.execute({"tool_call_id": "c1", "tool_id": "inspect_operation_contract",
+                                          "arguments": arguments}, session_id="chain-session"))
+    vocabulary = index.output["contract"]["step_vocabulary"]
+    listed = {line.split(":", 1)[0] for line in vocabulary["step_index"]}
+    assert listed == set(WORKFLOW_STEP_SPEC_CONTRACTS)
+    assert "step_operations" not in vocabulary and "how_to_get_specs" in vocabulary
+    assert len(_json.dumps(index.output, ensure_ascii=False)) < 40_000
+
+    wrong = asyncio.run(registry.execute({"tool_call_id": "c2", "tool_id": "inspect_operation_contract",
+                                          "arguments": {**arguments, "step_operation_ids": ["model.genesis", "nope.step"]}},
+                                         session_id="chain-session"))
+    detail = wrong.output["contract"]["step_vocabulary"]
+    assert list(detail["step_operations"]) == ["model.genesis"]
+    assert detail["unknown_step_operation_ids"] == ["nope.step"]
 
 
 def test_completed_workflow_result_is_discoverable_as_bounded_evidence(
@@ -1580,7 +1654,10 @@ def test_managed_chain_context_tool_rejects_a_forged_active_head(
     )
 
     assert result.ok is False
-    assert result.error == "ChainHeadConflict"
+    # Still refused; the refusal now names this conversation's own head.
+    assert result.error == "ToolVisibleError"
+    message = result.error_details[0]["message"]
+    assert message.startswith("ACTIVE_HEAD_MISMATCH") and "current head run-b" in message
 
 
 def test_invalid_node_probe_returns_one_visible_error_with_valid_targets(
@@ -1937,6 +2014,57 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
             "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
         }
     ]
+
+
+def test_model_summary_binds_inference_facts_to_the_selected_model_beyond_the_preview(tmp_path: Path) -> None:
+    from workbench.agent.context_tools import InspectResultSummaryRequest
+
+    project = tmp_path / "project"
+    _write_project_run(project)
+    models = project / "runs" / "run-a" / "model_results"
+    for model_id in ("a_sibling", "b_sibling"):
+        (models / f"{model_id}.json").write_text(json.dumps({
+            "model_id": model_id, "model_type": "ols", "nobs": 99,
+            "survey_design": {"degf": 7},
+            "coefficients": {"x1": {"estimate": -9.0}},
+        }))
+        (models / f"checks_{model_id}.json").write_text(json.dumps({
+            "checks": [{"check_id": "sibling.check", "status": "warn"}],
+        }))
+    (models / "checks_ols_1.json").write_text(json.dumps({
+        "checks": [{"check_id": "selected.check", "status": "ok"}],
+    }))
+    summary_path = models.parent / "diagnostic_summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["model_identity"]["n_observations"] = 99
+    summary["coefficients_summary"] = {
+        "full_table_ref": "model_results/a_sibling.json",
+        "rows": [{"variable": "x1", "estimate": -9.0}],
+    }
+    summary_path.write_text(json.dumps(summary))
+    provider = _load_provider_type()(project)
+    request = InspectResultSummaryRequest(
+        request_id="summary", owner_run_id="run-a", op_node_id="model:ols_1", active_head_run_id="run-a",
+    )
+
+    result = provider.inspect_result_summary(request)["result_summary"]
+    assert result["model_scope"] == {"model_id": "ols_1", "status": "available", "narrative_scope": "unavailable"}
+    assert result["model_identity"] == {}
+    assert result["metrics"] == {}
+    assert result["coefficient_rows"] == []
+    assert result["full_table_ref"] is None
+    assert [row["model_id"] for row in result["persisted_models"]] == ["ols_1"]
+    assert result["persisted_models"][0]["coefficients"][0]["estimate"] == 1.2
+    assert [row["check_id"] for row in result["checks"]] == ["selected.check"]
+    assert result["survey_design"] is None
+    assert {row["id"] for row in result["regression_table"]["models"]} == {"a_sibling", "b_sibling", "ols_1"}
+
+    (models / "ols_1.json").unlink()
+    unavailable = provider.inspect_result_summary(request)["result_summary"]
+    assert unavailable["model_scope"]["status"] == "unavailable"
+    assert unavailable["persisted_models"] == []
+    assert unavailable["checks"] is None
+    assert unavailable["survey_design"] is None
 
 
 def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
@@ -2826,3 +2954,101 @@ def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(
         f"contract payload is {len(serialized)} chars against a {budget} budget; "
         "the Agent would receive tool_output_budget_exceeded instead of the contract"
     )
+
+
+def _inspect_artifact(orchestrator, **arguments):
+    return asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {"tool_call_id": "call-artifact", "tool_id": "inspect_operation_artifact", "arguments": arguments},
+            session_id="chain-session",
+        )
+    )
+
+
+def test_operation_artifact_accepts_the_workflow_id_of_its_own_record(tmp_path: Path) -> None:
+    """v1.9.1 smoke: the Agent named the workflow id the result showed, not the record id."""
+
+    from workbench.agent.context_tools_support.workflow_results import _record_ids
+    from workbench.agent.operations import OperationRecordStore
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    record_id, artifact_id = _write_completed_workflow_result(project_root)
+    record = next(r for r in OperationRecordStore(project_root / "workbench", create=False).list_records()
+                  if r.record_id == record_id)
+    (workflow_id,) = _record_ids(record) - {record_id}
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    result = _inspect_artifact(orchestrator, owner_run_id="run-a", op_node_id="model:ols_1",
+                               active_head_run_id="run-a", operation_record_id=workflow_id, artifact_id=artifact_id)
+
+    assert result.ok is True, result.error_details
+    assert result.output["artifact_evidence"]["evidence_ref"]["operation_record_id"] == record_id
+
+
+def test_operation_artifact_out_of_scope_names_where_its_own_record_ran(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    _write_project_run(project_root, run_id="run-b")
+    record_id, artifact_id = _write_completed_workflow_result(project_root)
+    foreign_id, _ = _write_completed_workflow_result(project_root, proposal_id="proposal-foreign",
+                                                     session_id="other-session", chain_id="chain-b")
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    own = _inspect_artifact(orchestrator, owner_run_id="run-b", op_node_id="model:ols_1",
+                            active_head_run_id="run-b", operation_record_id=record_id, artifact_id=artifact_id)
+    foreign = _inspect_artifact(orchestrator, owner_run_id="run-b", op_node_id="model:ols_1",
+                                active_head_run_id="run-b", operation_record_id=foreign_id, artifact_id=artifact_id)
+
+    message = own.error_details[0]["message"]
+    assert own.ok is False and "OPERATION_RESULT_NOT_IN_SCOPE" in message
+    assert "owner_run_id run-a, op_node_id model:ols_1" in message
+    # Another conversation's record stays unnamed.
+    assert foreign.ok is False and "run-a" not in foreign.error_details[0]["message"]
+
+
+def test_operation_artifact_says_a_report_file_is_not_a_json_result(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    record_id, _ = _write_completed_workflow_result(project_root, artifact_id="workflow_report_html")
+    run_root = project_root / "runs" / "run-a"
+    index = json.loads((run_root / "artifacts_index.json").read_text())
+    index["artifacts"][0].update({"artifact_type": "report", "path": "reports/workflow.html"})
+    (run_root / "artifacts_index.json").write_text(json.dumps(index))
+    (run_root / "reports").mkdir()
+    (run_root / "reports" / "workflow.html").write_text("<html></html>")
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    result = _inspect_artifact(orchestrator, owner_run_id="run-a", op_node_id="model:ols_1",
+                               active_head_run_id="run-a", operation_record_id=record_id,
+                               artifact_id="workflow_report_html")
+
+    assert result.ok is False
+    assert "is a .html file" in result.error_details[0]["message"]
+
+
+def test_project_conversations_read_nodes_named_by_forest_key(tmp_path: Path) -> None:
+    """A whole-project conversation has no Chain record, and its context names nodes as
+    `<node hash>::<node id>` (live UI check, 2026-11-02: both reads failed as a bare ValueError)."""
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    chain_id = f"project:{project_root}"
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("main-session", chain_id="project", role="main")
+    repository.create_session("project-session", chain_id=chain_id, role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main-session",
+                                         context_provider=_load_provider_type()(project_root))
+    orchestrator.register_chain(chain_id, "project-session",
+                                AgentCore(repository, events, IdleAdapter(), session_id="project-session"))
+    registry = orchestrator.tool_registry(chain_id)
+
+    def read(node_id: str):
+        return asyncio.run(registry.execute(
+            {"tool_call_id": "call", "tool_id": "inspect_node_context",
+             "arguments": {"owner_run_id": "run-a", "op_node_id": node_id, "active_head_run_id": "run-a"}},
+            session_id="project-session"))
+
+    assert read("hash-a::model:ols_1").ok is True
+    stale = read("hash-b::model:ols_1")
+    assert stale.ok is False and "Valid node IDs for run run-a: model:ols_1" in repr(stale)

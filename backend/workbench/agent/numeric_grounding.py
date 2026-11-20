@@ -9,14 +9,16 @@ alone cannot rule that out, so the rule is enforced here:
 - ``check`` runs before a reply is shown. Every decimal number in the reply
   must equal some number the model was given -- a tool result, a server
   record, the user's own words, or a ``calculate`` value whose operands are
-  themselves supported -- rounded correctly to the digits written. A reply
-  that fails goes back to the model once with the offending numbers and the
+  themselves supported -- rounded correctly to the digits and sign written. A
+  reply that fails goes back to the model once with the offending numbers and the
   closest real values (``correction_message``); if the rewrite still fails,
   the reply is shown with a visible warning naming the unverified numbers
   (``unverified_note``). Nothing is silently rewritten.
 
-Whole numbers below 1,000 and years are not checked: counts of tests,
-levels and codes are too often legitimate prose.
+Explicit sample sizes, observation counts and participant counts are checked
+as exact integers. Their evidence is still a bag of values, without a field
+or result-owner binding. Other whole numbers below 1,000 and years are not
+checked: counts of tests, levels and codes are too often legitimate prose.
 """
 
 from __future__ import annotations
@@ -42,22 +44,47 @@ MAX_REPAIRS = 1
 # A number may be written in scientific notation as a statistician would:
 # 1.984×10⁻³⁸, 1.98 × 10^-38, 3.3*10**-38 -- one number, not "1.984".
 _REPLY_NUMBER = re.compile(
-    r"(?<![A-Za-z0-9_.,])"
-    r"(?P<number>(?P<mantissa>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
+    r"(?<![A-Za-z0-9_.])"
+    r"(?P<number>(?P<mantissa>[+−–-]?(?:(?:\d{1,3}(?:[,\u00a0\u2009\u202f]\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+    r"(?:[eE][+−-]?\d+)?)"
     r"(?:\s*[×xX*·]\s*10\s*(?:"
     r"(?P<superscript>[⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)"
     r"|(?:\^|\*\*)\s*\(?\s*(?P<exponent>[-+−]?\d+)\s*\)?"
     r"))?)"
-    r"(?![A-Za-z0-9_]|[.,]\d)"
+    r"(?![A-Za-z0-9_]|\.\d)"
 )
 _SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺−", "0123456789-+-")
-# Whole numbers are checked from here up: smaller ones are too often prose
-# ("3 tests", "the 5% level", "1 = male"). Years are prose too.
+# Other whole numbers are checked from here up: smaller ones are too often
+# prose ("3 tests", "the 5% level", "1 = male"). Years are prose too.
 _MIN_CHECKED_INTEGER = 1000
 _YEARS = range(1900, 2101)
-# Letters on either side mean an identifier or a hash ("run-3e45ab"), not a number.
-_EVIDENCE_NUMBER = re.compile(r"(?<![0-9A-Za-z_.])\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?![A-Za-z_])")
-
+_COUNT_BEFORE = re.compile(
+    r"(?:样本(?:量|人数)?|观测(?:数|数量)|参与者(?:人数|数量)|受试者(?:人数|数量)|人数"
+    r"|\bsample\s+size|\bnumber\s+of\s+(?:observations|participants)|\bn\s*[=:])"
+    r"\s*(?:为|是|有|共|is|was|were|[=:：])?\s*$",
+    re.IGNORECASE,
+)
+_COUNT_AFTER = re.compile(
+    r"^\s*(?:(?:个|名)\s*)?(?:观测(?:值)?|样本|参与者|受试者"
+    r"|(?:observations?|participants?|subjects?)\b)",
+    re.IGNORECASE,
+)
+# Report sample sizes are commonly labeled before the value, including in
+# headings and in the deterministic draft's fit summary.
+_REPORT_COUNT_BEFORE = re.compile(
+    r"\b(?:nobs|n_obs|n)\s*[=:：]\s*$|\bsample\s+(?:size|of)\s*(?:[:=：]|of)?\s*$",
+    re.IGNORECASE,
+)
+_REPORT_COUNT_LABEL_END = r"(?:\s*\(\s*n(?:_?obs)?\s*\))?\s*(?:[=:：]|(?:is|was|were|of)\b)?\s*$"
+_REPORT_ROWS_BEFORE = re.compile(r"(?:\b(?:observations?|rows)|观测(?:数|数量))" + _REPORT_COUNT_LABEL_END, re.IGNORECASE)
+_REPORT_ROWS_AFTER = re.compile(r"^(?:(?:panel\s+|complete-case\s+)?observations?\b|rows?\b|(?:个\s*)?观测(?:值)?)",
+                                re.IGNORECASE)
+_REPORT_UNITS_BEFORE = re.compile(
+    r"(?:\b(?:unit\s+count|number\s+of\s+(?:panel\s+)?units)|(?:^|[:·#])\s*units)" + _REPORT_COUNT_LABEL_END,
+    re.IGNORECASE,
+)
+_REPORT_UNITS_AFTER = re.compile(r"^(?:panel\s+)?units?\b", re.IGNORECASE)
+_REPORT_FIT_BEFORE = re.compile(r"\b(?:fit(?:ted)?|estimated)\s+(?:on|using)\s*$|\b(?:model|fit)\s+used\s*$", re.IGNORECASE)
 # Significance levels and coverage people state without citing a result;
 # exempt only where the wording shows they are thresholds ("p < 0.05",
 # "the 0.05 level", "α = 0.05").
@@ -67,6 +94,12 @@ _THRESHOLD_BEFORE = re.compile(
     re.IGNORECASE,
 )
 _THRESHOLD_AFTER = re.compile(r"^\s*(?:的)?\s*(?:水平|显著性水平|level|significance)", re.IGNORECASE)
+# An unsigned quantity in "4.91 points lower" states the magnitude only.
+_MAGNITUDE_AFTER = re.compile(
+    r"^\s*%?\s*(?:(?:percentage points?|points?|days?|hours?|years?|dollars?|units?)\s+)?"
+    r"(?:more|fewer|less|lower|higher)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -90,7 +123,7 @@ class Evidence:
     """The numbers a reply may use, sorted for window lookups."""
 
     def __init__(self, values: Iterable[Decimal]) -> None:
-        unique = sorted({abs(value) for value in values if value.is_finite()})
+        unique = sorted({value for value in values if value.is_finite()})
         self._values = unique
         self._floats = [float(value) for value in unique]
 
@@ -109,6 +142,11 @@ class Evidence:
             if _rounds_to(candidate * 100, quantum, value):  # 0.0985 → 9.85%
                 return True
         return False
+
+    def supports_integer(self, value: Decimal) -> bool:
+        """Exact value presence, without rounding, percentage scaling or field binding."""
+        index = bisect.bisect_left(self._values, value)
+        return value == value.to_integral_value() and index < len(self._values) and self._values[index] == value
 
     def closest(self, value: Decimal, limit: int = 2) -> tuple[str, ...]:
         if not self._values:
@@ -147,21 +185,12 @@ def _plain(value: Decimal) -> str:
 
 def _decimal(text: str) -> Decimal | None:
     try:
-        value = Decimal(text.replace(",", ""))
+        value = Decimal(re.sub(r"[,\u00a0\u2009\u202f]", "", text).replace("−", "-").replace("–", "-"))
     except (InvalidOperation, ArithmeticError):
         return None
     if not value.is_finite() or not -400 < value.adjusted() < 400:
         return None
     return value
-
-
-def _numbers_in(text: str) -> list[Decimal]:
-    values = []
-    for token in _EVIDENCE_NUMBER.findall(text):
-        value = _decimal(token)
-        if value is not None:
-            values.append(value)
-    return values
 
 
 def _content_text(content: Any) -> str:
@@ -190,11 +219,19 @@ def evidence_from_messages(messages: Sequence[Mapping[str, Any]]) -> Evidence:
         if message.get("role") == "tool" and message.get("name") == CALCULATE_TOOL_ID:
             calculations.extend(_calculation_records(text))
             continue
-        values.extend(_numbers_in(text))
+        values.extend(value for match in _REPLY_NUMBER.finditer(text) if (value := _reply_value(match)) is not None)
     evidence = Evidence(values)
     for record in calculations:
-        operands = [_decimal(str(operand)) for operand in record.get("operands") or ()]
-        if all(operand is not None and (operand == operand.to_integral_value() or evidence.supports(abs(operand))) for operand in operands):
+        written = record.get("operands") or ()
+        expression = record.get("expression")
+        # Old receipts stored only the constant's unsigned token.
+        if isinstance(expression, str) and "-" in expression and all(not str(token).startswith("-") for token in written):
+            try:
+                _, written = evaluate(expression)
+            except (CalculationError, OverflowError):
+                continue
+        operands = [_decimal(str(operand)) for operand in written]
+        if all(operand is not None and (operand == operand.to_integral_value() or evidence.supports(operand)) for operand in operands):
             value = _decimal(str(record.get("value")))
             if value is not None:
                 values.append(value)
@@ -233,6 +270,27 @@ def _is_threshold(text: str, start: int, end: int, value: Decimal) -> bool:
     return bool(_THRESHOLD_BEFORE.search(text[max(start - 12, 0):start]) or _THRESHOLD_AFTER.match(text[end:end + 12]))
 
 
+def report_sample_size_labels(text: str, start: int, end: int, *, bound: bool = False) -> set[str]:
+    """Find explicit sample-size labels next to a literal or bound value."""
+    before = text[max(0, start - 64):start].rstrip(" *_`\t\r\n")
+    after = text[end:end + 64].lstrip(" *_`\t\r\n")
+    labels: set[str] = set()
+    if _REPORT_COUNT_BEFORE.search(before) or _COUNT_BEFORE.search(before) or _COUNT_AFTER.match(after):
+        labels.add("sample")
+    if _REPORT_ROWS_BEFORE.search(before) or _REPORT_ROWS_AFTER.match(after):
+        labels.add("rows")
+    # "Units" can also be the scale of a coefficient. With a trailing label,
+    # require a count marker or explicit estimation/sample wording.
+    if _REPORT_UNITS_BEFORE.search(before) or (_REPORT_UNITS_AFTER.match(after)
+            and (bound or labels or _REPORT_FIT_BEFORE.search(before))):
+        labels.add("units")
+    return labels
+
+
+def has_report_sample_size_literal(text: str) -> bool:
+    return any(report_sample_size_labels(text, match.start(), match.end()) for match in _REPLY_NUMBER.finditer(text))
+
+
 def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, ...]:
     """The decimal numbers in ``reply`` that no given number supports."""
 
@@ -247,14 +305,22 @@ def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, .
         value = _reply_value(match)
         if value is None or text in seen:
             continue
-        value = abs(value)
-        scientific = bool(match.group("superscript") or match.group("exponent"))
-        if not scientific and "." not in text and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
+        scientific = bool(match.group("superscript") or match.group("exponent") or "e" in match.group("mantissa").lower())
+        integer = not scientific and "." not in text
+        count = integer and bool(
+            _COUNT_BEFORE.search(reply[max(0, match.start() - 64):match.start()])
+            or _COUNT_AFTER.match(reply[match.end():match.end() + 32])
+        )
+        if integer and not count and (abs(value) < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
             continue
-        if _is_threshold(reply, match.start(), match.end(), value) or evidence.supports(value):
+        supported = value >= 0 and evidence.supports_integer(value) if count else evidence.supports(value)
+        if _is_threshold(reply, match.start(), match.end(), value) or supported:
+            continue
+        opposite = not count and evidence.supports(-value)
+        if opposite and text[0] not in "+−–-" and _MAGNITUDE_AFTER.match(reply[match.end():match.end() + 40]):
             continue
         seen.add(text)
-        findings.append(Finding(text, evidence.closest(value)))
+        findings.append(Finding(text, evidence.closest(-value if opposite else value)))
     return tuple(findings) + group_comparison_findings(reply, messages)
 
 
@@ -329,7 +395,7 @@ def group_comparison_findings(reply: str, messages: Sequence[Mapping[str, Any]])
     evidence = Evidence(_decimal(repr(value)) for value in values if math.isfinite(value))
     for match in _REPLY_NUMBER.finditer(reply):
         number = _reply_value(match)
-        if number is not None and len(evidence) and evidence.supports(abs(number)):
+        if number is not None and len(evidence) and evidence.supports(number):
             return ()
     if any(value < 0.001 for value in values) and re.search(r"[<＜]\s*0?\.001", reply):
         return ()
@@ -386,7 +452,25 @@ def correction_message(findings: Sequence[Finding]) -> str:
     )
 
 
-def unverified_note(findings: Sequence[Finding], language: str) -> str:
+def image_in_this_turn(messages: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether the person's latest message came with an image.
+
+    A number read from a picture has no result to match, so a rewrite cannot
+    fix it; the reply keeps a warning that says what to compare it with.
+    """
+
+    index = len(messages) - 1
+    while index >= 0 and not (messages[index].get("role") == "user" and not messages[index].get("name")):
+        index -= 1
+    index -= 1
+    while index >= 0 and messages[index].get("name") == "workbench_attachment":
+        if messages[index].get("attachment_image"):
+            return True
+        index -= 1
+    return False
+
+
+def unverified_note(findings: Sequence[Finding], language: str, *, image: bool = False) -> str:
     """The warning shown with a reply whose rewrite still failed the check."""
 
     comparisons = [finding for finding in findings if finding.kind == "group_comparison"]
@@ -404,6 +488,12 @@ def unverified_note(findings: Sequence[Finding], language: str) -> str:
         return " ".join(notes)
     items = "; ".join(_finding_line(finding, language) for finding in findings)
     prefix = (" ".join(notes) + " ") if notes else ""
+    if image:
+        # The closest computed value says nothing about what a picture shows.
+        items = "; ".join(finding.text for finding in findings)
+        if language == "zh":
+            return f"{prefix}⚠️ Workbench 数字核对：以下数字不是计算结果，从图片读取的数字无法自动核对，请对照图片确认：{items}。"
+        return f"{prefix}⚠️ Workbench numeric check: these numbers are not computed results, and a number read from an image cannot be checked. Compare them with the image: {items}."
     if language == "zh":
         return f"{prefix}⚠️ Workbench 数字核对：以下数字与任何计算结果都对不上，请勿引用：{items}。"
     return f"{prefix}⚠️ Workbench numeric check: these numbers do not match any computed result; do not rely on them: {items}."
@@ -463,6 +553,10 @@ def evaluate(expression: str) -> tuple[float, tuple[str, ...]]:
             return float(node.value)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             value = walk(node.operand)
+            if isinstance(node.operand, ast.Constant):
+                literal = ast.get_source_segment(source, node)
+                if literal and _decimal(literal) is not None:
+                    operands[-1] = literal
             return -value if isinstance(node.op, ast.USub) else value
         if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
             left, right = walk(node.left), walk(node.right)

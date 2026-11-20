@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
+import { useState } from "react";
 import { usePendingRun } from "./usePendingRun";
 
 vi.mock("../api", () => ({
@@ -19,6 +20,109 @@ afterEach(() => {
 });
 
 describe("usePendingRun", () => {
+  it("preserves the default draft contract when an indexed run is still running", () => {
+    const onIndexed = vi.fn();
+    renderHook(() => usePendingRun({
+      pending: {runId: "r1", draftId: "d1", attempts: 0}, projectRoot: "/p", forest: forestWith(["r1"]),
+      refetch: vi.fn(), onIndexed, onFailed: vi.fn(), setPending: vi.fn(),
+    }));
+    expect(onIndexed).toHaveBeenCalledWith("r1");
+    expect(fetchRunDetail).not.toHaveBeenCalled();
+  });
+
+  it.each(["failed", "blocked", "cancelled", "interrupted", "partial"])("manual observation never accepts an indexed %s child as success", async status => {
+    const detail = {status, errors: {issues: [{code: "WORKFLOW_FAILED", message: "'hac'"}]}};
+    vi.mocked(fetchRunDetail).mockResolvedValue(detail as never);
+    const onIndexed = vi.fn(), onStatus = vi.fn(), setPending = vi.fn();
+    renderHook(() => usePendingRun({
+      pending: {runId: "r1", attempts: 0, confirmTerminal: true}, projectRoot: "/p", forest: forestWith(["r1"]),
+      refetch: vi.fn(), onIndexed, onStatus, onFailed: vi.fn(), setPending,
+    }));
+    expect(onIndexed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onIndexed).not.toHaveBeenCalled();
+    expect(onStatus).toHaveBeenCalledWith(detail);
+    expect(setPending.mock.calls[setPending.mock.calls.length - 1][0]({runId: "r1"})).toBeNull();
+  });
+
+  it("manual observation waits for completed even when already indexed", async () => {
+    vi.mocked(fetchRunDetail).mockResolvedValueOnce({status: "running"} as never)
+      .mockResolvedValue({status: "completed"} as never);
+    const onIndexed = vi.fn(), onStatus = vi.fn();
+    const forest = forestWith(["r1"]);
+    renderHook(() => {
+      const [pending, setPending] = useState<import("./usePendingRun").PendingRun | null>({runId: "r1", attempts: 0, confirmTerminal: true});
+      usePendingRun({pending, projectRoot: "/p", forest, refetch: vi.fn(), onIndexed, onStatus, onFailed: vi.fn(), setPending});
+    });
+    expect(onIndexed).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(onStatus).toHaveBeenCalledWith({status: "running"});
+    expect(onIndexed).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(onIndexed).toHaveBeenCalledOnce();
+    expect(onIndexed).toHaveBeenCalledWith("r1");
+  });
+
+  it("leaves exhausted manual observation unconfirmed with its last error", () => {
+    const onIndexed = vi.fn(), onUnconfirmed = vi.fn();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    renderHook(() => usePendingRun({
+      pending: {runId: "r1", attempts: 30, confirmTerminal: true, lastError: "Network unavailable"},
+      projectRoot: "/p", forest: forestWith(["r1"]), refetch: vi.fn(), onIndexed,
+      onFailed: vi.fn(), onUnconfirmed, setPending: vi.fn(),
+    }));
+    expect(onIndexed).not.toHaveBeenCalled();
+    expect(onUnconfirmed).toHaveBeenCalledWith(expect.stringContaining("Network unavailable"));
+  });
+
+  it("reports an unknown manual status as unconfirmed instead of success", async () => {
+    vi.mocked(fetchRunDetail).mockResolvedValue({status: "unknown"} as never);
+    const onIndexed = vi.fn(), onUnconfirmed = vi.fn();
+    renderHook(() => usePendingRun({
+      pending: {runId: "r1", attempts: 0, confirmTerminal: true}, projectRoot: "/p", forest: forestWith([]),
+      refetch: vi.fn(), onIndexed, onFailed: vi.fn(), onUnconfirmed, setPending: vi.fn(),
+    }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onIndexed).not.toHaveBeenCalled();
+    expect(onUnconfirmed).toHaveBeenCalledWith(expect.stringContaining("unknown"));
+  });
+
+  it("ignores a manual status response after observation is unmounted", async () => {
+    let finish!: (detail: never) => void;
+    vi.mocked(fetchRunDetail).mockImplementation(() => new Promise(resolve => {finish = resolve;}));
+    const onIndexed = vi.fn(), onStatus = vi.fn(), setPending = vi.fn();
+    const {unmount} = renderHook(() => usePendingRun({
+      pending: {runId: "r1", attempts: 0, confirmTerminal: true}, projectRoot: "/p", forest: forestWith(["r1"]),
+      refetch: vi.fn(), onIndexed, onStatus, onFailed: vi.fn(), setPending,
+    }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchRunDetail).toHaveBeenCalledOnce();
+    unmount();
+    finish({status: "completed"} as never);
+    await Promise.resolve();
+    expect(onIndexed).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(setPending).not.toHaveBeenCalled();
+  });
+
+  it("stops the previous manual observation when switching projects, without a late receipt", async () => {
+    let finish!: (detail: never) => void;
+    vi.mocked(fetchRunDetail).mockImplementation(() => new Promise(resolve => {finish = resolve;}));
+    const onIndexed = vi.fn(), onStatus = vi.fn(), onUnconfirmed = vi.fn(), setPending = vi.fn();
+    const props = {pending: {runId: "r1", attempts: 0, confirmTerminal: true} as import("./usePendingRun").PendingRun | null,
+      projectRoot: "/p", forest: forestWith(["r1"]), refetch: vi.fn(), onIndexed, onStatus, onUnconfirmed, onFailed: vi.fn(), setPending};
+    const {rerender} = renderHook(options => usePendingRun(options), {initialProps: props});
+    await vi.advanceTimersByTimeAsync(1000);
+    rerender({...props, projectRoot: "/other", pending: null});
+    finish({status: "failed"} as never);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchRunDetail).toHaveBeenCalledOnce();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(onIndexed).not.toHaveBeenCalled();
+    expect(onUnconfirmed).not.toHaveBeenCalled();
+    expect(setPending).not.toHaveBeenCalled();
+  });
+
   it("does not burn attempts while the run is still running", async () => {
     (fetchRunDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "running",

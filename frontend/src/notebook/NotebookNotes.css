@@ -1,0 +1,6 @@
+.nb-notes { overflow-wrap: anywhere; }
+.nb-notes h3, .nb-notes h4 { margin: 0; }
+.nb-notes blockquote { margin: 8px 0; white-space: pre-wrap; }
+.nb-notes-list { padding-left: 20px; }
+.nb-notes-list li + li { margin-top: 16px; }
+.nb-notes time { color: var(--label-tertiary); font-size: 12px; }

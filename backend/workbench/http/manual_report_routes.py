@@ -7,6 +7,7 @@ from filelock import Timeout
 
 from ..agent.workflow import WorkflowExecutionError
 from ..api_errors import WorkbenchAPIError
+from ..egress import EgressPolicyError
 from ..repository.run_repository import _resolve_run_root
 from ..services.manual_reports import (
     ManualReportRequest, build_manual_report_draft, export_manual_report,
@@ -21,7 +22,7 @@ router = APIRouter(route_class=TypedAPIRoute)
 def _invoke(function, *args):
     try:
         return function(*args)
-    except WorkbenchAPIError:
+    except (WorkbenchAPIError, EgressPolicyError):
         raise
     except Timeout as exc:
         raise WorkbenchAPIError(status_code=409, code="MANUAL_REPORT_BUSY", message="Another report write is in progress.") from exc

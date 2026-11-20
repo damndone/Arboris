@@ -3,11 +3,16 @@
 from __future__ import annotations
 import math
 from typing import Any
-from ...artifacts import read_json
 from ...lineage.run_inputs import read_run_inputs
 from ...services.results_service import read_model_results
 from ...analysis_loop.time_series_compare import read_time_series_artifacts as _read_time_series_artifacts
 from ..tools import ToolVisibleError
+from ..context_compiler import (
+    CONTEXT_DATA_PROFILE_REF,
+    model_evidence_ref,
+    read_context_artifact_index,
+    read_context_data_profile,
+)
 from ..bounds import _public_stat_number
 from .coefficients import (
     _lmm_published_results,
@@ -59,6 +64,7 @@ class ModelToolsMixin:
                     result=result,
                     requested_terms=request.terms,
                     labeler=labeler,
+                    run_root=run_root,
                 )
                 if public_model is not None:
                     models.append(public_model)
@@ -85,7 +91,7 @@ class ModelToolsMixin:
             artifact_id = item["artifact_id"]
             run_root = self._project_run_root(run_id)
             try:
-                index = read_json(run_root / "artifacts_index.json")
+                index = read_context_artifact_index(run_root)
                 records = index.get("artifacts") if isinstance(index, dict) else None
                 record = next(
                     (
@@ -184,7 +190,7 @@ class ModelToolsMixin:
                     "and moderator column must be distinct."
                 )
             run_root = self._project_run_root(run_id)
-            matches: list[tuple[str, dict[str, Any]]] = []
+            matches: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
             for result in read_model_results(run_root):
                 model_id = result.get("model_id")
                 model_type = result.get("model_type")
@@ -204,14 +210,14 @@ class ModelToolsMixin:
                     and _public_stat_number(focal.get("estimate")) is not None
                     and _public_stat_number(interaction.get("estimate")) is not None
                 ):
-                    matches.append((model_id, coefficients))
+                    matches.append((model_id, coefficients, result))
             if len(matches) != 1:
                 raise ToolVisibleError(
                     "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: exactly one persisted OLS "
                     f"model in {run_id!r} must contain the requested focal and interaction terms."
                 )
             try:
-                profile = read_json(run_root / "staged" / "data_profile.json")
+                profile = read_context_data_profile(run_root)
             except (FileNotFoundError, OSError, ValueError) as exc:
                 raise ToolVisibleError(
                     "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the moderator mean is not persisted."
@@ -228,7 +234,7 @@ class ModelToolsMixin:
                     "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the requested moderator has "
                     "no persisted numeric mean."
                 )
-            model_id, coefficients = matches[0]
+            model_id, coefficients, result = matches[0]
             focal_estimate = _public_stat_number(coefficients[focal_term].get("estimate"))
             interaction_estimate = _public_stat_number(
                 coefficients[interaction_term].get("estimate")
@@ -249,12 +255,8 @@ class ModelToolsMixin:
                     "moderator_column": moderator_column,
                     "moderator_mean": moderator_mean,
                     "marginal_effect": marginal_effect,
-                    "evidence_ref": {
-                        "run_id": run_id,
-                        "model_id": model_id,
-                        "result_ref": f"model_results:{model_id}",
-                        "profile_ref": "staged/data_profile.json",
-                    },
+                    "evidence_ref": {**model_evidence_ref(run_root, result, run_id=run_id),
+                                     "profile_ref": CONTEXT_DATA_PROFILE_REF},
                 }
             )
         return {
@@ -292,7 +294,7 @@ class ModelToolsMixin:
                     "scale_0_01 or expm1_percent."
                 )
             run_root = self._project_run_root(run_id)
-            matches: list[tuple[str, float]] = []
+            matches: list[tuple[str, float, dict[str, Any]]] = []
             for result in read_model_results(run_root):
                 model_id = result.get("model_id")
                 coefficients = result.get("coefficients")
@@ -303,13 +305,13 @@ class ModelToolsMixin:
                     else None
                 )
                 if isinstance(model_id, str) and estimate is not None:
-                    matches.append((model_id, float(estimate)))
+                    matches.append((model_id, float(estimate), result))
             if len(matches) != 1:
                 raise ToolVisibleError(
                     "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: exactly one persisted "
                     f"model in {run_id!r} must contain {term!r}."
                 )
-            model_id, estimate = matches[0]
+            model_id, estimate, result = matches[0]
             value = estimate * 0.01 if transform == "scale_0_01" else math.expm1(estimate) * 100.0
             if not math.isfinite(value):
                 raise ToolVisibleError(
@@ -323,11 +325,7 @@ class ModelToolsMixin:
                     "term": term,
                     "transform": transform,
                     "value": value,
-                    "evidence_ref": {
-                        "run_id": run_id,
-                        "model_id": model_id,
-                        "result_ref": f"model_results:{model_id}",
-                    },
+                    "evidence_ref": model_evidence_ref(run_root, result, run_id=run_id),
                 }
             )
         return {

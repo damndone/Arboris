@@ -74,6 +74,10 @@ def test_declared_labels_reach_run_report_and_explicit_xlsx_export(tmp_path: Pat
     regression_rows = list(regression_table.iter_rows(values_only=True))
     assert any("Treatment label" in row for row in regression_rows)
 
+    from workbench.figure_plans import ensure_figures
+
+    assert not (run_root / "figures" / "figure_labels.json").exists()  # drawn when first read
+    ensure_figures(run_root)
     figure_labels = read_json(run_root / "figures" / "figure_labels.json")
     assert figure_labels["scatter_plots"]["x_label"] == "Treatment label"
     assert figure_labels["scatter_plots"]["y_label"] == "Outcome label"

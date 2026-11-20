@@ -7,6 +7,8 @@ import {
   createNotebook,
   ensureNotebookProjection,
   listNotebookOptions,
+  listNotebookNotes,
+  saveNotebookNote,
   materializeNotebookOption,
   proposeNotebookOptions,
   recordNotebookDecision,
@@ -18,6 +20,17 @@ afterEach(() => {
 });
 
 describe("notebookApi", () => {
+  it("saves the selected text and source to the Notebook and reads its notes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const selection = { text: "selected text", source_ref: "narrative:nb_1:title", source_label: "user entry" };
+    await saveNotebookNote("/tmp/project", "nb_1", selection);
+    await listNotebookNotes("/tmp/project", "nb_1");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/notebooks/nb_1/notes?project_root=%2Ftmp%2Fproject");
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(selection);
+    expect(fetchMock.mock.calls[1]).toEqual(["/api/notebooks/nb_1/notes?project_root=%2Ftmp%2Fproject", undefined]);
+  });
   it("creates a notebook with the project root in the query", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ notebook_id: "nb_1" }), { status: 201 }),

@@ -71,6 +71,25 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
     expect(screen.getByText("model")).toBeInTheDocument();
   });
 
+  it("renders the recorded report preview in place of the generic summary", () => {
+    mountNode(vn({
+      kind: "report",
+      stage: "report",
+      title: "Result",
+      summary: "HTML report",
+      cardPreview: {
+        title: "IV / 2SLS results",
+        lines: ["d0: 1.036 · Significant (5%)", "95% CI [0.729, 1.344]"],
+        detail: "1 of 31 endogenous terms shown",
+      },
+    }));
+    expect(screen.getByText("IV / 2SLS results")).toBeInTheDocument();
+    expect(screen.getByText("d0: 1.036 · Significant (5%)")).toBeInTheDocument();
+    expect(screen.getByText("95% CI [0.729, 1.344]")).toBeInTheDocument();
+    expect(screen.getByTitle(/1 of 31 endogenous terms shown/)).toBeInTheDocument();
+    expect(screen.queryByText("HTML report")).not.toBeInTheDocument();
+  });
+
   it("hides meta line when summary is undefined", () => {
     mountNode(vn({ summary: undefined }));
     expect(screen.queryByTestId("node-summary")).toBeNull();

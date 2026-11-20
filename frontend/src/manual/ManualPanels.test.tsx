@@ -67,10 +67,48 @@ it('retains the original target and receipt when execution refresh selects a new
  expect(api.execute).toHaveBeenCalledOnce();
 });
 
+it("opens the exact result node even when it shares the source run", async () => {
+  const onOpenRun = vi.fn();
+  vi.mocked(api.execute).mockResolvedValue({...preview, status:"completed", steps:[{
+    step_id:"fit", operation_id:operation.id, status:"completed", artifact_refs:[],
+    node_refs:[{run_id:"run", node_id:"native-result:fit-2"}],
+  }]} as never);
+  render(<OperationsPanel projectRoot="/test" runId="run" models={[]} onClose={vi.fn()}
+    onRefresh={vi.fn()} onOpenRun={onOpenRun} onDedicated={vi.fn()} />);
+  await add();
+  fireEvent.click(screen.getByRole("button",{name:"Preview analysis"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Open result"}));
+  expect(onOpenRun).toHaveBeenCalledWith("run", "native-result:fit-2");
+});
+
 it("binds an inline model test to its owner rather than the first dataset", async () => {
   render(<OperationsPanel projectRoot="/test" runId="run" models={[{runId:"source",nodeId:"model:ols_1",label:"OLS"}]} initialTarget={{kind:"model_node",run_id:"source",node_id:"model:ols_1"}} onClose={vi.fn()} onRefresh={vi.fn()} onOpenRun={vi.fn()} onDedicated={vi.fn()}/>);
   await waitFor(()=>expect(screen.getByLabelText("Analysis target")).toHaveValue("1"));
   await waitFor(()=>expect(api.catalog).toHaveBeenLastCalledWith("/test",{kind:"model_node",run_id:"source",node_id:"model:ols_1"}));
+});
+
+it("reopens a saved analysis as an editable preview on its original dataset", async () => {
+  const target = {kind:"dataset_node" as const, run_id:"original", node_id:"data", artifact_id:"input.csv"};
+  const spec = {options:{alpha:0.5}};
+  render(<OperationsPanel projectRoot="/test" runId="another" models={[]} replay={{target, operationId:operation.id, spec}}
+    onClose={vi.fn()} onRefresh={vi.fn()} onOpenRun={vi.fn()} onDedicated={vi.fn()} />);
+  await waitFor(() => expect(screen.getByLabelText("Analysis target")).toHaveValue("0"));
+  expect(api.execute).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", {name:"Preview analysis"}));
+  await screen.findByRole("button", {name:"Confirm analysis"});
+  expect(vi.mocked(api.execute).mock.calls[0][1]).toMatchObject({
+    mode:"preview", target, steps:[{operation_id:operation.id, spec}],
+  });
+});
+
+it("keeps a saved analysis unbound when its original source is missing", async () => {
+  const target = {kind:"dataset_node" as const, run_id:"original", node_id:"missing", artifact_id:"input.csv"};
+  render(<OperationsPanel projectRoot="/test" runId="another" models={[]} replay={{target, operationId:operation.id, spec:{options:{}}}}
+    onClose={vi.fn()} onRefresh={vi.fn()} onOpenRun={vi.fn()} onDedicated={vi.fn()} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Saved analysis source is unavailable");
+  expect(screen.getByLabelText("Analysis target")).toHaveValue("");
+  expect(screen.getByRole("button", {name:"Preview analysis"})).toBeDisabled();
+  expect(api.execute).not.toHaveBeenCalled();
 });
 
 it('distinguishes repeated dataset labels and exposes the selected source', async () => {

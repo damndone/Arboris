@@ -19,6 +19,8 @@ fails until someone classifies it.
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import logging
 import threading
 from collections.abc import Iterable, Mapping
@@ -26,6 +28,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
+from .jsonl_store import _exclusive_jsonl_lock, jsonl_lines
 
 Category = Literal[
     "data_change", "metadata_change", "deletion", "model", "inferential", "descriptive", "report", "export",
@@ -47,6 +51,7 @@ _EXACT: Mapping[str, str] = {
     "statistical.derive_numeric": "data_change",
     "nonparametric.robust_summary": "descriptive",
     "missingness.profile": "descriptive",
+    "network.centrality": "descriptive",
     "time_series.acf": "descriptive",
     "time_series.pacf": "descriptive",
     "survival.kaplan_meier": "descriptive",
@@ -59,9 +64,40 @@ _EXACT: Mapping[str, str] = {
     "time_series.var": "model",
     "time_series.vecm": "model",
     "time_series.irf": "model",
+    "time_series.local_level": "model",
+    "time_series.local_level_fit": "model",
+    "time_series.native_arima": "model",
+    "time_series.arima_residual_check": "model",
+    "time_series.native_sarima": "model",
+    "time_series.native_arimax": "model",
+    "time_series.native_sarimax": "model",
+    "time_series.native_var": "model",
+    "time_series.native_vecm": "model",
+    "time_series.varma11_fixed_ma": "model",
+    "time_series.native_arfima": "model",
+    "time_series.markov_switching": "model",
+    "time_series.holt_winters_additive": "model",
+    "time_series.holt_winters_fit_alpha": "model",
+    "time_series.holt_winters_fit_joint": "model",
+    "time_series.ets_trend": "model",
+    "time_series.ets_trend_estimate": "model",
+    "time_series.native_volatility": "model",
+    "time_series.native_egarch": "model",
+    "time_series.native_igarch": "model",
+    "time_series.figarch_fixed": "model",
+    "time_series.correlogram": "descriptive",
+    "time_series.stationarity_statistic": "descriptive",
+    "time_series.johansen_rank": "descriptive",
+    "quant.replay": "descriptive",
+    "quant.replay_fee_comparison": "descriptive",
+    "quant.replay_tail_risk": "descriptive",
+    "quant.rolling_risk": "descriptive",
+    "quant.min_variance": "descriptive",
+    "quant.min_variance_walk_forward": "descriptive",
     "synthetic_control.fit": "model",
     "iv.gmm": "model",
     "matching.att": "model",
+    "treatment_effects.estimate": "model",
     "missing_data.rubin_pool": "model",
     "model.joint_f_test": "inferential",
     "model.white_test": "inferential",
@@ -69,10 +105,12 @@ _EXACT: Mapping[str, str] = {
     "metadata.edit": "metadata_change",
     "graph.fork": "descriptive",
     "code.execute": "data_change",
+    "external.query": "export",
     # UI actions that are not workflow steps
     "run.delete": "deletion",
     "run.submit": "model",
     "run.rerun": "model",
+    "notebook.note.save": "metadata_change",
 }
 _PREFIXES: tuple[tuple[str, str], ...] = (
     ("data.", "data_change"),
@@ -132,7 +170,9 @@ class LedgerEntry:
     actor: Literal["user", "agent"]
     # Who allowed it to run: the user's own action or confirmation, or the
     # read-only analysis policy (Agent analyses that change no data).
-    authorized_by: Literal["user", "read_only_policy"]
+    # v1.9.1: or the person's standing permission -- the approved plan, a
+    # conversation grant or a project rule (agent/permissions.py).
+    authorized_by: Literal["user", "read_only_policy", "approved_plan", "session_grant", "project_rule"]
     source: str  # the route or operation that ran it
     status: Literal["completed", "failed"]
     steps: tuple[LedgerStep, ...]
@@ -145,6 +185,7 @@ class LedgerEntry:
     # The data this entry is about, resolved when it is written: a run that
     # is later deleted can no longer be traced back to its data.
     source_upload_sha256: str | None = None
+    research_specification: dict[str, Any] | None = None
     at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="milliseconds"))
 
     @property
@@ -153,6 +194,12 @@ class LedgerEntry:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        if self.research_specification is None:
+            value.pop("research_specification")
+        else:
+            value["specification_status"] = self.research_specification["specification_status"]
+            value["specification_reason"] = self.research_specification["reason"]
+            value["question_id"] = self.research_specification["question_id"]
         value["steps"] = [asdict(step) for step in self.steps]
         value["inferential_steps"] = sum(step.tests for step in self.steps if step.category == "inferential")
         value["changes_data"] = bool(self.categories & CHANGING_CATEGORIES)
@@ -176,10 +223,67 @@ def record(project_root: Path | str, entry: LedgerEntry) -> dict[str, Any]:
         payload["source_upload_sha256"] = upload_sha(project_root, entry.run_id or entry.produced_run_id)
     path = ledger_path(project_root)
     line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
-    with _LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK, _exclusive_jsonl_lock(path):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
+    return payload
+
+
+def record_plan_event_once(project_root: Path | str, *, session_id: str, event_type: str,
+                           plan_snapshot: Mapping[str, Any], actor: str | None = None) -> dict[str, Any]:
+    """Fix an exact research intent before plan authority becomes active.
+
+    This event records a request, not proof that results were unseen or that
+    the matching plan commit succeeded. Pre-specified/exploratory status needs
+    separate exposure evidence; no analysis count or result is fabricated.
+    """
+    if event_type not in {"criteria_fixed", "question_change"}:
+        raise ValueError("unknown plan event type")
+    actor = actor or ("user" if event_type == "criteria_fixed" else "agent")
+    if actor not in {"user", "agent"} or event_type == "criteria_fixed" and actor != "user":
+        raise ValueError("invalid plan event actor")
+    snapshot = json.loads(json.dumps(dict(plan_snapshot), ensure_ascii=False, allow_nan=False))
+    identity = ["agent.plan-event.v1", session_id, snapshot["plan_id"], snapshot["version"], event_type]
+    event_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()
+    payload = {
+        "record_type": "research_intent", "event_type": event_type, "event_id": event_id,
+        "actor": actor, "authorized_by": "user",
+        "source": f"agent.plan.{event_type}", "status": "completed", "steps": [],
+        "inferential_steps": 0, "changes_data": False, "session_id": session_id,
+        "plan_id": snapshot["plan_id"], "plan_version": snapshot["version"], "plan_snapshot": snapshot,
+        "activation": "requires_matching_approved_plan", "summary": "Research intent recorded; no analysis executed.",
+    }
+    path = ledger_path(project_root)
+    with _LOCK, _exclusive_jsonl_lock(path):
+        raw = path.read_text(encoding="utf-8") if path.exists() else ""
+        if raw and not raw.endswith("\n"):
+            raise ValueError("incomplete analysis ledger needs reconciliation")
+        entries = [json.loads(line) for line in jsonl_lines(raw) if line.strip()]
+        matches = [entry for entry in entries if entry.get("event_id") == event_id]
+        if matches:
+            recorded = {k: v for k, v in matches[0].items() if k != "at"}
+            expected = payload
+            if event_type == "question_change":
+                # This event prepares a generated revision timestamp. The
+                # first snapshot owns it; return that exact snapshot to commit.
+                # Every other field must still match the same requested change.
+                def without_generated_time(value):
+                    return {**value, "plan_snapshot": {
+                        key: item for key, item in value.get("plan_snapshot", {}).items() if key != "updated_at"}}
+                recorded, expected = without_generated_time(recorded), without_generated_time(expected)
+            if len(matches) != 1 or recorded != expected:
+                raise ValueError("plan event conflicts with the recorded research intent")
+            return matches[0]
+        payload["at"] = datetime.now(UTC).isoformat(timespec="milliseconds")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     return payload
 
 
@@ -204,7 +308,7 @@ def read(project_root: Path | str) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in jsonl_lines(path.read_text(encoding="utf-8")):
         try:
             entries.append(json.loads(line))
         except json.JSONDecodeError:

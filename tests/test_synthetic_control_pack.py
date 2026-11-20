@@ -61,6 +61,40 @@ def test_synthetic_control_fit_is_reproducible_and_enforces_simplex_weights() ->
     assert "raw_matrix" not in result
 
 
+def test_solver_success_is_not_an_optimality_certificate(monkeypatch):
+    from types import SimpleNamespace
+    from workbench.engine.packs.synthetic_control import runtime
+
+    monkeypatch.setattr(runtime, 'minimize', lambda *args, **kwargs:
+                        SimpleNamespace(success=True, x=np.full(3, 1 / 3), nit=5))
+    with pytest.raises(runtime.SyntheticControlPackError, match='SYNTHETIC_CONTROL_OPTIMALITY_FAILURE'):
+        runtime.fit_synthetic_control(**_fit_kwargs())
+
+
+def test_identical_nonconstant_paths_are_a_valid_perfect_fit():
+    from workbench.engine.packs.synthetic_control import runtime
+    target = np.array([1., 2., 4.])
+    weights, certificate = runtime._fit_weights(target, np.stack([target, target]),
+                                                _fit_kwargs()['solver_policy'], _fit_kwargs()['tolerance_policy'])
+    assert weights.sum() == pytest.approx(1.)
+    assert certificate['objective'] == 0. and certificate['simplex_duality_gap'] == 0.
+
+
+@pytest.mark.parametrize('scale,offset', [(1., 0.), (1e6, 1e9), (1e-6, 0.)])
+def test_simplex_fit_beats_every_vertex_and_has_a_known_unique_solution(scale, offset):
+    from workbench.engine.packs.synthetic_control import runtime
+
+    # Three orthogonal donors; the exact interior solution is (0.2, 0.3, 0.5).
+    donor = np.eye(3) * scale + offset
+    target = np.array([.2, .3, .5]) * scale + offset
+    weights, certificate = runtime._fit_weights(target, donor, _fit_kwargs()['solver_policy'],
+                                                _fit_kwargs()['tolerance_policy'])
+    assert weights == pytest.approx([.2, .3, .5], abs=1e-7)
+    assert certificate['optimality_verified']
+    assert certificate['simplex_duality_gap'] <= certificate['optimality_tolerance']
+    assert np.sum((target - weights @ donor) ** 2) <= np.min(np.sum((donor - target) ** 2, axis=1))
+
+
 @pytest.mark.parametrize(
     "mutator, reason",
     [

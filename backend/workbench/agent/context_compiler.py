@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+import json
+from stat import S_ISREG
 from typing import Any
 from uuid import uuid4
 
@@ -35,9 +37,11 @@ from ..lineage.node_write_validation import (
     NodeWriteOperationRequestV1,
     compute_context_fingerprint,
 )
+from ..repository.run_repository import read_artifacts_index
 
 CONTEXT_PROFILE = "notebook-plan/v1"
 CONTEXT_SCHEMA_VERSION = "notebook-planning-context.v1"
+CONTEXT_DATA_PROFILE_REF = "staged/data_profile.json"
 
 # Fields that describe *this compilation event* rather than its content. They
 # must never enter the canonical hash: including them would make every
@@ -374,6 +378,66 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def bounded_context_index_ready(run_root: Path, *, max_bytes: int) -> bool:
+    """Check that a selected run's graph and artifact index fit the read limit."""
+    try:
+        if run_root.is_symlink():
+            return False
+        for filename in ("graph.json", "artifacts_index.json"):
+            info = (run_root / filename).lstat()
+            if not S_ISREG(info.st_mode) or info.st_size > max_bytes:
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def read_workflow_artifact_index(run_root: Path) -> dict[str, Any]:
+    """Read a server-selected run's index for execution with registry validation."""
+
+    return read_artifacts_index(run_root)
+
+
+def read_context_artifact_index(run_root: Path) -> Any:
+    """Read the unprojected index so each context tool can report malformed evidence."""
+
+    return read_json(run_root / "artifacts_index.json")
+
+
+def has_context_artifact_index(run_root: Path) -> bool:
+    """Distinguish an absent legacy index from an unreadable registered one."""
+
+    path = run_root / "artifacts_index.json"
+    return path.exists() or path.is_symlink()
+
+
+def read_context_data_profile(run_root: Path) -> Any:
+    return read_json(run_root / CONTEXT_DATA_PROFILE_REF)
+
+
+def read_context_run_manifest(run_root: Path) -> Any:
+    return read_json(run_root / "run_manifest.json")
+
+
+def registered_artifact_records(run_root: Path) -> list[dict[str, Any]]:
+    """The run's registered artifact records; the compiler owns artifact-index reads."""
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    return [item for item in entries if isinstance(item, dict)] if isinstance(entries, list) else []
+
+
+def registered_artifact_suffix(run_root: Path, artifact_id: str) -> str | None:
+    """The file extension of a registered artifact (".json", ".html", ...), read from the index only."""
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    for item in entries if isinstance(entries, list) else ():
+        if isinstance(item, dict) and item.get("artifact_id") == artifact_id and isinstance(item.get("path"), str):
+            return Path(item["path"]).suffix.lower()
+    return None
+
+
 def resolve_registered_artifact(
     run_root: Path,
     artifact_id: str,
@@ -386,6 +450,12 @@ def resolve_registered_artifact(
     artifact remains unavailable rather than becoming an alternate file-read
     capability.
     """
+    from ..native_research import native_result_operation
+
+    if native_result_operation(artifact_id) is not None:
+        verified = read_completion_artifact(run_root, artifact_id)
+        return ((verified.artifact_type, verified.sha256, verified.payload)
+                if verified is not None and verified.payload is not None else None)
 
     index = _read_json(run_root / "artifacts_index.json")
     entries = index.get("artifacts") if isinstance(index, dict) else None
@@ -418,6 +488,191 @@ def resolve_registered_artifact(
         return None
     sha256 = entry.get("sha256")
     return artifact_type, (sha256 if isinstance(sha256, str) else None), payload
+
+
+@dataclass(frozen=True)
+class VerifiedCompletionArtifact:
+    """Content-bound artifact facts; no caller-controlled filesystem path."""
+
+    artifact_id: str
+    artifact_type: str
+    sha256: str
+    inputs: tuple[str, ...]
+    payload: dict[str, Any] | None
+    suffix: str
+    size_bytes: int
+
+
+def read_garch_completion_product(run_root: Path, artifact: VerifiedCompletionArtifact):
+    """Read a source-verified production GARCH child through its owner."""
+    from ..services.time_series_result_adapter import read_garch_completion
+
+    return read_garch_completion(run_root, artifact)
+
+
+def read_arima_completion_product(run_root: Path, artifact: VerifiedCompletionArtifact):
+    """Project a native ARIMA result after owner-side source verification."""
+    from ..services.time_series_result_adapter import read_arima_completion
+
+    return read_arima_completion(run_root, artifact)
+
+
+def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedCompletionArtifact | None:
+    """Read one unambiguous registered product and verify the exact bytes read.
+
+    Binary sources are hashed without loading a data frame. JSON evidence is
+    bounded here at the external-file boundary and is never sent raw to a model.
+    """
+    import hashlib
+    from ..artifacts import sha256_file
+    from ..native_research import native_result_operation, read_native_result_bytes
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts", []) if isinstance(index, dict) else []
+    if not isinstance(entries, list):
+        return None
+    matches = [entry for entry in entries if isinstance(entry, dict) and entry.get("artifact_id") == artifact_id]
+    if len(matches) != 1:
+        return None
+    entry = matches[0]
+    native_operation = native_result_operation(artifact_id)
+    if native_operation is None and entry.get('artifact_type') in {'model_result_packet', 'lmm_analysis_evidence'}:
+        from ..services.lmm_result_adapter import read_lmm_completion_product
+        native = read_lmm_completion_product(run_root, artifact_id)
+        if native is None:
+            return None
+        return VerifiedCompletionArtifact(artifact_id, entry['artifact_type'], native['sha256'],
+            native['inputs'], native['payload'], '.json', native['size_bytes'])
+    relative = entry.get("path")
+    if not isinstance(relative, str) or Path(relative).is_absolute():
+        return None
+    try:
+        path = (run_root / relative).resolve()
+        path.relative_to(run_root.resolve())
+        if not path.is_file():
+            return None
+        if native_operation is not None:
+            raw = read_native_result_bytes(run_root, entry, path, native_operation)
+            if raw is None:
+                return None
+            digest, payload = entry["sha256"], json.loads(raw)
+            if not isinstance(payload, dict):
+                return None
+        elif path.suffix.lower() == ".json":
+            if path.stat().st_size > 16_000_000:
+                return None
+            raw = path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                return None
+        else:
+            digest, payload = sha256_file(path), None
+    except (OSError, ValueError):
+        return None
+    inputs = entry.get("inputs")
+    kind = entry.get("artifact_type")
+    if (digest != entry.get("sha256") or not isinstance(kind, str)
+            or not isinstance(inputs, list) or not all(isinstance(item, str) for item in inputs)):
+        return None
+    return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload, path.suffix.lower(), path.stat().st_size)
+
+
+def registered_model_completion_ref(run_root: Path, result: dict[str, Any]) -> dict[str, str] | None:
+    """The producer's unique registered model-id slot, without rereading models.
+
+    This is identity discovery only. Neither the already loaded projection nor
+    registry metadata becomes numerical/scientific certification. The plan
+    boundary and completion gate verify bytes and source lineage independently.
+    Native owners with another artifact naming contract retain their old ref;
+    this helper never guesses a packet suffix or searches historical runs.
+    """
+    index = _read_json(run_root / 'artifacts_index.json')
+    entries = index.get('artifacts') if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return None
+    matches = [item for item in entries if isinstance(item, dict)
+               and item.get('artifact_id') == result.get('model_id')]
+    if len(matches) != 1:
+        return None
+    item = matches[0]
+    digest = item.get('sha256')
+    if (item.get('artifact_type') not in {'model_result', 'workflow_result', 'model_result_packet'}
+            or not isinstance(digest, str) or len(digest) != 64):
+        return None
+    if any(other is not item and isinstance(other, dict)
+           and other.get('artifact_type') == item['artifact_type']
+           and other.get('sha256') == digest for other in entries):
+        return None  # Several registered owners of the same bytes need an explicit receipt.
+    return {'run_id': run_root.name, 'artifact_id': item['artifact_id'],
+            'registered_sha256': digest, 'binding_status': 'registered'}
+
+
+def model_evidence_ref(run_root: Path | None, result: dict[str, Any], *, run_id: str) -> dict[str, Any]:
+    """Keep legacy numeric aliases separate from usable completion bindings."""
+    model_id = result['model_id']
+    value = {'run_id': run_id, 'model_id': model_id, 'result_ref': f'model_results:{model_id}'}
+    ref = registered_model_completion_ref(run_root, result) if run_root is not None and run_root.name == run_id else None
+    if ref is not None:
+        value.update(artifact_id=ref['artifact_id'], registered_sha256=ref['registered_sha256'],
+                     binding_status='registered',
+                     completion_ref={'run_id': ref['run_id'], 'artifact_id': ref['artifact_id']})
+    return value
+
+
+def completion_candidate_refs(run_root: Path) -> list[dict[str, str]]:
+    """Bounded discovery only; every candidate still needs content/lineage verification."""
+    index = _read_json(run_root / 'artifacts_index.json')
+    entries = index.get('artifacts', []) if isinstance(index, dict) else []
+    if not isinstance(entries, list):
+        return []
+    kinds = {'model_result', 'workflow_result', 'model_result_packet', 'p7_analysis',
+             'workflow_capability_result', 'model_diagnostic', 'lmm_analysis_evidence',
+             'analysis_completion_evidence', 'post_estimation', 'report'}
+    refs = []
+    for entry in entries:
+        if (isinstance(entry, dict) and entry.get('artifact_type') in kinds
+                and isinstance(entry.get('artifact_id'), str) and len(entry['artifact_id']) <= 200):
+            refs.append({'run_id': run_root.name, 'artifact_id': entry['artifact_id']})
+            if len(refs) == 48:
+                break
+    return refs
+
+
+def read_completion_dataset_source(run_root: Path) -> dict[str, Any] | None:
+    """Project the persisted v1 dataset binding, without reading a source path.
+
+    The declaration becomes an edge only when the caller has verified both
+    the child's raw upload digest and the named parent's current bytes.
+    """
+    import hashlib
+
+    try:
+        path = run_root / "run_inputs.json"
+        if path.stat().st_size > 2_000_000:
+            return None
+        raw = path.read_bytes()
+        value = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("run_input_schema_version") != 1:
+        return None
+    top = value.get("dataset_source")
+    lineage = value.get("source_lineage")
+    nested = lineage.get("dataset_source") if isinstance(lineage, dict) else None
+    if top is not None and nested is not None and top != nested:
+        return None
+    source = top if top is not None else nested
+    upload = value.get("upload")
+    if not isinstance(source, dict) or not isinstance(upload, dict):
+        return None
+    if not all(isinstance(source.get(key), str) and source[key] for key in ("source_run_id", "source_artifact_id")):
+        return None
+    hashes = (source.get("source_sha256"), upload.get("sha256"))
+    if not all(isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h) for h in hashes):
+        return None
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "upload_sha256": hashes[1],
+            "source": {"run_id": source["source_run_id"], "artifact_id": source["source_artifact_id"], "sha256": hashes[0]}}
 
 
 def _digest(value: Any) -> str:
@@ -772,6 +1027,8 @@ def compile_notebook_planning_context(
 
 def notebook_planning_workbench_context(
     context: NotebookPlanningContextV1,
+    *,
+    result_blind: bool = False,
 ) -> dict[str, Any]:
     """The model-facing projection, ready for `ContextBuilder(workbench_context=...)`.
 
@@ -785,7 +1042,7 @@ def notebook_planning_workbench_context(
     36 of which are per-series JSON" can ask for the right thing instead.
     """
 
-    return {
+    payload = {
         "context_profile": context.context_profile,
         "context_id": context.context_id,
         "generation_context_hash": generation_context_hash(context),
@@ -799,3 +1056,48 @@ def notebook_planning_workbench_context(
             if key not in {"omissions", "artifact_type_counts", "budget_report"}
         },
     }
+    if result_blind:
+        # A whitelist, not a search for statistical key names: graph summaries,
+        # diagnostics and memory prose can embed fitted results in arbitrary text.
+        content = payload["content"]
+        content["analysis_contract"] = {
+            key: value for key, value in context.analysis_contract.items()
+            if key in {"revision", "objective", "question", "target", "y", "x", "constraints"}
+        }
+        content["user_focus"] = {
+            key: value for key, value in context.user_focus.items()
+            if key in {"goal", "interaction_mode"}
+        }
+        content["dataset_profile"] = {
+            "row_count": context.dataset_profile.get("row_count"),
+            "columns": [
+                {key: column[key] for key in ("name", "dtype", "row_count", "missing_count", "unique_count") if key in column}
+                for column in context.dataset_profile.get("columns", [])
+            ],
+        }
+        content["active_run_summary"] = {
+            key: context.active_run_summary[key]
+            for key in ("run_id", "mode", "y", "x", "requested_model_type")
+            if key in context.active_run_summary
+        }
+        content["bounded_lineage"] = [
+            {key: node[key] for key in (
+                "node_id", "kind", "stage", "node_hash", "forest_node_key",
+                "context_fingerprint", "artifact_id", "workflow_artifact_id",
+            ) if key in node} for node in context.bounded_lineage
+        ]
+        content["diagnostics"] = []
+        content["artifact_summaries"] = []
+        # Defaults are applied by their existing server registry. Unclassified
+        # natural-language lessons are not evidence for a blinded comparison.
+        if "domain_memory_projection" in content:
+            content["domain_memory_projection"] = None
+        payload["artifact_type_counts"] = {}
+        payload["comparison_policy"] = {
+            "profile": "result-blind-comparison/v1",
+            "dimensions": ["question_fit", "data_support", "assumptions", "cost", "domain_practice"],
+            "excluded": ["fitted_results", "post_fit_checks", "paired_sample_rows", "unclassified_memory_prose"],
+            "user_supplied_text": "User goals and declared specifications are not certified result-free.",
+            "prediction_exception": "Unavailable until a sealed evaluation source is verified.",
+        }
+    return payload

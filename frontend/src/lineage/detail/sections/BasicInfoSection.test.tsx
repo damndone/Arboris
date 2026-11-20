@@ -1,6 +1,6 @@
 // frontend/src/lineage/detail/sections/BasicInfoSection.test.tsx
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { BasicInfoSection } from "./BasicInfoSection";
 import type { GraphViewNode } from "../../api/graphViewTypes";
@@ -20,6 +20,38 @@ function node(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
     ...overrides,
   };
 }
+
+it("chooses the report coefficient and confidence level while keeping the saved interval visible", () => {
+  render(<BasicInfoSection node={node({
+    id: "report:one", nodeKey: "report:one", stage: "report", kind: "report", title: "Result",
+    cardPreview: {
+      title: "IV results", lines: [], report: {
+        model_id: "iv_2sls_1", default_term: "d2", distribution: "z", coefficients: [
+          { term: "d1", label: "d1", estimate: 0.4, p_value: 0.02,
+            saved_interval: { level: 0.95, lower: 0.1, upper: 0.7 },
+            intervals: [{ level: 0.99, lower: -0.15, upper: 0.95 }] },
+          { term: "d2", label: "d2", estimate: -1, p_value: 0.03,
+            saved_interval: { level: 0.95, lower: -1.5, upper: -0.5 }, intervals: [],
+            interval_unavailable: "No matching covariance was saved." },
+        ],
+      },
+    },
+  })} />);
+
+  const term = screen.getByLabelText("Coefficient");
+  const confidence = screen.getByLabelText("Confidence level");
+  expect(term).toHaveValue("d2");
+  expect(screen.getByText("No matching covariance was saved.")).toBeVisible();
+  fireEvent.change(term, { target: { value: "d1" } });
+  fireEvent.change(confidence, { target: { value: "0.99" } });
+  expect(screen.getByText("99% CI [-0.15, 0.95]")).toBeVisible();
+  expect(screen.getByText("95% CI [0.1, 0.7]")).toBeVisible();
+  expect(screen.getByText("Computed from saved normal (z) inference")).toBeVisible();
+  fireEvent.change(term, { target: { value: "d2" } });
+  expect(screen.getByText("Confidence interval unavailable")).toBeVisible();
+  expect(screen.getByText("95% CI [-1.5, -0.5]")).toBeVisible();
+  expect(screen.queryByText("99% CI [-0.15, 0.95]")).not.toBeInTheDocument();
+});
 
 describe("BasicInfoSection", () => {
   it("renders heading 'Basic info'", () => {

@@ -423,7 +423,11 @@ def run_oos_prediction(
     noise_control = None
     noise_features = tuple(features) + ("__control_noise_v1",)
     if control_seed is not None:
-        permutation_control = permute_target(frame[target], seed=control_seed)
+        # Labels are permuted inside each fit scope only (each fold's training rows, then the
+        # development rows), so validation and final-holdout labels only ever enter evaluation.
+        # A frame-wide permutation moved holdout labels into the control's training targets
+        # (2026-11-06 risk review, finding 9).
+        permutation_control = permute_target(frame.loc[development_rows, target], seed=control_seed)
         noise_control = add_seeded_noise_feature(
             frame[list(features)],
             seed=control_seed,
@@ -485,10 +489,11 @@ def run_oos_prediction(
 
         if permutation_control is not None and noise_control is not None:
             permutation_estimator = estimator_factory()
+            fold_permutation = permute_target(frame.loc[training_rows, target], seed=control_seed + fold)
             _fit_estimator(
                 permutation_estimator,
                 training_scope.loc[:, list(features)],
-                permutation_control.values.loc[training_rows],
+                fold_permutation.values,
                 frequency_weights.loc[training_rows] if frequency_weights is not None else None,
             )
             permutation_predictions = [
@@ -628,11 +633,13 @@ def run_oos_prediction(
                 "n_train": len(development_rows),
                 "n_evaluation": len(final_rows),
                 "fit_scope": "development_only",
+                "permutation_scope": "within_each_fit_scope",
+                "cv_permutation_seeds": {str(fold): control_seed + fold for fold in folds},
                 "status": permutation_status,
                 "observed_development_cv": cv_metrics,
                 "permuted_target_cv": permutation_cv_metrics,
                 "metric_gap": metric_gap,
-                "policy_version": 1,
+                "policy_version": 2,
             }
         )
 

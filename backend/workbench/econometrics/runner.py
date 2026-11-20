@@ -1,38 +1,56 @@
 from __future__ import annotations
 
 from .fit_support import (
-    _formula_term, _ols_formula, _ensure_numeric_y, _ensure_numeric_x,
-    _add_engine, _root_cause_suffix, _attach_average_marginal_effects,
+    _formula_term,
+    _ols_formula,
+    _ensure_numeric_y,
+    _ensure_numeric_x,
+    _add_engine,
 )
-from ..engine.packs.binary_models.runner import run_logit, run_probit, _raise_if_separated
+# Callers import every estimator from this module: the binary/count packs, the panel and IV
+# estimators, and the OLS row helpers are re-exported here (F401 by design).
+from ..engine.packs.binary_models.runner import run_logit, run_probit
 from ..engine.packs.count_regression.runner import run_poisson, run_negative_binomial, run_glm
 
-import json
 import os
-from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import statsmodels
 import statsmodels.formula.api as smf
 
-from ..canonical import sha256_canonical
-from ..analysis_loop.fingerprints import (
-    analysis_sample_fingerprint,
-    coefficient_schema_fingerprint,
-    dataset_snapshot_fingerprint,
-    inference_config_fingerprint,
-    point_estimation_fingerprint,
-)
-from ..analysis_loop.policy import (
-    cluster_declared_runtime_compatible,
-    cluster_runtime_type,
-    ols_cluster_policy_v1,
-)
-from ..formula_terms import quote_column
-from .normalize import _json_safe_float, normalize_statsmodels_result
+from .collinearity import dependent_columns, unidentified_columns, whole_terms
+from .normalize import _json_safe_float, _public_term, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
+from .panel_design import panel_ols_model
+from .ols_contract import (
+    _linearmodels_term,
+    _normalize_linearmodels_result,
+    _python_scalar,
+    _python_values,
+    _row_id_values,
+    _validate_cluster_group_values,
+    _aligned_positions,
+    _analysis_row_context,
+    _attach_ols_result_contract,
+)
+from .ols_covariance import (
+    _require_hac_time_order,
+    _hac_plan,
+    apply_ols_covariance,
+    _normalize_ols_weight_spec,
+    _frequency_weight_counts,
+    _expand_rows_by_frequency,
+)
+from .panel_iv import (
+    run_fixed_effects,
+    _panel_covariance,
+    _panel_covariance_warnings,
+    _panel_estimation_rows,
+    _cluster_panel_fit,
+    run_panel_ols,
+    run_iv_2sls,
+)
 
 # honest-DID (Rambachan-Roth ΔRM) production config. Module-level so tests can
 # monkeypatch to a small grid for speed; run_cs_did reads them as globals.
@@ -46,799 +64,54 @@ HONEST_SD_SCALE_FLOOR = 1e-8
 HONEST_DID_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
-def _linearmodels_term(column: str) -> str:
-    if column.isidentifier():
-        return column
-    return f"`{column.replace('`', '``')}`"
+#: One indicator per level, held densely: 4,741 levels on 9,166 rows took 2.2 GB for one fit.
+MAX_OLS_INDICATOR_COLUMNS = 1_000
 
 
-def _normalize_linearmodels_result(
-    fitted: Any,
-    model_id: str,
-    model_type: str,
-    *,
-    y_column: str | None = None,
-    covariance: str | None = None,
-    entity_col: str | None = None,
-    time_col: str | None = None,
-    clustered_on_entity: bool = False,
-    inference: Any = None,
-    warnings: list[str] | None = None,
-) -> dict[str, Any]:
-    params = getattr(fitted, "params", {})
-    std_errors = getattr(fitted, "std_errors", {})
-    pvalues = getattr(fitted, "pvalues", {})
-    confidence_intervals = getattr(fitted, "conf_int", lambda: None)()
-    coefficients: dict[str, dict[str, Any]] = {}
-
-    items = list(params.items() if hasattr(params, "items") else enumerate(params))
-    for label, estimate in items:
-        term = str(label)
-        interval = None
-        if hasattr(confidence_intervals, "loc"):
-            try:
-                interval = confidence_intervals.loc[label]
-            except (KeyError, TypeError):
-                interval = None
-        ci_lower = (
-            _json_safe_float(interval.get("lower"))
-            if hasattr(interval, "get")
-            else None
-        )
-        ci_upper = (
-            _json_safe_float(interval.get("upper"))
-            if hasattr(interval, "get")
-            else None
-        )
-        p_value = _json_safe_float(
-            pvalues.get(label) if hasattr(pvalues, "get") else None
-        )
-        coefficients[term] = {
-            "estimate": _json_safe_float(estimate),
-            "std_error": _json_safe_float(
-                std_errors.get(label) if hasattr(std_errors, "get") else None
-            ),
-            "p_value": round(p_value, 6) if p_value is not None else None,
-            "ci_lower": ci_lower,
-            "ci_upper": ci_upper,
-            "source_id": f"model_results.{model_id}.coefficients.{term}",
-        }
-
-    result = {
-        "schema_version": 1,
-        "model_id": model_id,
-        "model_type": model_type,
-        "engine": "linearmodels",
-        "y_column": y_column,
-        "nobs": int(getattr(fitted, "nobs")),
-        "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
-        "r_squared_adj": _json_safe_float(getattr(fitted, "rsquared_adj", None)),
-        "df_model": _json_safe_float(getattr(fitted, "df_model", None)),
-        "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
-        "coefficients": coefficients,
-        "warnings": list(warnings or []),
+def _refuse_oversized_dummies(frame: pd.DataFrame, x: list[str], categorical: set[str]) -> None:
+    levels = {
+        column: int(frame[column].nunique())
+        for column in x
+        if column in frame.columns and (column in categorical or not pd.api.types.is_numeric_dtype(frame[column]))
     }
-    if inference is not None:
-        # Clustered by panel_inference: CR1, Stata's finite-sample rule, t(G - 1).
-        result.update(
-            {
-                "covariance": "clustered",
-                "covariance_estimator": (
-                    "clustered_entity" if inference.cluster_variable == entity_col else "clustered"
-                ),
-                "entity_col": entity_col,
-                "time_col": time_col,
-                "x_columns": [str(label) for label, _ in items],
-                "covariance_evidence": {
-                    "covariance": "clustered",
-                    "covariance_estimator": "CR1",
-                    "cluster_variable": inference.cluster_variable,
-                    "cluster_entity": inference.cluster_variable == entity_col,
-                    "cluster_count": inference.n_clusters,
-                    "small_sample_correction": True,
-                    "degrees_of_freedom_correction": True,
-                    "finite_sample_factor": "G/(G-1) * (N-1)/(N-K)",
-                    "parameters_counted": inference.parameters_counted,
-                    "use_t": True,
-                    "inference_version": INFERENCE_ENGINE_VERSION,
-                    "df_method": "clusters_minus_one",
-                    "inference_distribution": "t",
-                    "effective_df": inference.df,
-                    "confidence_level": 0.95,
-                    "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
-                    "reference": "Stata xtreg, fe vce(cluster)",
-                },
-            }
-        )
-        return result
-    if covariance is not None:
-        cluster_count = None
-        if clustered_on_entity and entity_col is not None:
-            entities = getattr(fitted.model, "dependent", None)
-            entity_ids = getattr(entities, "entity_ids", None)
-            if entity_ids is not None:
-                cluster_count = len({str(value) for value in entity_ids.ravel()})
-        result.update(
-            {
-                "covariance": covariance,
-                "covariance_estimator": (
-                    "clustered_entity" if clustered_on_entity else covariance
-                ),
-                "entity_col": entity_col,
-                "time_col": time_col,
-                "x_columns": [str(label) for label, _ in items],
-                "covariance_evidence": {
-                    "covariance": covariance,
-                    "cluster_variable": entity_col if clustered_on_entity else None,
-                    "cluster_entity": clustered_on_entity,
-                    "cluster_count": cluster_count,
-                    "confidence_level": 0.95,
-                    "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
-                    "inference_version": INFERENCE_ENGINE_VERSION,
-                    "inference_distribution": "t" if getattr(fitted, "debiased", False) else "z",
-                },
-            }
-        )
-    return result
-
-
-def _python_scalar(value: Any) -> Any:
-    """Make pandas/numpy scalar values safe for the canonical JSON helpers."""
-    if hasattr(value, "item"):
-        try:
-            value = value.item()
-        except (TypeError, ValueError):
-            pass
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    try:
-        missing = pd.isna(value)
-        if type(missing) is bool and missing:
-            return None
-    except (TypeError, ValueError):
-        pass
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _row_id_values(
-    frame: pd.DataFrame,
-    row_ids: list[str] | tuple[str, ...] | None,
-) -> list[str]:
-    def collision_safe(values: list[Any]) -> list[str]:
-        original_types = [
-            f"{type(value).__module__}.{type(value).__qualname__}"
-            for value in values
-        ]
-        normalized = [_python_scalar(value) for value in values]
-        rendered = [str(value) for value in normalized]
-        if len(set(rendered)) == len(rendered):
-            return rendered
-        typed = [
-            f"{original_type}:{value}"
-            for original_type, value in zip(original_types, normalized, strict=True)
-        ]
-        return typed
-
-    if row_ids is None:
-        if frame.index.is_unique:
-            return collision_safe(list(frame.index))
-        return [f"position:{position}" for position in range(len(frame))]
-    if len(row_ids) != len(frame):
+    if sum(levels.values()) > MAX_OLS_INDICATOR_COLUMNS:
+        named = ", ".join(f"{column} ({count})" for column, count in sorted(levels.items(), key=lambda item: -item[1]))
         raise ValueError(
-            "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
-            "and aligned to the input frame."
-        )
-    values = collision_safe(list(row_ids))
-    if len(set(values)) == len(values):
-        return values
-    if frame.index.is_unique:
-        raise ValueError(
-            "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
-            "and aligned to the input frame."
-        )
-    return [f"{value}#occurrence:{position}" for position, value in enumerate(values)]
-
-
-def _cluster_declared_dtype(groups: pd.Series) -> str:
-    dtype = groups.dtype
-    if isinstance(dtype, pd.CategoricalDtype):
-        return "category"
-    if pd.api.types.is_datetime64_any_dtype(dtype):
-        return "datetime"
-    if pd.api.types.is_bool_dtype(dtype):
-        return "bool"
-    if pd.api.types.is_integer_dtype(dtype):
-        return "integer"
-    if pd.api.types.is_float_dtype(dtype):
-        return "float"
-    if pd.api.types.is_string_dtype(dtype):
-        return "string"
-    return str(dtype)
-
-
-def _validate_cluster_group_values(groups: pd.Series) -> None:
-    declared = _cluster_declared_dtype(groups)
-    runtime_types: set[str | None] = set()
-    for position, value in enumerate(groups):
-        try:
-            missing = pd.isna(value)
-            is_missing = type(missing) is bool and missing
-        except (TypeError, ValueError):
-            is_missing = False
-        if is_missing:
-            raise ValueError(
-                "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
-                f"on analysis rows at position {position}."
-            )
-        runtime_types.add(cluster_runtime_type(value))
-
-    policy = ols_cluster_policy_v1
-    if (
-        None in runtime_types
-        or "bool" in runtime_types and policy.reject_boolean
-        or "float" in runtime_types and policy.reject_float
-        or any(item not in policy.allowed_cluster_types for item in runtime_types)
-        or (
-            len(runtime_types) == 1
-            and not cluster_declared_runtime_compatible(
-                declared, next(iter(runtime_types))
-            )
-        )
-    ):
-        raise ValueError(
-            "OLS_CLUSTER_TYPE_UNSUPPORTED: entity_col values violate "
-            "ols_cluster_policy_v1 "
-            f"(declared_dtype={declared!r}, "
-            f"runtime_types={sorted(str(item) for item in runtime_types)})."
-        )
-    if len(runtime_types) > 1 and policy.reject_mixed_object:
-        raise ValueError(
-            "OLS_CLUSTER_TYPE_MIXED: entity_col contains mixed runtime value types "
-            f"({sorted(str(item) for item in runtime_types)})."
+            f"OLS_TOO_MANY_CATEGORY_LEVELS: these predictors would add {sum(levels.values())} indicator columns, above the "
+            f"limit of {MAX_OLS_INDICATOR_COLUMNS}: {named}. Drop the column, group rare levels first, or absorb it as a panel fixed effect."
         )
 
 
-def _analysis_row_context(
-    frame: pd.DataFrame,
-    row_labels: Any,
-    *,
-    model_index: Any = None,
-    row_ids: list[str] | tuple[str, ...] | None,
-    cluster_row_ids: list[str] | tuple[str, ...] | None,
-) -> tuple[list[int], list[str]]:
-    reference_index = list(model_index if model_index is not None else frame.index)
-    labels = list(row_labels) if row_labels is not None else reference_index
-    source_ids = _row_id_values(frame, row_ids)
-    positions_by_label: dict[Any, list[int]] = {}
-    for position, label in enumerate(reference_index):
-        positions_by_label.setdefault(label, []).append(position)
-    selected_positions: list[int] = []
-    for label in labels:
-        positions = positions_by_label.get(label)
-        if not positions:
-            raise ValueError(
-                "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
-            )
-        selected_positions.append(positions.pop(0))
-    analysis_ids = [source_ids[position] for position in selected_positions]
-    if cluster_row_ids is not None:
-        observed_cluster_ids = [str(value) for value in cluster_row_ids]
-        if observed_cluster_ids != analysis_ids:
-            raise ValueError(
-                "OLS_CLUSTER_ROW_ALIGNMENT: cluster vector row identifiers do not "
-                "match the model analysis rows in order."
-            )
-    return selected_positions, analysis_ids
+def _columns_the_fit_reads(frame: pd.DataFrame, y: str, x: list[str], *optional: str | None) -> list[str]:
+    """The formula's columns plus the weight and time-order columns, in frame order.
 
-
-def _frame_snapshot(frame: pd.DataFrame) -> dict[str, Any]:
-    try:
-        values = json.loads(frame.to_json(orient="split", date_format="iso"))
-    except (TypeError, ValueError):
-        values = {
-            "columns": [str(column) for column in frame.columns],
-            "data": [
-                [_python_scalar(value) for value in row]
-                for row in frame.itertuples(index=False, name=None)
-            ],
-        }
-    return {
-        "columns": [str(column) for column in frame.columns],
-        "dtypes": {str(column): str(frame[column].dtype) for column in frame.columns},
-        "values": values,
-    }
-
-
-def _primary_estimand(
-    coefficients: dict[str, dict[str, Any]],
-    *,
-    focal_x: list[str] | tuple[str, ...] | str | None,
-    primary_estimand: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    stable_ids = {
-        coefficient.get("result_id")
-        for coefficient in coefficients.values()
-        if isinstance(coefficient, dict)
-    }
-    if isinstance(primary_estimand, dict):
-        explicit_id = primary_estimand.get("result_id")
-        if explicit_id in stable_ids:
-            return {
-                **primary_estimand,
-                "result_id": explicit_id,
-                "resolution_source": "explicit_primary_metadata",
-            }
-        return None
-    if isinstance(focal_x, str):
-        focal_values = [item.strip() for item in focal_x.split(",") if item.strip()]
-    elif isinstance(focal_x, (list, tuple)):
-        focal_values = [str(item) for item in focal_x]
-    else:
-        focal_values = []
-    if len(focal_values) != 1:
-        return None
-    focal_term = focal_values[0]
-    exact_matches = [
-        coefficient
-        for term, coefficient in coefficients.items()
-        if term == focal_term
-    ]
-    if len(exact_matches) != 1:
-        return None
-    return {
-        "result_id": exact_matches[0]["result_id"],
-        "role": "primary",
-        "focal_x": focal_term,
-        "resolution_source": "explicit_focal_x",
-    }
-
-
-def _attach_ols_result_contract(
-    result: dict[str, Any],
-    *,
-    fitted: Any,
-    original: Any,
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    categorical_x: set[str],
-    model_id: str,
-    covariance: str,
-    covariance_explicit: bool,
-    cluster_col: str | None,
-    model_index: Any,
-    dataset_snapshot: Any,
-    row_ids: list[str] | tuple[str, ...] | None,
-    cluster_row_ids: list[str] | tuple[str, ...] | None,
-    focal_x: list[str] | tuple[str, ...] | str | None,
-    primary_estimand: dict[str, Any] | None,
-    weights: Any,
-    intercept: bool,
-    missing_policy: str,
-    solver_options: Any,
-    hac: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    row_positions, analysis_ids = _analysis_row_context(
-        frame,
-        getattr(original.model.data, "row_labels", None),
-        model_index=model_index,
-        row_ids=row_ids,
-        cluster_row_ids=cluster_row_ids,
-    )
-    if dataset_snapshot is None:
-        dataset_snapshot = _frame_snapshot(frame)
-    dataset_fp = dataset_snapshot_fingerprint(dataset_snapshot)
-    sample_fp = analysis_sample_fingerprint(
-        row_set=analysis_ids,
-        row_order=analysis_ids,
-    )
-    selected = frame.iloc[row_positions][[y, *x]]
-    point_fp = point_estimation_fingerprint(
-        y=[_python_scalar(value) for value in selected[y]],
-        X={
-            column: [_python_scalar(value) for value in selected[column]]
-            for column in x
-        },
-        weights=weights,
-        intercept=intercept,
-        categorical_encoding={
-            column: ("categorical" if column in categorical_x else "numeric")
-            for column in x
-        },
-        missing_policy=missing_policy,
-        rows=analysis_ids,
-        solver_options=solver_options,
-    )
-
-    coefficients = result.get("coefficients", {})
-    result_id_by_source_id: dict[str, str] = {}
-    schema: list[dict[str, Any]] = []
-    for position, (term, coefficient) in enumerate(coefficients.items()):
-        identity = {
-            "model": "ols",
-            "model_id": model_id,
-            "term": term,
-        }
-        stable_id = "coef:" + sha256_canonical(identity)
-        coefficient["result_id"] = stable_id
-        coefficient["candidate_result_id"] = stable_id
-        coefficient["coefficient_id"] = stable_id
-        coefficient["coefficient_identity"] = f"ols:{model_id}:{term}"
-        coefficient["coefficient_term"] = term
-        source_id = coefficient.get("source_id")
-        if isinstance(source_id, str):
-            result_id_by_source_id[source_id] = stable_id
-        schema.append({"result_id": stable_id, "term": term, "position": position})
-    stable_result_ids = [entry["result_id"] for entry in schema]
-
-    group_vector: list[Any] | None = None
-    group_vector_dtype: str | None = None
-    group_vector_fp: str | None = None
-    cluster_count = 0
-    if cluster_col is not None:
-        groups = frame.iloc[row_positions][cluster_col]
-        group_vector_dtype = str(groups.dtype)
-        group_vector = [_python_scalar(value) for value in groups]
-        missing_positions = [
-            position
-            for position, value in enumerate(group_vector)
-            if value is None
-        ]
-        if missing_positions:
-            raise ValueError(
-                "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
-                f"on analysis rows at positions {missing_positions}."
-            )
-        group_vector_fp = sha256_canonical(
-            {
-                "entity_col": cluster_col,
-                "row_order": analysis_ids,
-                "dtype": group_vector_dtype,
-                "values": group_vector,
-            }
-        )
-        cluster_count = len({json.dumps(value, sort_keys=True) for value in group_vector})
-
-    use_t = bool(getattr(fitted, "use_t", False))
-    inference_df = getattr(fitted, "df_resid_inference", None)
-    effective_df = _json_safe_float(inference_df)
-    if effective_df is None:
-        effective_df = _json_safe_float(getattr(fitted, "df_resid", None))
-    inference_distribution = "t" if use_t else "normal"
-    p_value_method = "t" if use_t else "normal_z"
-    confidence_interval_method = "t" if use_t else "normal_z"
-    # Where the inference degrees of freedom come from. Results written before
-    # inference engine v2 carry no `inference_version`: their robust and
-    # clustered p-values used the normal distribution.
-    df_method = (
-        ("clusters_minus_one" if covariance == "clustered" else "residual") if use_t else "asymptotic"
-    )
-    evidence = {
-        "covariance": covariance,
-        "covariance_estimator": {"clustered": "cluster", "robust": "HC1", "hac": "HAC"}.get(
-            covariance, "nonrobust"
-        ),
-        "engine": "statsmodels",
-        "library": "statsmodels",
-        "library_version": statsmodels.__version__,
-        # HC1 and CR1 both scale the sandwich for finite samples (N/(N-K);
-        # G/(G-1) * (N-1)/(N-K)).
-        "small_sample_correction": covariance in {"clustered", "robust", "hac"},
-        "degrees_of_freedom_correction": covariance == "clustered",
-        "use_t": use_t,
-        "inference_version": INFERENCE_ENGINE_VERSION,
-        "df_method": df_method,
-        "inference_distribution": inference_distribution,
-        "p_value_method": p_value_method,
-        "confidence_interval_method": confidence_interval_method,
-        "confidence_level": 0.95,
-        "alpha": 0.05,
-        "effective_df": effective_df,
-        "cluster_variable": cluster_col,
-        "entity_col": cluster_col,
-        "cluster_count": cluster_count,
-        "group_vector_dtype": group_vector_dtype,
-        "group_vector_fingerprint": group_vector_fp,
-        # Newey-West: the kernel, the lag and the rule that chose it, and the
-        # column that ordered the rows.
-        **({"hac": dict(hac)} if hac is not None else {}),
-    }
-    inference_kwargs: dict[str, Any] = {
-        "covariance": covariance,
-        "cluster_var": cluster_col,
-        "cluster_count": cluster_count,
-        "corrections": {
-            "small_sample_correction": covariance == "clustered",
-            "degrees_of_freedom_correction": covariance == "clustered",
-            **({"hac": {key: hac[key] for key in ("kernel", "lags", "time_order")}} if hac is not None else {}),
-        },
-        "df": effective_df,
-        "use_t": use_t,
-        "confidence_level": evidence["confidence_level"],
-        "engine": "statsmodels",
-        "version": statsmodels.__version__,
-        "inference_distribution": inference_distribution,
-        "p_value_method": p_value_method,
-        "confidence_interval_method": confidence_interval_method,
-    }
-    if group_vector_fp is not None:
-        inference_kwargs["cluster_group_vector_fingerprint"] = group_vector_fp
-    inference_fp = inference_config_fingerprint(**inference_kwargs)
-    result.update(
-        {
-            "contract_version": "ols_result_contract_v1",
-            "model": "ols",
-            "covariance": covariance,
-            "covariance_wire": covariance,
-            "covariance_explicit": covariance_explicit,
-            "covariance_estimator": evidence["covariance_estimator"],
-            "source_eligible": covariance == "unadjusted" and covariance_explicit,
-            "formula": original.model.formula,
-            "y_column": y,
-            "x_columns": list(x),
-            "intercept": intercept,
-            "weights": weights,
-            "missing_policy": missing_policy,
-            "analysis_sample": {
-                "row_set": sorted(analysis_ids),
-                "row_order": analysis_ids,
-                "fingerprint": sample_fp,
-            },
-            "dataset_snapshot_fingerprint": dataset_fp,
-            "analysis_sample_fingerprint": sample_fp,
-            "point_estimation_fingerprint": point_fp,
-            "coefficient_schema_fingerprint": coefficient_schema_fingerprint(schema),
-            "inference_config_fingerprint": inference_fp,
-            "stable_result_ids": stable_result_ids,
-            "candidate_result_ids": list(stable_result_ids),
-            "result_id_by_source_id": result_id_by_source_id,
-            "primary_estimand": _primary_estimand(
-                coefficients,
-                focal_x=focal_x,
-                primary_estimand=primary_estimand,
-            ),
-            "covariance_evidence": evidence,
-            "inference_config": evidence,
-            "entity_col": cluster_col,
-        }
-    )
-    return result
-
-
-#: Inference engine v2 (v1.8.10): robust and clustered OLS use Stata's
-#: finite-sample reference distributions instead of the normal.
-INFERENCE_ENGINE_VERSION = "workbench.inference.v2"
-
-
-def _require_hac_time_order(
-    frame: pd.DataFrame, time_order: str | None, y: str, x: list[str], weight_kind: str | None
-) -> None:
-    if not time_order:
-        raise ValueError(
-            "OLS_HAC_TIME_ORDER_MISSING: HAC (Newey-West) standard errors need the data's time "
-            "order; set time_order to the column that orders the observations in time."
-        )
-    if time_order not in frame.columns:
-        raise ValueError(f"OLS_HAC_TIME_ORDER_MISSING: time_order column {time_order!r} is not in the data.")
-    if time_order == y or time_order in x:
-        raise ValueError("OLS_HAC_TIME_ORDER_CONFLICT: time_order cannot be the outcome or a predictor.")
-    if weight_kind is not None:
-        raise ValueError(
-            f"OLS_HAC_WEIGHTS_NOT_VALIDATED: HAC with {weight_kind} weights has not been checked "
-            "against a reference implementation yet, so it is not offered."
-        )
-
-
-def _hac_plan(original: Any, model_frame: pd.DataFrame, time_order: str, lags: int | None) -> dict[str, Any]:
-    """Check the estimation sample is one regular time series and fix the lag.
-
-    The check runs on the rows the model used: a row dropped for a missing value
-    leaves a gap exactly as a missing period does, and Newey-West would then
-    treat observations two periods apart as neighbours (Stata's `newey`
-    refuses gaps for the same reason).
+    A column the frame lacks is left for the formula to report, as before.
     """
-    from ..contracts.model.ols import HAC_DEFAULT_LAG_RULE, hac_default_lags
-
-    labels = getattr(original.model.data, "row_labels", None)
-    times = model_frame.loc[list(labels), time_order] if labels is not None else model_frame[time_order]
-    if times.isna().any():
-        raise ValueError(f"OLS_HAC_TIME_ORDER_MISSING_VALUES: {time_order} is missing on rows the model uses.")
-    _require_regular_periods(times, time_order)
-    nobs = int(original.nobs)
-    if lags is None:
-        lags, rule = hac_default_lags(nobs), HAC_DEFAULT_LAG_RULE
-    else:
-        rule = "specified"
-    if lags >= nobs:
-        raise ValueError(f"OLS_HAC_LAGS_INVALID: {lags} lags need more than {nobs} observations.")
-    return {
-        "kernel": "bartlett",
-        "lags": int(lags),
-        "lag_rule": rule,
-        "time_order": time_order,
-        "nobs": nobs,
-        "first_period": _python_scalar(times.iloc[0]),
-        "last_period": _python_scalar(times.iloc[-1]),
-    }
+    wanted = {y, *x, *(column for column in optional if column)}
+    return [column for column in frame.columns if column in wanted]
 
 
-def _require_regular_periods(times: pd.Series, column: str) -> None:
-    """One observation per period, with no period missing between the first and last."""
-    if pd.api.types.is_numeric_dtype(times):
-        values = times.to_numpy(dtype=float)
-        if not np.all(np.isclose(values, np.round(values))):
-            raise ValueError(
-                f"OLS_HAC_TIME_ORDER_INVALID: {column} must hold whole-number periods (such as years) "
-                "or dates."
-            )
-        steps = np.diff(np.round(values))
-        if (steps == 0).any():
-            raise ValueError(_repeated_period_message(column))
-        if (steps != 1).any():
-            first_gap = int(np.flatnonzero(steps != 1)[0])
-            raise ValueError(
-                f"OLS_HAC_TIME_GAPS: {column} has gaps in the rows the model uses (first after "
-                f"{_python_scalar(times.iloc[first_gap])}); missing periods, or rows dropped for missing "
-                "values, would make observations two periods apart look adjacent. Fill or drop the "
-                "gap explicitly first."
-            )
-        return
-    stamps = pd.to_datetime(times, format="mixed", errors="coerce")
-    if stamps.isna().any():
-        raise ValueError(f"OLS_HAC_TIME_ORDER_INVALID: {column} must hold whole-number periods or dates.")
-    if stamps.duplicated().any():
-        raise ValueError(_repeated_period_message(column))
-    index = pd.DatetimeIndex(stamps)
-    frequency = pd.infer_freq(index) if len(index) >= 3 else None
-    if frequency is None:
-        raise ValueError(
-            f"OLS_HAC_TIME_GAPS: the dates in {column} are not evenly spaced in the rows the model "
-            "uses (a gap, or an irregular frequency); Newey-West needs one observation per period."
-        )
-
-
-def _repeated_period_message(column: str) -> str:
-    return (
-        f"OLS_HAC_REPEATED_PERIODS: {column} repeats a period in the rows the model uses. "
-        "Newey-West here is for one time series; panel data need Driscoll-Kraay standard "
-        "errors, which are not implemented yet."
-    )
-
-
-def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None, hac_lags: int | None = None) -> Any:
-    """Return the fit carrying `covariance`, from a plain OLS fit.
-
-    Single source for how a covariance estimator is applied to OLS, so a
-    consumer that needs the fit itself -- rather than the normalized result --
-    cannot drift from what `run_ols` reports. `run_ols` returns the *plain*
-    fit, so post-estimation inference must apply the estimator itself or it
-    silently answers under `nonrobust`.
-    """
-
-    if covariance == "clustered":
-        if groups is None:
-            raise ValueError("clustered covariance requires cluster groups")
-        return original.get_robustcov_results(
-            cov_type="cluster",
-            groups=groups,
-            use_correction=True,
-            df_correction=True,
-            # Inference engine v2 (v1.8.10): Stata's finite-sample rule,
-            # t(G - 1) for coefficients and F(q, G - 1) for joint tests.
-            use_t=True,
-        )
-    if covariance == "robust":
-        # HC1 with t(N - K), as Stata's `regress, vce(robust)`.
-        return original.get_robustcov_results(cov_type="HC1", use_t=True)
-    if covariance == "hac":
-        if hac_lags is None:
-            raise ValueError("HAC covariance requires its lag truncation")
-        # Newey-West: Bartlett kernel, N/(N-K) scaling, t(N - K) -- Stata's
-        # `newey` and R's sandwich::NeweyWest(prewhite = FALSE, adjust = TRUE).
-        # The fit's rows must already be in time order.
-        return original.get_robustcov_results(
-            cov_type="HAC", maxlags=hac_lags, kernel="bartlett", use_correction=True, use_t=True
-        )
-    if covariance == "unadjusted":
-        return original
-    raise ValueError(f"unsupported OLS covariance estimator: {covariance}")
-
-
-_MAX_FREQUENCY_EXPANDED_ROWS = 5_000_000
-
-
-def _normalize_ols_weight_spec(
-    frame: pd.DataFrame, weights: Any
-) -> tuple[str | None, str, Any]:
-    """Validate a declared weight spec without deciding how to execute it."""
-
-    if weights is None:
-        return None, "", None
-    if not isinstance(weights, Mapping):
-        raise ValueError("OLS_WEIGHT_INVALID: weights must be an object with kind and column")
-    kind = str(weights.get("kind") or "").strip().lower()
-    column = str(weights.get("column") or "").strip()
-    if kind not in {"frequency", "analysis", "sampling"}:
-        raise ValueError(
-            "OLS_WEIGHT_KIND_UNSUPPORTED: OLS supports frequency, analysis or "
-            "sampling weights"
-        )
-    if not column:
-        raise ValueError("OLS_WEIGHT_COLUMN_MISSING: weight column must be declared")
-    if column not in frame.columns:
-        raise ValueError(
-            f"OLS_WEIGHT_COLUMN_MISSING: weight column {column!r} is not present in the dataset"
-        )
-    values = pd.to_numeric(frame[column], errors="coerce")
-    if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
-        raise ValueError(
-            f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
-        )
-    if (values <= 0).any():
-        raise ValueError(
-            f"OLS_WEIGHT_INVALID: weight column {column!r} must contain finite positive values"
-        )
-    return kind, column, values
-
-
-def _frequency_weight_counts(values: Any, column: str) -> Any:
-    """Frequency weights are observation counts, so they must be whole numbers."""
-
-    numeric = values.to_numpy(dtype=float)
-    rounded = np.rint(numeric)
-    if not np.allclose(numeric, rounded, rtol=0.0, atol=1e-9):
-        raise ValueError(
-            f"OLS_FREQUENCY_WEIGHT_NOT_INTEGER: frequency_weight column {column!r} must "
-            "contain whole observation counts; declare analysis_weight for fractional "
-            "weights"
-        )
-    counts = rounded.astype(np.int64)
-    total = int(counts.sum())
-    if total > _MAX_FREQUENCY_EXPANDED_ROWS:
-        raise ValueError(
-            f"OLS_FREQUENCY_WEIGHT_TOO_LARGE: frequency_weight column {column!r} expands "
-            f"the analysis sample to {total} rows, above the {_MAX_FREQUENCY_EXPANDED_ROWS} "
-            "row limit"
-        )
-    return counts
-
-
-def _expand_rows_by_frequency(
-    frame: pd.DataFrame,
-    counts: Any,
-    *,
-    row_ids: list[str] | tuple[str, ...] | None,
-    cluster_row_ids: list[str] | tuple[str, ...] | None,
-) -> tuple[pd.DataFrame, Any, Any]:
-    """Repeat each analysis row by its observation count, provenance included."""
-
-    if (counts == 1).all():
-        # Every row was observed once: expansion is the identity, so leave the
-        # frame, its index and its row identifiers byte-for-byte untouched.
-        return frame, row_ids, cluster_row_ids
-    positions = np.repeat(np.arange(len(frame), dtype=np.int64), counts)
-    occurrences = np.concatenate([np.arange(count, dtype=np.int64) for count in counts])
-    expanded = frame.iloc[positions].reset_index(drop=True)
-
-    def _expand_ids(values: Any) -> list[str]:
-        # The repeated copies are distinct analysis rows, so they need distinct
-        # identifiers; the first copy keeps the original id so provenance for an
-        # unrepeated row never changes.
-        expanded_ids: list[str] = []
-        for position, occurrence in zip(positions, occurrences, strict=True):
-            identifier = str(values[position])
-            expanded_ids.append(
-                identifier if occurrence == 0 else f"{identifier}#frequency:{occurrence}"
-            )
-        return expanded_ids
-
-    if row_ids is not None:
-        row_ids = _expand_ids(row_ids)
-    if cluster_row_ids is not None:
-        cluster_row_ids = _expand_ids(cluster_row_ids)
-    return expanded, row_ids, cluster_row_ids
+def _fit_ols_formula(formula: str, data: pd.DataFrame, weight_kind: str | None, weight_column: str | None) -> Any:
+    if weight_kind == "sampling":
+        # A sampling weight means "this row represents w population units", so
+        # the point estimate is weighted least squares -- the same arithmetic an
+        # analysis weight produces.  What differs is the variance (see run_ols).
+        sampling_weights = pd.to_numeric(data[weight_column], errors="coerce")
+        return smf.wls(formula=formula, data=data, weights=sampling_weights).fit()
+    if weight_kind == "analysis":
+        # An analysis weight stays weighted least squares: it rescales each
+        # row's contribution without claiming the row was observed more than
+        # once, so nobs remains the row count.
+        analysis_weights = pd.to_numeric(data[weight_column], errors="coerce")
+        if (analysis_weights == 1).all():
+            # Keep the unweighted numerical path byte-for-byte stable for the
+            # identity case while still exposing that the declared weight was
+            # validated and executed.
+            return smf.ols(formula=formula, data=data).fit()
+        return smf.wls(formula=formula, data=data, weights=analysis_weights).fit()
+    # Unweighted, or a frequency weight already executed by expanding the
+    # analysis rows.
+    return smf.ols(formula=formula, data=data).fit()
 
 
 def run_ols(
@@ -864,6 +137,7 @@ def run_ols(
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
+    _refuse_oversized_dummies(frame, x, cat)
     weight_kind, weight_column, weight_values = _normalize_ols_weight_spec(frame, weights)
     frequency_counts: Any = None
     if weight_kind == "frequency":
@@ -919,7 +193,7 @@ def run_ols(
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     if covariance == "clustered":
         _validate_cluster_group_values(frame[cluster_col])
-    model_frame = frame.copy()
+    model_frame = frame.loc[:, _columns_the_fit_reads(frame, y, x, weight_column, hac_time_order)].copy()
     if not frame.index.is_unique:
         # Patsy/statsmodels uses row labels for its model data. A positional
         # index makes duplicate input labels unambiguous without changing any
@@ -937,36 +211,39 @@ def run_ols(
     if weight_kind is not None:
         normalized_weights = {"kind": weight_kind, "column": weight_column, "executed": True}
     if weight_kind == "sampling":
-        # A sampling weight means "this row represents w population units", so
-        # the point estimate is weighted least squares -- the same arithmetic an
-        # analysis weight produces.  What differs is the variance, and that is
-        # not computed here: the design-variance engine owns it, because getting
-        # it right needs the strata and PSU structure this function never sees.
-        sampling_weights = pd.to_numeric(model_frame[weight_column], errors="coerce")
-        original = smf.wls(
-            formula=formula, data=model_frame, weights=sampling_weights
-        ).fit()
+        # The design-variance engine owns a sampling weight's variance, because
+        # getting it right needs the strata and PSU structure this function never sees.
         normalized_weights["variance_owner"] = "survey_design_engine"
-    elif weight_kind == "analysis":
-        # An analysis weight stays weighted least squares: it rescales each
-        # row's contribution without claiming the row was observed more than
-        # once, so nobs remains the row count.
-        analysis_weights = pd.to_numeric(model_frame[weight_column], errors="coerce")
-        if (analysis_weights == 1).all():
-            # Keep the unweighted numerical path byte-for-byte stable for the
-            # identity case while still exposing that the declared weight was
-            # validated and executed.
-            original = smf.ols(formula=formula, data=model_frame).fit()
-        else:
-            original = smf.wls(
-                formula=formula,
-                data=model_frame,
-                weights=analysis_weights,
-            ).fit()
-    else:
-        # Unweighted, or a frequency weight already executed by expanding the
-        # analysis rows above.
-        original = smf.ols(formula=formula, data=model_frame).fit()
+    original = _fit_ols_formula(formula, model_frame, weight_kind, weight_column)
+    omitted_terms, not_identified_terms = [], []
+    dependent = dependent_columns(original.model)
+    if dependent:
+        # Stata's rule: a term that adds nothing to the terms before it is
+        # omitted and the rest is fitted on the same rows, instead of printing
+        # pseudo-inverse numbers for terms the rows cannot identify.
+        column_by_term = {_formula_term(column, column in cat): column for column in x}
+        slices = original.model.data.design_info.term_name_slices
+        for term in whole_terms(original.model, dependent):
+            if term in column_by_term:
+                constant = np.ptp(original.model.exog[:, slices[term]], axis=0).max() == 0
+                omitted_terms.append({
+                    "variable": column_by_term[term],
+                    "term": _public_term(term),
+                    "reason": "zero_variance" if constant else "perfect_collinearity",
+                })
+        omitted = {entry["variable"] for entry in omitted_terms}
+        if omitted:
+            rows = original.model.data.row_labels
+            formula = _ols_formula(
+                y, [_formula_term(column, column in cat) for column in x if column not in omitted] or ["1"]
+            )
+            original = _fit_ols_formula(formula, model_frame.loc[rows], weight_kind, weight_column)
+    if dependent is None or dependent_columns(original.model):
+        # What is left is a set of category levels that other terms determine;
+        # Stata omits one level, which a formula term cannot, so every
+        # coefficient the rows cannot pin down is named instead.
+        names = list(original.model.exog_names)
+        not_identified_terms = [_public_term(names[index]) for index in unidentified_columns(original.model)]
     hac: dict[str, Any] | None = None
     if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
@@ -1001,6 +278,10 @@ def run_ols(
         model_type = "ols"
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = model_type
+    if omitted_terms:
+        result["omitted_terms"] = omitted_terms
+    if not_identified_terms:
+        result["not_identified_terms"] = not_identified_terms
     result = _attach_ols_result_contract(
         result,
         fitted=fitted,
@@ -1034,219 +315,6 @@ def run_ols(
     return _add_engine(result), original
 
 
-def run_fixed_effects(
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    entity: str,
-    time: str | None,
-    model_id: str,
-    categorical_x: set[str] | None = None,
-) -> tuple[dict[str, Any], Any]:
-    frame = _ensure_numeric_y(frame, y)
-    cat = categorical_x or set()
-    terms = [_formula_term(column, column in cat) for column in x]
-    terms.append(f"C({_formula_term(entity)})")
-    if time is not None:
-        terms.append(f"C({_formula_term(time)})")
-    fitted = smf.ols(formula=_ols_formula(y, terms), data=frame).fit()
-    result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "fixed_effects"
-    return _add_engine(result), fitted
-
-
-PANEL_COVARIANCE_VALUES = ("clustered", "robust", "unadjusted")
-
-
-def _panel_covariance(covariance: str | None, cluster_col: str | None) -> str:
-    """The covariance a panel fit uses: clustered unless another is chosen."""
-    value = (covariance or "").strip().lower() or "clustered"
-    if value not in PANEL_COVARIANCE_VALUES:
-        raise ValueError(
-            f"PANEL_COVARIANCE_UNSUPPORTED: unsupported covariance {value!r}; panel and DID "
-            "models offer " + ", ".join(PANEL_COVARIANCE_VALUES) + "."
-        )
-    if cluster_col is not None and value != "clustered":
-        raise ValueError(
-            "PANEL_CLUSTER_WITHOUT_CLUSTERING: a cluster variable applies only to clustered "
-            f"standard errors, not to {value!r}."
-        )
-    return value
-
-
-def _panel_covariance_warnings(covariance: str) -> list[str]:
-    if covariance == "robust":
-        return [
-            "Heteroskedasticity-robust standard errors that ignore the clustering by entity are not "
-            "consistent with a fixed number of periods (Stock & Watson 2008); use them only to "
-            "reproduce earlier work. The default clusters by entity, as Stata's xtreg, fe vce(robust)."
-        ]
-    if covariance == "unadjusted":
-        return [
-            "Conventional standard errors assume independent, homoskedastic errors; within an entity "
-            "the errors are usually correlated over time."
-        ]
-    return []
-
-
-def _panel_estimation_rows(data: pd.DataFrame, columns: list[str], cluster_source: str) -> pd.DataFrame:
-    """The rows the fit uses: complete in the model's columns and the cluster variable."""
-    if cluster_source not in data.columns:
-        raise ValueError(
-            f"PANEL_CLUSTER_COLUMN_MISSING: the cluster variable {cluster_source!r} is not in the data."
-        )
-    return data.dropna(subset=[*dict.fromkeys([*columns, cluster_source])])
-
-
-def _cluster_panel_fit(
-    fitted: Any,
-    data: pd.DataFrame,
-    *,
-    y: str,
-    regressors: list[str],
-    entity_effects: bool,
-    time_effects: bool,
-    cluster_source: str,
-) -> Any:
-    from .panel_inference import ClusteredPanelResult, PanelInferenceError, clustered_covariance
-
-    entity_level, time_level = data.index.names[0], data.index.names[1]
-    clusters = (
-        pd.Series(data.index.get_level_values(entity_level), index=data.index)
-        if cluster_source == entity_level else data[cluster_source]
-    )
-    try:
-        inference = clustered_covariance(
-            data,
-            y=y,
-            regressors=regressors,
-            entity=pd.Series(data.index.get_level_values(entity_level)) if entity_effects else None,
-            time=pd.Series(data.index.get_level_values(time_level)) if time_effects else None,
-            clusters=clusters,
-            cluster_variable=cluster_source,
-            params=fitted.params,
-        )
-    except PanelInferenceError as error:
-        raise ValueError(f"PANEL_CLUSTER_INFERENCE_FAILED: {error}") from error
-    return ClusteredPanelResult(fitted, inference)
-
-
-def run_panel_ols(
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    entity: str | None,
-    time: str | None,
-    model_id: str,
-    covariance: str = "clustered",
-    cluster_col: str | None = None,
-) -> tuple[dict[str, Any], Any]:
-    if entity is None and time is None:
-        raise ValueError(
-            "PANEL_FIELDS_MISSING: PanelOLS requires at least an entity or time field."
-        )
-    covariance = _panel_covariance(covariance, cluster_col)
-    if covariance == "clustered" and entity is None and cluster_col is None:
-        raise ValueError(
-            "PANEL_CLUSTER_ENTITY_REQUIRED: clustered PanelOLS requires an entity field "
-            "or a cluster variable."
-        )
-
-    panel_module = require_optional_dependency(
-        "linearmodels.panel",
-        extra="panel",
-        engine="linearmodels",
-        model_type="panel_ols",
-    )
-    data = _ensure_numeric_y(frame.copy(), y)
-    data = _ensure_numeric_x(data, x)
-    cluster_source = cluster_col or entity
-    if covariance == "clustered":
-        data = _panel_estimation_rows(data, [y, *x], cluster_source)
-
-    declared_entity = entity
-    declared_time = time
-    index_cols: list[str] = []
-    if entity is None:
-        entity = "_panel_entity"
-        data[entity] = "entity"
-    index_cols.append(entity)
-    if time is None:
-        time = "_panel_time"
-        data[time] = range(len(data))
-    index_cols.append(time)
-    data = data.set_index(index_cols)
-
-    terms = ["1", *[_linearmodels_term(column) for column in x]]
-    if index_cols[0] != "_panel_entity":
-        terms.append("EntityEffects")
-    if index_cols[1] != "_panel_time":
-        terms.append("TimeEffects")
-    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
-    if covariance == "clustered":
-        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type="unadjusted")
-        fitted = _cluster_panel_fit(
-            fitted, data, y=y, regressors=list(x),
-            entity_effects=index_cols[0] != "_panel_entity",
-            time_effects=index_cols[1] != "_panel_time",
-            cluster_source=cluster_source,
-        )
-    else:
-        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
-    return (
-        _normalize_linearmodels_result(
-            fitted,
-            model_id,
-            "panel_ols",
-            y_column=y,
-            covariance=covariance,
-            entity_col=declared_entity,
-            time_col=declared_time,
-            inference=getattr(fitted, "inference", None),
-            warnings=_panel_covariance_warnings(covariance),
-        ),
-        fitted,
-    )
-
-
-def run_iv_2sls(
-    frame: pd.DataFrame,
-    y: str,
-    exog: list[str],
-    endog: list[str],
-    instruments: list[str],
-    model_id: str,
-    covariance: str = "robust",
-) -> tuple[dict[str, Any], Any]:
-    if not endog or not instruments:
-        raise ValueError(
-            "IV_SPEC_INCOMPLETE: IV2SLS requires endogenous variables and instruments."
-        )
-
-    iv_module = require_optional_dependency(
-        "linearmodels.iv",
-        extra="panel",
-        engine="linearmodels",
-        model_type="iv_2sls",
-    )
-    data = _ensure_numeric_y(frame.copy(), y)
-    data = _ensure_numeric_x(data, [*exog, *endog, *instruments])
-
-    rhs_terms = ["1", *[_linearmodels_term(column) for column in exog]]
-    iv_terms = " + ".join(_linearmodels_term(column) for column in endog)
-    instrument_terms = " + ".join(
-        _linearmodels_term(column) for column in instruments
-    )
-    formula = (
-        f"{_linearmodels_term(y)} ~ {' + '.join(rhs_terms)} "
-        f"[{iv_terms} ~ {instrument_terms}]"
-    )
-    fitted = iv_module.IV2SLS.from_formula(formula, data=data).fit(
-        cov_type=covariance
-    )
-    return _normalize_linearmodels_result(fitted, model_id, "iv_2sls"), fitted
-
-
 def run_did(
     frame: pd.DataFrame,
     y: str,
@@ -1272,17 +340,16 @@ def run_did(
         data = _panel_estimation_rows(data, [y, "_did_D", *x], cluster_source)
     data = data.set_index([entity, time])
 
-    terms = ["1", "_did_D", *[_linearmodels_term(c) for c in x],
-             "EntityEffects", "TimeEffects"]
-    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
+    model = panel_ols_model(panel_module, data, y=y, regressors=["_did_D", *x],
+                            entity_effects=True, time_effects=True)
     if covariance == "clustered":
-        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type="unadjusted")
+        fitted = model.fit(cov_type="unadjusted")
         fitted = _cluster_panel_fit(
             fitted, data, y=y, regressors=["_did_D", *x], entity_effects=True, time_effects=True,
             cluster_source=cluster_source,
         )
     else:
-        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
+        fitted = model.fit(cov_type=covariance)
     return _normalize_linearmodels_result(
         fitted, model_id, "did", y_column=y, covariance=covariance, entity_col=entity, time_col=time,
         inference=getattr(fitted, "inference", None), warnings=_panel_covariance_warnings(covariance),
@@ -1328,11 +395,9 @@ def run_event_study(
     if covariance == "clustered":
         data = _panel_estimation_rows(data, [y, *dummy_terms, *x], cluster_source)
     data = data.set_index([entity, time])
-    terms = ["1", *dummy_terms, *[_linearmodels_term(c) for c in x],
-             "EntityEffects", "TimeEffects"]
-    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
     try:
-        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
+        fitted = panel_ols_model(panel_module, data, y=y, regressors=[*dummy_terms, *x],
+                                 entity_effects=True, time_effects=True).fit(
             cov_type="unadjusted" if covariance == "clustered" else covariance
         )
         if covariance == "clustered":

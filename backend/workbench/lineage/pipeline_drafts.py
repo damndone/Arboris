@@ -446,8 +446,9 @@ class PipelineDraftStore:
                     )
                 )
                 if checks:
-                    codes = ", ".join(item["code"] for item in checks)
-                    raise DraftValidationFailure(codes)
+                    message = ", ".join(item["message"] if item["code"].startswith("ESTIMATION_ENGINE_")
+                                        else item["code"] for item in checks)
+                    raise DraftValidationFailure(message)
             node["status"] = "pending" if node["node_type"] == "model" and selection_only else "configured"
             if node["node_type"] == "table":
                 model = next(
@@ -476,8 +477,9 @@ class PipelineDraftStore:
                             server_owned_values=_genesis_server_owned_values(draft),
                         )
                         if checks:
-                            codes = ", ".join(item["code"] for item in checks)
-                            raise DraftValidationFailure(codes)
+                            message = ", ".join(item["message"] if item["code"].startswith("ESTIMATION_ENGINE_")
+                                                else item["code"] for item in checks)
+                            raise DraftValidationFailure(message)
             draft["updated_at"] = utc_now()
             draft["status"] = "draft"  # any edit returns to draft state; must re-validate
             PipelineDraftV1(**draft)
@@ -1006,6 +1008,13 @@ def _validate_genesis_model_params(
                 node_id=node_id,
             )
         )
+    if not unknown and "estimation_engine" in params:
+        from ..estimation_engine import EstimationEngineError, validate_genesis_estimation_engine
+
+        try:
+            validate_genesis_estimation_engine(params)
+        except EstimationEngineError as exc:
+            checks.append(check(str(exc).split(":", 1)[0], str(exc), node_id=node_id))
     for key, control in controls.items():
         if key not in params:
             if control.get("required") is True:

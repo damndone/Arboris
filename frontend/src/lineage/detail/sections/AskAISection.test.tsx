@@ -306,6 +306,7 @@ describe("AskAISection", () => {
 
     await waitFor(() => expect(askAiForNode).toHaveBeenCalledTimes(1));
     const packet = vi.mocked(askAiForNode).mock.calls[0][0] as Record<string, any>;
+    expect(vi.mocked(askAiForNode).mock.calls[0][2]).toBe("/p");
     expect(packet.analysis_loop.source_run.primary_estimand.estimate).toBe(0.42);
     expect(packet.analysis_loop.run.primary_estimand.estimate).toBe(0.41);
     expect(packet.analysis_loop.packet.compare_packet.result_diff).toEqual({

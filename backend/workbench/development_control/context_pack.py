@@ -21,7 +21,7 @@ import stat
 from typing import Any
 import uuid
 
-from .events import EventValidationError, append_event, validate_line_id, verify_log
+from .events import ARCHIVE_NAME, EventValidationError, append_event, read_verified_events, validate_line_id
 from .promotion import PromotionError, read_candidate_rules, read_global_rules
 
 
@@ -217,7 +217,7 @@ def verify_context_pack(repo_root: Path, line_id: str) -> ContextPackResult:
         raise ContextPackError("manifest_sha256 does not match frozen manifest bytes")
     if manifest.get("context_pack_sha256") != _sha256(pack):
         raise ContextPackError("context-pack.md does not match its manifest")
-    events = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    events = _verified_line_events(line)
     if not events or events[0].get("type") != "STATE_CHANGE" or events[0].get("subtype") != "line_started":
         raise ContextPackError("the first devline event must be line_started")
     evidence = events[0].get("evidence")
@@ -230,10 +230,6 @@ def verify_context_pack(repo_root: Path, line_id: str) -> ContextPackResult:
     current_rules = _rule_snapshot(_control_dir(root, create=False))
     if current_rules != expected_rules:
         raise ContextPackDriftError("CONTEXT_REFRESH_REQUIRED: current rules differ from the frozen Context Pack")
-    try:
-        verify_log(_devlines_dir(root, create=False), line_id)
-    except EventValidationError as error:
-        raise ContextPackError("initial event log is not trustworthy") from error
     return ContextPackResult(line_id, line / "context-pack.md", line / "context-pack.manifest.json", stored_manifest_hash)
 
 
@@ -253,11 +249,7 @@ def record_context_refresh_required(repo_root: Path, line_id: str) -> ContextRef
     new_rules_sha256 = _rules_digest(current_rules)
     if current_rules == old_rules:
         raise ContextPackError("context rules have not drifted; refresh is not required")
-    try:
-        verify_log(_devlines_dir(root, create=False), line_id)
-    except EventValidationError as error:
-        raise ContextPackError("event log is not trustworthy before refresh audit") from error
-    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    rows = _verified_line_events(line)
     if rows and _is_matching_refresh_required(rows[-1], old_manifest_sha256, old_rules_sha256, new_rules_sha256):
         return ContextRefreshRequired(line_id, old_manifest_sha256, old_rules_sha256, new_rules_sha256)
     _append_context_state_event(
@@ -278,17 +270,13 @@ def refresh_context_pack(repo_root: Path, line_id: str) -> ContextPackResult:
     """Explicitly replace a drifted pack after its audit event is durable."""
 
     root, line, old_manifest, old_manifest_sha256 = _load_frozen_context(repo_root, line_id)
-    try:
-        verify_log(_devlines_dir(root, create=False), line_id)
-    except EventValidationError as error:
-        raise ContextPackError("event log is not trustworthy before explicit refresh") from error
     current_rules = _rule_snapshot(_control_dir(root, create=False))
     old_rules = old_manifest["rules"]
     if current_rules == old_rules:
         raise ContextPackError("context rules have not drifted; refresh is not required")
     old_rules_sha256 = _rules_digest(old_rules)
     new_rules_sha256 = _rules_digest(current_rules)
-    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    rows = _verified_line_events(line)
     if not rows or not _is_matching_refresh_required(rows[-1], old_manifest_sha256, old_rules_sha256, new_rules_sha256):
         raise ContextPackError("context_refresh_required must be durably recorded before refresh")
     request = _request_from_manifest(old_manifest)
@@ -343,11 +331,7 @@ def record_context_rescope_required(
     # Do not combine a scope correction with unreviewed policy drift.
     verify_context_pack(root, line_id)
     _, line, old_manifest, old_manifest_sha256 = _load_frozen_context(root, line_id)
-    try:
-        verify_log(_devlines_dir(root, create=False), line_id)
-    except EventValidationError as error:
-        raise ContextPackError("event log is not trustworthy before rescope audit") from error
-    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    rows = _verified_line_events(line)
     pending = _pending_rescope_completion(rows, old_manifest_sha256)
     if pending is not None:
         return ContextRescopeRequired(line_id, pending["old_manifest_sha256"], pending["new_manifest_sha256"])
@@ -383,11 +367,7 @@ def rescope_context_pack(
     _validate_rescope_allowed_paths(root, allowed_paths)
     verify_context_pack(root, line_id)
     _, line, old_manifest, old_manifest_sha256 = _load_frozen_context(root, line_id)
-    try:
-        verify_log(_devlines_dir(root, create=False), line_id)
-    except EventValidationError as error:
-        raise ContextPackError("event log is not trustworthy before explicit rescope") from error
-    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    rows = _verified_line_events(line)
     pending = _pending_rescope_completion(rows, old_manifest_sha256)
     if pending is not None:
         _append_context_state_event(
@@ -989,12 +969,22 @@ def _write_new_file(directory: Path, name: str, content: bytes) -> None:
         os.close(fd)
 
 
+def is_formal_line_layout(names: set[str]) -> bool:
+    return names == _FORMAL_FILES or names == _FORMAL_FILES | {ARCHIVE_NAME}
+
+
 def _ensure_formal_files(line: Path) -> None:
-    names = {entry.name for entry in line.iterdir()}
-    if names != _FORMAL_FILES:
-        raise ContextPackError("devline directory does not contain exactly the five formal files")
+    if not is_formal_line_layout({entry.name for entry in line.iterdir()}):
+        raise ContextPackError("devline directory must contain the formal files and at most one event archive")
     for name in _FORMAL_FILES:
         _read_regular_file(line / name, name)
+
+
+def _verified_line_events(line: Path) -> list[dict[str, Any]]:
+    try:
+        return read_verified_events(line.parent, line.name)
+    except EventValidationError as error:
+        raise ContextPackError(f"event log is not trustworthy: {error}") from error
 
 
 def _parse_manifest(raw: bytes) -> dict[str, Any]:
@@ -1046,7 +1036,7 @@ def _load_frozen_context(repo_root: Path, line_id: str) -> tuple[Path, Path, dic
         raise ContextPackError("manifest_sha256 does not match frozen manifest bytes")
     if manifest.get("context_pack_sha256") != _sha256(pack):
         raise ContextPackError("context-pack.md does not match its manifest")
-    rows = _parse_jsonl(_read_regular_file(line / "events.jsonl", "events.jsonl"), "events.jsonl")
+    rows = _verified_line_events(line)
     if not rows or rows[0].get("type") != "STATE_CHANGE" or rows[0].get("subtype") != "line_started":
         raise ContextPackError("the first devline event must be line_started")
     evidence = rows[0].get("evidence")

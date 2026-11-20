@@ -161,3 +161,20 @@ def test_merge_many_to_many_is_fail_closed_with_next_step(tmp_path: Path) -> Non
     )
     with pytest.raises(Exception, match="DATA_MERGE_MANY_TO_MANY_BLOCKED"):
         preview_data_transform(project, spec)
+
+
+def test_recode_mapping_from_json_names_numeric_values_by_their_string_form() -> None:
+    """QRData 355 (6af0a0da round): {"12": 1} on int64 educ matched nothing and the default filled every row."""
+    from workbench.predictive_research.contracts import ContractError
+    from workbench.predictive_research.feature_recipe import apply_feature_recipe
+
+    def recode(values, mapping, default=0):
+        recipe = _recipe("recode", inputs=("educ",), output="grad", parameters={"input": "educ", "mapping": mapping, "default": default})
+        return apply_feature_recipe(pd.DataFrame({"educ": values}), recipe)["grad"].tolist()
+
+    assert recode([10, 12, 16], {"12": 1, "16": 1}) == recode([10, 12, 16], {12: 1, 16: 1}) == [0, 1, 1]
+    assert recode([12.0, 12.5], {"12": 1, "12.5": 2}) == [1, 2]
+    with pytest.raises(ContractError, match="names one value twice with different results: 12, 12.0"):
+        recode([12.0], {"12": 1, "12.0": 2})
+    with pytest.raises(ContractError, match="matched no value of educ; its keys are values of educ, e.g. '10', '12'"):
+        recode([10, 12], {"99": 1})

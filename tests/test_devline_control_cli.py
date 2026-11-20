@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -80,6 +82,56 @@ def test_verify_all_checks_formal_lines_but_reports_quarantined_legacy_lines(tmp
     result = json.loads(verified.stdout)
     assert result["verified_lines"] == ["integration-v173"]
     assert result["quarantined_legacy_lines"] == ["wo-a"]
+
+    rejected = _run(tmp_path, "archive-events", "--line", "wo-a")
+    assert rejected.returncode == 2
+    assert not (legacy / "events.jsonl.gz").exists()
+    assert (legacy / "events.jsonl").read_bytes() == b"legacy\n"
+
+
+def test_event_archive_preserves_formal_consumers_and_accepts_new_events(tmp_path: Path) -> None:
+    (tmp_path / "objective.md").write_text("Preserve the audit trail.\n", encoding="utf-8")
+    line_id = "integration-v173"
+    started = _run(tmp_path, "start", "--line", line_id, "--objective", "objective.md", "--baseline-sha", "a" * 40)
+    assert started.returncode == 0, started.stderr
+    line = tmp_path / ".agent" / "devlines" / line_id
+    live = line / "events.jsonl"
+    anchor = line / "events.jsonl.anchor"
+    archive = line / "events.jsonl.gz"
+    retrospective = line / "RETROSPECTIVE.md"
+    original, original_anchor, original_report = live.read_bytes(), anchor.read_bytes(), retrospective.read_bytes()
+
+    archived = _run(tmp_path, "archive-events", "--line", line_id)
+    assert archived.returncode == 0, archived.stderr
+    receipt = json.loads(archived.stdout)
+    assert receipt["raw_sha256"] == hashlib.sha256(original).hexdigest()
+    assert receipt["archive_sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert receipt["archive"] == f".agent/devlines/{line_id}/events.jsonl.gz"
+    assert receipt["event_count"] == 1
+    assert live.read_bytes() == b""
+    assert gzip.decompress(archive.read_bytes()) == original
+    assert anchor.read_bytes() == original_anchor
+    exported = _run(tmp_path, "read-events", "--line", line_id)
+    assert exported.returncode == 0, exported.stderr
+    assert exported.stdout.encode("utf-8") == original
+
+    for args in (("verify", "--all"), ("retrospective", "--line", line_id), ("promote", "--all"), ("index", "--all")):
+        result = _run(tmp_path, *args)
+        assert result.returncode == 0, result.stderr
+    assert retrospective.read_bytes() == original_report
+
+    rescoped = _run(tmp_path, "rescope-context", "--line", line_id, "--affected-path", "tests")
+    assert rescoped.returncode == 0, rescoped.stderr
+    assert json.loads(live.read_bytes().splitlines()[0])["prev_event_sha256"] == receipt["tail_event_sha256"]
+    combined = original + live.read_bytes()
+    assert _run(tmp_path, "read-events", "--line", line_id).stdout.encode("utf-8") == combined
+
+    archived_again = _run(tmp_path, "archive-events", "--line", line_id)
+    assert archived_again.returncode == 0, archived_again.stderr
+    assert gzip.decompress(archive.read_bytes()) == combined
+    assert live.read_bytes() == b""
+    assert _run(tmp_path, "archive-events", "--line", line_id).stdout == archived_again.stdout
+    assert _run(tmp_path, "verify", "--all").returncode == 0
 
 
 def test_promote_all_orchestrates_only_formal_lines(tmp_path: Path) -> None:

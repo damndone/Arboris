@@ -232,7 +232,9 @@ def run_workflow(
     survey_weight_frame: str = "",
     survey_subpop: str = "",
     survey_df: str = "",
+    estimation_engine: str = "",
     labels: dict[str, object] | None = None,
+    on_step: Callable[[str, str, str], None] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
@@ -241,7 +243,10 @@ def run_workflow(
     from ..model_options import ModelOptionsError, bind_new_model_options
     from ..services.run_service import _normalize_labels
 
+    from ..estimation_engine import stored_choice
+
     project_root = Path(project_root)
+    estimation_engine = stored_choice(estimation_engine)
     if model_type == "linear_mixed_effects":
         from ..services.execution_profile import (
             ExecutionProfileError,
@@ -315,6 +320,7 @@ def run_workflow(
         "survey_subpop": survey_subpop,
         # Only when set: an absent key keeps every earlier run's inputs.
         **({"survey_df": survey_df} if survey_df else {}),
+        **({"estimation_engine": estimation_engine} if estimation_engine else {}),
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -441,7 +447,9 @@ def run_workflow(
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
             survey_df=survey_df,
+            estimation_engine=estimation_engine,
             labels=normalized_labels,
+            on_step=on_step,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -665,6 +673,7 @@ def _run_workflow(
     survey_weight_frame: str = "",
     survey_subpop: str = "",
     survey_df: str = "",
+    estimation_engine: str = "",
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
@@ -677,6 +686,9 @@ def _run_workflow(
     from ..engine.stages import PIPELINE
     from ..model_options import canonicalize_model_options
     from ..services.run_service import _normalize_labels
+
+    if mode == 'import' and (y or x or model_type != 'auto' or model_options or imputation or statistical_tests or by_group):
+        raise ValueError('Import-only runs cannot include estimation, imputation or testing requests; import first, then propose the analysis.')
 
     normalized_model_options = canonicalize_model_options(
         {} if model_options is None else model_options
@@ -747,6 +759,9 @@ def _run_workflow(
     ctx.artifacts["_survey_weight_frame"] = survey_weight_frame
     ctx.artifacts["_survey_subpop"] = survey_subpop
     ctx.artifacts["_survey_df"] = survey_df
+    from ..estimation_engine import stored_choice as _stored_engine_choice
+
+    ctx.artifacts["_estimation_engine"] = _stored_engine_choice(estimation_engine)
     ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
@@ -805,6 +820,9 @@ def _run_workflow(
         form["labels"] = normalized_labels
     if model_options_binding is not None:
         form["model_options_binding"] = model_options_binding
+    if estimation_engine:
+        # Results from another engine are other bytes, so they get other node identities.
+        form["estimation_engine"] = estimation_engine
     cfg = {
         "random_seed": getattr(config, "random_seed", 20260429),
         "imputation_method": getattr(config, "imputation_method", ""),
@@ -813,11 +831,30 @@ def _run_workflow(
         "max_missing_rate": getattr(config, "max_missing_rate", 0.4),
         "run_timeout_s": getattr(config, "run_timeout_s", 1800.0),
     }
+    # Import is the same ingestion/cleaning/profile path, with no prerequisite
+    # regression or model-sample validation. It creates data evidence, not a fit.
+    pipeline = [stage for stage in PIPELINE if stage.name in {'source', 'cleaning', 'profiling'}] if mode == 'import' else PIPELINE
     ctx = run_pipeline_traced(
-        PIPELINE, ctx, env, form=form, config=cfg,
+        pipeline, ctx, env, form=form, config=cfg,
         force_full=flags.force_full_recompute() or not flags.incremental_cache(),
         upload_hash=upload_hash,
     )
+    if mode == 'import':
+        from ..graph_model import Stage
+
+        _recorder.record_stage(node_id='stage:cleaned', display_label='Imported dataset',
+                               payload_ref='processed/cleaned_dataset.parquet', stage=Stage.CLEAN,
+                               summary=f'{len(ctx.data.frame)} rows × {len(ctx.data.frame.columns)} cols')
+        _recorder.record_edge(edge_id='raw:cleaned', source_id='stage:raw', target_id='stage:cleaned', op='clean')
+        _recorder.flush()
+        # Without an identity the nodes exist but no node tool can address them.
+        if ctx.artifacts.get('_node_hashes'):
+            from ..lineage.node_index import write_node_index
+            write_node_index(run_root, ctx.artifacts['_node_hashes'], normalized_y='', normalized_x=[],
+                             model_results=[], upload_hash=ctx.artifacts.get('_upload_hash', ''))
+        _write_manifest(run_root, run_id, mode, 'completed', _lineage(input_files),
+                        started_at=started_at, y='', x=[], requested_model_type='auto')
+        ctx.terminal_status = 'completed'
     return {"run_id": run_id, "status": ctx.terminal_status}
 
 

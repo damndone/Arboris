@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
 
 import numpy as np
@@ -8,6 +9,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy import stats
 
+from .... import native_io
 from ....artifacts import register_artifact, write_json
 from ....contracts.model.v186_model_families import (
     MultinomialResultContract,
@@ -146,9 +148,32 @@ def _frame(ctx: Any, y: str, x: list[str], extra: list[str] | None = None) -> tu
 
 
 def _json_safe(value: Any) -> Any:
+    # A 200,000-row Cox packet is 1.8 million nested builtins: walk dicts and lists natively.
+    kind = type(value)
+    if kind is dict or kind is list:
+        return native_io.json_safe(value, _json_safe_reference)
+    return _json_safe_reference(value)
+
+
+def _json_safe_reference(value: Any) -> Any:
+    kind = type(value)
+    if kind is float:
+        return value if math.isfinite(value) else None
+    if kind is str or kind is int or kind is bool or value is None:
+        return value
+    if kind is dict:
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if kind is list:
+        return [_json_safe(item) for item in value]
     if isinstance(value, np.generic):
         return _json_safe(value.item())
     if isinstance(value, np.ndarray):
+        if value.ndim == 1 and value.dtype.kind in "fiub":
+            # Numeric arrays need no walk per item; a 100,000-row residual column spent 3 s here.
+            items = value.tolist()
+            if value.dtype.kind != "f" or np.isfinite(value).all():
+                return items
+            return [item if np.isfinite(item) else None for item in items]
         return [_json_safe(item) for item in value.tolist()]
     if isinstance(value, pd.Series):
         return [_json_safe(item) for item in value.tolist()]
@@ -203,10 +228,13 @@ def _fit_stats(result: Any, names: list[str]) -> dict[str, dict[str, float | Non
     }
 
 
-def _persist_packet(env: Any, artifact_id: str, relative: str, payload: Mapping[str, Any], *, artifact_type: str = "model_diagnostic") -> None:
+def _persist_packet(
+    env: Any, artifact_id: str, relative: str, payload: Mapping[str, Any], *,
+    artifact_type: str = "model_diagnostic", normalize_json: bool = True,
+) -> None:
     path = env.run_root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, _json_safe(dict(payload)))
+    write_json(path, _json_safe(dict(payload)) if normalize_json else payload)
     register_artifact(env.run_root, artifact_id, path, artifact_type, "model_families", ["cleaned_dataset"])
 
 
@@ -449,6 +477,17 @@ def fit_multinomial(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     return "multinomial_logit_1", primary, None
 
 
+def _at_risk_counts(points: np.ndarray, duration: np.ndarray, entry: np.ndarray | None) -> np.ndarray:
+    """How many rows are at risk at each time, from sorted times rather than a scan of every row per time.
+
+    Entry precedes duration (validated by fit_survival), so whoever ended before a time had entered by it.
+    """
+    ended_before = np.searchsorted(np.sort(duration), points, side="left")
+    if entry is None:
+        return len(duration) - ended_before
+    return np.searchsorted(np.sort(entry), points, side="right") - ended_before
+
+
 def _survival_curve(
     time: np.ndarray,
     status: np.ndarray,
@@ -464,18 +503,20 @@ def _survival_curve(
     curves: list[dict[str, Any]] = []
     for label, mask in groups:
         group_entry = entry[mask] if entry is not None else None
-        curve = SurvfuncRight(time[mask], status[mask], entry=group_entry)
-        for index, point in enumerate(np.asarray(curve.surv_times)):
-            at_risk = (time[mask] >= point)
-            if group_entry is not None:
-                at_risk &= group_entry <= point
-            curves.append({"group": label, "time": _json_safe(point), "survival": _json_safe(np.asarray(curve.surv_prob)[index]), "n_at_risk": int(np.sum(at_risk))})
+        group_time = time[mask]
+        curve = SurvfuncRight(group_time, status[mask], entry=group_entry)
+        points = np.asarray(curve.surv_times)
+        curves.extend(
+            {"group": label, "time": _json_safe(point), "survival": _json_safe(probability), "n_at_risk": at_risk}
+            for point, probability, at_risk in zip(
+                points.tolist(), np.asarray(curve.surv_prob).tolist(), _at_risk_counts(points, group_time, group_entry).tolist(), strict=True)
+        )
     return curves
 
 
 def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
-    from statsmodels.duration.hazard_regression import PHReg
     from statsmodels.duration.survfunc import survdiff
+    from ....native_cox import FastPHReg
 
     options = dict(ctx.artifacts.get("_model_options") or {})
     validate_survival_options(options)
@@ -508,34 +549,36 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
             or (entry >= duration).any()
         ):
             raise ValueError("SURVIVAL_ENTRY_MUST_BE_FINITE_NONNEGATIVE_AND_BEFORE_DURATION")
-    fitted = PHReg(duration, exog, status=status, entry=entry, ties=str(options.get("ties", "breslow"))).fit()
+    fitted = FastPHReg(duration, exog, status=status, entry=entry, ties=str(options.get("ties", "breslow"))).fit()
     names = [str(name) for name in exog.columns]
     coefficient_map = _fit_stats(fitted, names)
     for name, values in coefficient_map.items():
         values["hazard_ratio"] = _json_safe(np.exp(float(values["estimate"]))) if values["estimate"] is not None else None
-    event_times = sorted(set(float(value) for value in duration[status == 1]))
-    risk_set = []
-    for point in event_times:
-        at_risk_mask = duration >= point
-        if entry is not None:
-            at_risk_mask &= entry <= point
-        risk_set.append({
-            "time": _json_safe(point),
-            "at_risk": int(np.sum(at_risk_mask)),
-            "events": int(np.sum((duration == point) & (status == 1))),
-            "censored": int(np.sum((duration == point) & (status == 0))),
-        })
+    event_mask = status == 1
+    event_axis = duration[event_mask]
+    event_times, event_counts = np.unique(event_axis, return_counts=True)
+    censored_sorted = np.sort(duration[~event_mask])
+    risk_set = [
+        {"time": point, "at_risk": at_risk, "events": events, "censored": censored}
+        for point, at_risk, events, censored in zip(
+            event_times.tolist(),
+            _at_risk_counts(event_times, duration, entry).tolist(),
+            event_counts.tolist(),
+            (np.searchsorted(censored_sorted, event_times, "right") - np.searchsorted(censored_sorted, event_times, "left")).tolist(),
+            strict=True)
+    ]
     log_rank: dict[str, Any] = {"status": "not_requested"}
-    if group is not None and len(np.unique(group)) == 2:
-        chisq, pvalue = survdiff(duration, status, group, entry=entry)
-        log_rank = {"status": "computed", "statistic": _json_safe(chisq), "p_value": _json_safe(pvalue), "groups": [str(value) for value in np.unique(group)]}
+    if group is not None:
+        group_levels = np.unique(group)
+        if len(group_levels) == 2:
+            chisq, pvalue = survdiff(duration, status, group, entry=entry)
+            log_rank = {"status": "computed", "statistic": _json_safe(chisq), "p_value": _json_safe(pvalue), "groups": [str(value) for value in group_levels]}
     residuals = np.asarray(getattr(fitted, "schoenfeld_residuals", np.empty((0, len(names)))), dtype=float)
-    event_axis = np.asarray(duration[status == 1], dtype=float)
     schoenfeld: list[dict[str, Any]] = []
     for index, name in enumerate(names):
         if residuals.ndim == 2 and residuals.shape[1] > index:
             values = (
-                residuals[status == 1, index]
+                residuals[event_mask, index]
                 if residuals.shape[0] == len(duration)
                 else residuals[:, index]
             )
@@ -566,7 +609,9 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "validation": _validation_metadata("survival_cox"),
     }
     SurvivalEvidenceContract.from_dict(evidence)
-    _persist_packet(env, "survival_evidence", "survival/evidence.json", evidence, artifact_type="survival_evidence")
+    # The curve, log-rank, and residuals are already normalized where built.
+    _persist_packet(env, "survival_evidence", "survival/evidence.json", evidence,
+                    artifact_type="survival_evidence", normalize_json=False)
     primary = {
         "schema_version": 1,
         "model_id": "survival_cox_1",
@@ -577,6 +622,21 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "hazard_ratios": {name: values.get("hazard_ratio") for name, values in coefficient_map.items()},
         "survival_evidence_artifact": "survival_evidence",
     }
+    from ..survival_analysis.ph_diagnostics import ph_score_test
+    from ...completion_evidence import publish_completion_evidence
+    from ....services.completion_products import array_fingerprint
+    design = exog.to_numpy(dtype=float)
+    ph = ph_score_test(duration, status, design, fitted.params,
+                       names, ties=str(options.get('ties', 'breslow')), entry=entry)
+    required = [ctx.artifacts['_normalized_y'], *ctx.artifacts['_normalized_x'], *extra_columns]
+    retained = np.flatnonzero(ctx.data.frame[list(dict.fromkeys(required))].notna().all(axis=1))
+    publish_completion_evidence(ctx, env, primary,
+        point_definition={'family': 'survival_cox', 'names': names, 'time': array_fingerprint(duration),
+                          'event': array_fingerprint(status), 'design': array_fingerprint(design),
+                          'entry': None if entry is None else array_fingerprint(entry),
+                          'ties': options.get('ties', 'breslow')},
+        retained_positions=retained, diagnostics={'proportional_hazards': ph},
+        diagnostic_artifact_ids=['survival_evidence'])
     _record_kernel(ctx, fitted, model_id="survival_cox_1", model_type="survival_cox", nobs=int(len(frame)), names=names)
     return "survival_cox_1", primary, None
 

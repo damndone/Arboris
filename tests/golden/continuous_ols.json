@@ -13,7 +13,6 @@
     "cleaning_actions": [
       "raw_data.csv"
     ],
-    "coef_plot": [],
     "correlation_heatmap": [],
     "data_profile": [
       "cleaned_dataset"

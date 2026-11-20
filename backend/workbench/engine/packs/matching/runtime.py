@@ -49,7 +49,13 @@ def _policy_input(operation_id: str, *, outcome_column: str | None, **kwargs: An
     try:
         return MatchingInput.from_dict(value)
     except Exception as exc:
-        _fail("MATCHING_INVALID_POLICY", str(exc))
+        message = str(exc)
+        if "propensity" in message:
+            message += (
+                '. propensity_policy takes exactly these fields, for example {"model": "logit", "solver": "newton", '
+                '"max_iter": 100, "tolerance": 1e-8, "min_probability": 1e-6, "max_probability": 0.999999}'
+            )
+        _fail("MATCHING_INVALID_POLICY", message)
 
 
 def _validate_frame(frame: Any, request: MatchingInput, *, require_outcome: bool) -> pd.DataFrame:
@@ -112,7 +118,12 @@ def _fit_propensity(frame: pd.DataFrame, request: MatchingInput) -> tuple[np.nda
         _fail("MATCHING_PROPENSITY_EXTREME", "propensity probabilities are non-finite")
     lower, upper = float(policy["min_probability"]), float(policy["max_probability"])
     if np.any(probabilities < lower) or np.any(probabilities > upper):
-        _fail("MATCHING_PROPENSITY_EXTREME", "propensity probabilities exceed declared bounds")
+        outside = int(np.count_nonzero((probabilities < lower) | (probabilities > upper)))
+        _fail(
+            "MATCHING_PROPENSITY_EXTREME",
+            f"{outside} of {probabilities.size} propensity probabilities are outside the declared bounds "
+            f"[{lower:g}, {upper:g}]; observed range [{probabilities.min():.3g}, {probabilities.max():.3g}]",
+        )
     return probabilities, names
 
 
@@ -259,7 +270,12 @@ def estimate_att(frame: pd.DataFrame, *, treatment_column: str, outcome_column: 
                 if float(np.linalg.norm((covariate_matrix[treated_position] - covariate_matrix[control_position]) / scales)) <= float(caliper)
             ]
         if len(candidates) < request.ratio:
-            _fail("MATCHING_UNMATCHED_TREATED", "a treated unit has fewer matches than the declared ratio")
+            _fail(
+                "MATCHING_UNMATCHED_TREATED",
+                f"a treated unit has {len(candidates)} eligible controls but ratio is {request.ratio} "
+                f"({treated.size} treated, {controls.size} controls, replacement={replacement}, caliper={caliper}, "
+                "with the caliper measured on standardized covariate distance)",
+            )
         selected = candidates[:request.ratio]
         for control_position in selected:
             pairs.append({"treated_position": treated_position, "control_position": control_position, "control_unit": value.iloc[control_position][id_column]})

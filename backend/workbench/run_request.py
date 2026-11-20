@@ -91,6 +91,11 @@ RUN_REQUEST_FIELDS: tuple[RunField, ...] = (
         "survey_df",
         "Coefficient test df under a survey design: design (default, #PSU - #strata) | design_minus_p (R survey).",
     ),
+    RunField(
+        "estimation_engine",
+        "Estimation engine: reference (default; bit for bit) | fast (opt-in native engine; agrees with "
+        "the reference within 1e-9 relative, covers IV 2SLS with robust or unadjusted covariance).",
+    ),
     RunField("iv_endog", "Endogenous regressor; repeat for several.", many=True, encoding="json_array"),
     RunField("iv_instruments", "Instrument column; repeat for several.", many=True, encoding="json_array"),
     RunField("did_mode", "DID design: cohort | two_by_two | status. Default: cohort."),
@@ -132,6 +137,15 @@ def encode_many(field: RunField, values: list[str]) -> str:
     return json.dumps(list(values), ensure_ascii=False)
 
 
+def _engine_choice(value: Any) -> str:
+    from .estimation_engine import EstimationEngineError, stored_choice
+
+    try:
+        return stored_choice(value)
+    except EstimationEngineError as exc:
+        raise RunRequestError(str(exc)) from exc
+
+
 def form_from_request(values: Mapping[str, Any]) -> dict[str, Any]:
     """The run service's form from submitted field values.
 
@@ -161,6 +175,7 @@ def form_from_request(values: Mapping[str, Any]) -> dict[str, Any]:
 
     by_group = get("by_group")
     survey_df = get("survey_df")
+    estimation_engine = _engine_choice(get("estimation_engine"))
     form: dict[str, Any] = {
         name: get(name)
         for name in (
@@ -183,6 +198,8 @@ def form_from_request(values: Mapping[str, Any]) -> dict[str, Any]:
         form["by_group"] = by_group
     if str(survey_df).strip():
         form["survey_df"] = survey_df
+    if estimation_engine:
+        form["estimation_engine"] = estimation_engine
     form["cs_anticipation"] = str(get("cs_anticipation"))
     form["honest_did"] = str(get("honest_did")).lower()
     form["model_options"] = model_options

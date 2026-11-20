@@ -7,7 +7,6 @@
 // into a dead graph.
 
 import { useState } from "react";
-import { useWorkspaceMode } from "../workspace/workspaceMode";
 import { WorkspaceLauncherBar } from "../workspace/WorkspaceLauncherBar";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { rootToSlug } from "../workbench/projectSlug";
@@ -21,7 +20,6 @@ export function LauncherRoute() {
   const [searchParams] = useSearchParams();
   const [modalOpen, setModalOpen] = useState(false);
   const recents = listRecents();
-  const workspaceMode = useWorkspaceMode();
 
   // v1.6.12 (V10): `/` jumps straight into the last project and `?home=1`
   // aliases the in-workbench Home view. Fresh users (no recents) still land
@@ -53,8 +51,7 @@ export function LauncherRoute() {
     />
   );
 
-  if (workspaceMode === "new") {
-    return (
+  return (
       <div className="ws-page" data-testid="workspace-launcher">
         <header className="ws-topbar" role="banner">
           <WorkspaceLauncherBar />
@@ -74,19 +71,4 @@ export function LauncherRoute() {
         {createModal}
       </div>
     );
-  }
-
-  return (
-    <section className="panel" aria-labelledby="launcher-heading">
-      <div className="panel-heading">
-        <h2 id="launcher-heading">Workbench</h2>
-        <span>Choose a project or create a new one to begin.</span>
-      </div>
-      <button type="button" onClick={() => setModalOpen(true)}>
-        New project
-      </button>
-      <RecentProjectsPanel onOpenProject={goToProject} />
-      {createModal}
-    </section>
-  );
 }

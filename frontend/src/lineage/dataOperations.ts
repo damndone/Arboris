@@ -67,6 +67,7 @@ export interface DataTransformParameters {
   values?: string;
   equals?: Record<string, unknown>;
   row_indices?: number[];
+  exclude_row_indices?: number[];
   row_index_range?: DataTransformRowIndexRange;
   [key: string]: unknown;
 }

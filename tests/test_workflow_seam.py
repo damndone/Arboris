@@ -548,15 +548,42 @@ def test_an_unreplayable_producer_upstream_of_a_sourceless_step_is_rejected(
     moment it registers a reshape without wiring it into the replay path.
     """
 
-    monkeypatch.setattr(workflow_contracts, "STEP_REPLAYABLE_BY_RECIPE", frozenset())
+    from workbench.agent.workflow_contract_parts import registry
+
+    monkeypatch.setattr(registry, "STEP_REPLAYABLE_BY_RECIPE", frozenset())
 
     downstream = _numeric_step("second", "scaled")
-    downstream["depends_on"] = ["first"]
+    downstream["depends_on"] = ["first", "other"]
 
+    # Two producers: no single reading of depends_on, so the step still has to choose.
     with pytest.raises(
         OperationValidationError,
         match=r"step second does not declare a source, so it reads the original table",
     ):
+        validate_workflow_steps([_numeric_step("first", "doubled"), _numeric_step("other", "tripled"), downstream])
+
+    # One producer named in depends_on is the source the refusal would ask for, so it is filled.
+    downstream["depends_on"] = ["first"]
+    ordered = validate_workflow_steps([_numeric_step("first", "doubled"), downstream])
+    assert ordered[1]["spec"]["source"] == {"from_step": "first", "output": "produced_dataset"}
+
+
+def test_a_replayed_producer_keeps_the_sourceless_path() -> None:
+    downstream = _numeric_step("second", "scaled")
+    downstream["depends_on"] = ["first"]
+    ordered = validate_workflow_steps([_numeric_step("first", "doubled"), downstream])
+    assert "source" not in ordered[1]["spec"]
+
+
+def test_a_source_beside_spec_is_read_from_there_and_two_different_ones_are_refused() -> None:
+    """QRData 355 and 390 (3f281a47 round) wrote source beside spec."""
+
+    downstream = _numeric_step("second", "scaled")
+    downstream["source"] = {"from_step": "first", "output": "produced_dataset"}
+    ordered = validate_workflow_steps([_numeric_step("first", "doubled"), downstream])
+    assert ordered[1]["spec"]["source"]["from_step"] == "first" and ordered[1]["depends_on"] == ["first"]
+    downstream["spec"] = {**downstream["spec"], "source": {"from_step": "other", "output": "produced_dataset"}}
+    with pytest.raises(OperationValidationError, match="one source beside spec and a different one inside it"):
         validate_workflow_steps([_numeric_step("first", "doubled"), downstream])
 
 
@@ -977,6 +1004,26 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
         ),
         _sourced(
             {
+                "step_id": "iv_models",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "iv_2sls",
+                    "iv_endog": ["size"],
+                    "iv_instruments": ["rate_a"],
+                    "branches": [{"branch_id": "iv", "outcome": "outcome", "predictors": ["rate_b"]}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "ar",
+                "operation_id": "iv.ar_confidence",
+                "depends_on": ["iv_models"],
+                "spec": {"model_ref": "step:iv_models:iv"},
+            }
+        ),
+        _sourced(
+            {
                 "step_id": "named_correlations",
                 "operation_id": "test.correlations",
                 "spec": _generic_spec({"columns": ["size", "rate_a"]}),
@@ -1273,6 +1320,7 @@ _LINEAGE_META_STEPS: dict[str, tuple[str, ...]] = {
     "model.joint_f_test": ("joint",),
     "model.white_test": ("white",),
     "model.quadratic_stationary_point": ("stationary",),
+    "iv.ar_confidence": ("ar",),
     "data.merge": ("data_merge",),
     "data.append": ("data_append",),
     "data.reshape": ("data_reshape",),
@@ -1528,6 +1576,7 @@ _LINEAGE_META_READERS = {
     "model.joint_f_test": _post_estimation_claims,
     "model.white_test": _post_estimation_claims,
     "model.quadratic_stationary_point": _post_estimation_claims,
+    "iv.ar_confidence": _post_estimation_claims,
     "data.merge": _data_management_claims,
     "data.append": _data_management_claims,
     "data.reshape": _data_management_claims,
@@ -2218,18 +2267,20 @@ def test_the_published_sets_track_the_declarations_they_are_read_from(
     the failure mode it exists to catch.
     """
 
+    from workbench.agent.workflow_contract_parts import registry
+
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "STEP_PRODUCES_DATASET",
         frozenset({*workflow_contracts.STEP_PRODUCES_DATASET, "data.future_reshape"}),
     )
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "STEP_CONSUMES_INPUT_FRAME",
         frozenset({*workflow_contracts.STEP_CONSUMES_INPUT_FRAME, "data.future_reshape"}),
     )
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "SUPPORTED_STEP_OUTPUTS",
         frozenset({*workflow_contracts.SUPPORTED_STEP_OUTPUTS, "produced_summary"}),
     )
@@ -2275,22 +2326,6 @@ def test_the_agent_protocol_text_carries_the_source_field() -> None:
     assert "from_step" in rendered
     for operation_id in workflow_contracts.STEP_PRODUCES_DATASET:
         assert operation_id in rendered
-
-
-def test_a_source_beside_depends_on_is_told_where_it_belongs() -> None:
-    """The likeliest mistake gets the least useful message unless we help.
-
-    The vocabulary says `source` lives inside `spec`, but it sits alongside
-    `depends_on` conceptually, so an author placing it beside `depends_on` is
-    one move from a correct plan. A bare "unknown field" reads as "this seam
-    does not exist" and sends them to look for another way to express it.
-    """
-
-    misplaced = _numeric_step("second", "scaled")
-    misplaced["source"] = {"from_step": "first", "output": "produced_dataset"}
-
-    with pytest.raises(OperationValidationError, match=r"inside `spec`"):
-        validate_workflow_steps([_numeric_step("first", "doubled"), misplaced])
 
 
 @pytest.mark.parametrize("model_ref,error", [

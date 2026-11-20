@@ -18,6 +18,7 @@ from typing import Any
 from ..artifacts import read_json
 from ..lineage.family import scan_family
 from ..repository.run_repository import _resolve_run_root
+from ..jsonl_store import jsonl_lines
 
 
 class RunDeletionConfirmationError(ValueError):
@@ -374,7 +375,7 @@ class RunDeletionService:
     @staticmethod
     def _read_json_lines(path: Path) -> list[dict[str, Any]]:
         try:
-            rows = path.read_text(encoding="utf-8").splitlines()
+            rows = jsonl_lines(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError):
             return []
         values: list[dict[str, Any]] = []
@@ -390,7 +391,7 @@ class RunDeletionService:
     @staticmethod
     def _read_json_lines_strict(path: Path) -> list[dict[str, Any]] | None:
         try:
-            rows = path.read_text(encoding="utf-8").splitlines()
+            rows = jsonl_lines(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError):
             return None
         values: list[dict[str, Any]] = []

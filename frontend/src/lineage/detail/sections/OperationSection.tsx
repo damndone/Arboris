@@ -26,8 +26,10 @@ import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
 import {
   buildManualRerunPatch,
   buildManualRerunPatchId,
+  normalizeForCompare,
   type ManualRerunPatch,
 } from "./manualRerunPatch";
+import "./operationForms.css";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
   const schema = node.editableSchema;
@@ -72,21 +74,17 @@ function EditableOperation({
   }, [schema]);
 
   const [values, setValues] = useState<Record<string, unknown>>(initial);
-  const [status, setStatus] = useState<"idle" | "submitting" | "done" | "error">(
+  const [status, setStatus] = useState<"idle" | "submitting" | "submitted" | "error">(
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
   const [previewPatch, setPreviewPatch] = useState<ManualRerunPatch | null>(null);
+  const receipt = rerun.receipt?.contextFingerprint === context.context_fingerprint ? rerun.receipt : null;
+  const observing = Boolean(rerun.receipt && ["submitted", "running", "queued", "cancelling", "indexing"].includes(rerun.receipt.status));
+  const unsuccessful = receipt && ["failed", "blocked", "cancelled", "interrupted", "partial", "unconfirmed"].includes(receipt.status);
 
-  const overrides = useMemo(() => {
-    const diff: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(values)) {
-      if (value !== initial[key]) diff[key] = value;
-    }
-    return diff;
-  }, [values, initial]);
-
-  const dirty = Object.keys(overrides).length > 0;
+  const dirty = Object.entries(values).some(([key, value]) => value !== initial[key] &&
+    normalizeForCompare(value) !== normalizeForCompare(initial[key]));
   const validationErrors = schema.flatMap(control => controlErrors({...control, value: values[control.key]}));
 
   const onChange = (key: string, value: unknown) => {
@@ -119,112 +117,98 @@ function EditableOperation({
     setStatus("submitting");
     setError(null);
     try {
-      const response = await rerun.submitRerun({
+      await rerun.submitRerun({
         context,
         opOverrides: {},
         manualPatch: previewPatch,
       });
-      setStatus("done");
+      setStatus("submitted");
       setPreviewPatch(null);
-      if (response?.focus === null) {
-        setError("Rerun completed, but focus target could not be resolved automatically.");
-      }
     } catch (e) {
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
+  const row = (control: EditableControl) => (
+    <div
+      key={control.key}
+      className={control.key === "iv_endog" ? "op-field op-field--iv-endog" : "op-field"}
+      data-testid={`operation-control-${control.key}`}
+      title={control.key === "x" ? "Uncheck a regressor to drop it. To add a column, go back to the analysis setup." : undefined}
+    >
+      <span className="op-field__label">{control.label}</span>
+      {renderControl({ ...control, value: values[control.key] }, onChange)}
+    </div>
+  );
+  const labelOf = (fieldId: string) => schema.find((control) => control.key === fieldId)?.label ?? fieldId;
+
   return (
-    <section aria-label="Operation" data-testid="operation-section" style={{ marginTop: 18 }}>
-      <div className="ln-section-label" style={{ marginBottom: 6 }}>
-        Operation
-      </div>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          padding: 10,
-          background: "var(--bg-card-2)",
-          borderRadius: 8,
-          fontSize: 12,
-        }}
-      >
-        <div
-          data-testid="operation-rerun-label"
-          style={{ color: "var(--label-secondary)", fontWeight: 600 }}
+    <section aria-label="Operation" data-testid="operation-section" className="op-panel">
+      <div className="op-fields">{schema.filter((control) => !isAdvanced(control)).map(row)}</div>
+      {schema.some(isAdvanced) && (
+        <details className="op-advanced" open={schema.some(advancedInUse) || undefined}>
+          <summary>Weights, survey design and other options</summary>
+          <div className="op-fields">{schema.filter(isAdvanced).map(row)}</div>
+        </details>
+      )}
+      {validationErrors.map(message => <p className="op-error" role="alert" key={message}>{message}</p>)}
+      {previewPatch && (
+        <ul className="op-preview" data-testid="manual-patch-preview">
+          {previewPatch.changes.map((change) => (
+            <li key={change.field_id}>
+              <strong>{labelOf(change.field_id)}</strong> {changedValue(change.old_value)} → {changedValue(change.new_value)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="op-actions">
+        <button
+          type="button"
+          className="op-primary"
+          data-testid="operation-rerun-submit"
+          title="The current run stays as it is; this creates a new run beside it."
+          disabled={!dirty || validationErrors.length > 0 || status === "submitting" || observing || rerun.busy}
+          onClick={onSubmit}
         >
-          Rerun source with changes
-        </div>
-        {schema.some((control) => control.key === "x") && (
-          <div
-            data-testid="operation-x-hint"
-            style={{ color: "var(--label-secondary)", fontSize: 11 }}
-          >
-            Uncheck a regressor to remove it from the next rerun. To add a new
-            column, return to the analysis setup or draft.
-          </div>
+          {status === "submitting"
+            ? "Rerunning..."
+            : previewPatch
+              ? "Run with these changes"
+              : "Preview changes"}
+        </button>
+        {status === "submitted" && !receipt && (
+          <span data-testid="operation-rerun-submitted" role="status">Rerun submitted. Completion is not confirmed.</span>
         )}
-        <div
-          data-testid="operation-rerun-explanation"
-          style={{ color: "var(--label-tertiary)", fontSize: 11 }}
-        >
-          The current run stays unchanged. Confirming creates a new child run.
-        </div>
-        {schema.map((control) => (
-          <div
-            key={control.key}
-            data-testid={`operation-control-${control.key}`}
-            style={{ display: "flex", gap: 8, alignItems: "center" }}
-          >
-            <span style={{ minWidth: 120, color: "var(--label-tertiary)", fontSize: 11 }}>
-              {control.label}
-            </span>
-            {renderControl({ ...control, value: values[control.key] }, onChange)}
-          </div>
-        ))}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
-          <button
-            type="button"
-            data-testid="operation-rerun-submit"
-            disabled={!dirty || validationErrors.length > 0 || status === "submitting"}
-            onClick={onSubmit}
-          >
-            {status === "submitting"
-              ? "Rerunning..."
-              : previewPatch
-                ? "Confirm rerun source with changes"
-                : "Preview source changes"}
-          </button>
-          {status === "done" && (
-            <span data-testid="operation-rerun-done" style={{ color: "var(--status-holds-fg)" }}>
-              {error ?? "Branch created"}
-            </span>
-          )}
-          {status === "error" && (
-            <span data-testid="operation-rerun-error" style={{ color: "var(--status-fails-fg)" }}>
-              {error}
-            </span>
-          )}
-        </div>
-        {validationErrors.map(message => <p role="alert" key={message}>{message}</p>)}
-        {previewPatch && (
-          <div
-            data-testid="manual-patch-preview"
-            style={{ display: "flex", flexDirection: "column", gap: 4 }}
-          >
-            {previewPatch.changes.map((change) => (
-              <div key={change.field_id}>
-                <strong>{change.field_id}</strong>: {JSON.stringify(change.old_value)} -&gt;{" "}
-                {JSON.stringify(change.new_value)}
-              </div>
-            ))}
-          </div>
+        {status === "error" && (
+          <span data-testid="operation-rerun-error" className="op-error op-rerun-feedback">{error}</span>
         )}
       </div>
+      {receipt && <div data-testid="operation-rerun-receipt" role={unsuccessful ? "alert" : "status"} className={unsuccessful ? "op-rerun-feedback op-error" : "op-rerun-feedback"}>
+        <p data-testid={receipt.status === "completed" ? "operation-rerun-done" : undefined}>Rerun {receipt.status}: {receipt.runId}</p>
+        {receipt.issue && <p>{receipt.issue}</p>}
+        <a href={receipt.href} target="_blank" rel="noreferrer">Open child run</a>
+      </div>}
     </section>
   );
+}
+
+/** Survey design, weights and free-form settings: most reruns never touch them. */
+function isAdvanced(control: EditableControl): boolean {
+  return control.kind === "object" || control.kind === "json" || /weight|^survey_/.test(control.key);
+}
+
+/** A weight or design column already in use is part of this model: it must not sit folded away. */
+function advancedInUse(control: EditableControl): boolean {
+  const value = control.value;
+  return isAdvanced(control) && !control.options && control.kind !== "object" && control.kind !== "json"
+    && value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0);
+}
+
+function changedValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "none";
+  if (Array.isArray(value)) return value.join(", ") || "none";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
 function ReadOnlyOperation({

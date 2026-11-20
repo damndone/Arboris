@@ -218,6 +218,15 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
         if artifact["artifact_id"] == "ols_1"
     )
     assert ols_record["inputs"] == ["imputed_dataset"]
+    from workbench.lineage.card_preview import build_card_previews
+    model_key = "model:ols_1"
+    cards = build_card_previews(
+        run_root, read_json(run_root / "graph.json"), read_json(run_root / "run_manifest.json"),
+        {}, ["stage:cleaned", model_key],
+    )
+    assert "Imputation before fitting: MICE (1 completed dataset)" in cards[model_key]["detail"]
+    assert "Imputed columns: y, x" in cards[model_key]["detail"]
+    assert "MICE" not in cards["stage:cleaned"]["detail"]
     diagnostics_record = next(
         artifact
         for artifact in artifact_index["artifacts"]

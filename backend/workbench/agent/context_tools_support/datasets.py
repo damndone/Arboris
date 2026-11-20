@@ -4,7 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
-from ...artifacts import read_json, sha256_file
+from ...artifacts import sha256_file
+from ..context_compiler import (
+    CONTEXT_DATA_PROFILE_REF,
+    read_context_artifact_index,
+    read_context_data_profile,
+)
 from ...graph_store import GraphStore
 from ...data_operations import _read_frame
 from ...graph_model import NodeKind
@@ -34,7 +39,8 @@ class DatasetsMixin:
     ) -> dict[str, Any]:
         """Return real materialized dataset identities from graph and index evidence."""
 
-        detail_keys = {(item["run_id"], item["node_id"]) for item in request.detail_for}
+        detail_keys = {(item["run_id"], self._tool_node_id({"owner_run_id": item["run_id"], "op_node_id": item["node_id"]}))
+                       for item in request.detail_for}
         runs_root = self.project_root / "runs"
         datasets: list[dict[str, Any]] = []
         unavailable: list[dict[str, str]] = []
@@ -65,7 +71,7 @@ class DatasetsMixin:
             if not dataset_nodes:
                 continue
             try:
-                index_payload = read_json(run_root / "artifacts_index.json")
+                index_payload = read_context_artifact_index(run_root)
             except (OSError, ValueError) as exc:
                 for node in sorted(dataset_nodes, key=lambda item: item.id):
                     unavailable.append(
@@ -228,7 +234,7 @@ class DatasetsMixin:
 
         run_root = self._project_run_root(request.run_id)
         try:
-            profile = read_json(run_root / "staged" / "data_profile.json")
+            profile = read_context_data_profile(run_root)
         except (FileNotFoundError, OSError, ValueError) as exc:
             raise ToolVisibleError(
                 "PROJECT_DATASET_SCHEMA_UNAVAILABLE: no persisted dataset schema is "
@@ -279,7 +285,7 @@ class DatasetsMixin:
             "columns_omitted": max(len(columns) - len(public_columns), 0),
             "evidence_ref": {
                 "run_id": request.run_id,
-                "profile_ref": "staged/data_profile.json",
+                "profile_ref": CONTEXT_DATA_PROFILE_REF,
             },
             "omitted_sections": [
                 "raw_rows",
@@ -302,7 +308,7 @@ class DatasetsMixin:
 
         run_root = self._project_run_root(request.run_id)
         try:
-            profile = read_json(run_root / "staged" / "data_profile.json")
+            profile = read_context_data_profile(run_root)
         except (FileNotFoundError, OSError, ValueError) as exc:
             raise ToolVisibleError(
                 "PROJECT_NUMERIC_SUMMARY_UNAVAILABLE: no persisted numeric summary is "
@@ -335,7 +341,7 @@ class DatasetsMixin:
             "unavailable_columns": unavailable_columns,
             "evidence_ref": {
                 "run_id": request.run_id,
-                "profile_ref": "staged/data_profile.json",
+                "profile_ref": CONTEXT_DATA_PROFILE_REF,
             },
             "omitted_sections": ["raw_rows", "correlations"],
         }
@@ -364,11 +370,12 @@ class DatasetsMixin:
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
+        dataset_node_id = _dataset_feeding(self.project_root, request.owner_run_id, request.op_node_id)
         try:
             context = resolve_data_column_cast_context(
                 self.project_root,
                 source_run_id=request.owner_run_id,
-                source_node_id=request.op_node_id,
+                source_node_id=dataset_node_id,
             )
         except DataColumnCastValidationError as exc:
             return {
@@ -381,6 +388,7 @@ class DatasetsMixin:
             "node": _bounded_node(node),
             "data_schema": {
                 "available": True,
+                **({"dataset_node_id": dataset_node_id} if dataset_node_id != request.op_node_id else {}),
                 "row_count": context["row_count"],
                 "columns": context["columns"],
                 "downstream_invalidation": context["downstream_invalidation"],
@@ -398,3 +406,21 @@ class DatasetsMixin:
             "omitted_sections": ["source_artifact_id", "raw_rows"],
         }
 
+
+
+def _dataset_feeding(project_root: Path, run_id: str, node_id: str) -> str:
+    """A model or other derived node reads its schema from the one dataset stage that feeds it.
+
+    The Agent asked the imported model node for its schema and was refused, then read
+    income_k's unit off its name (binary_logit retest, 2026-11-07).
+    """
+    try:
+        graph = GraphStore(Path(project_root) / "runs").read(run_id)
+    except (OSError, ValueError, KeyError):
+        return node_id
+    node = graph.nodes.get(node_id)
+    if node is None or node.kind == NodeKind.DATASET_STAGE:
+        return node_id
+    feeding = {edge.source_id for edge in graph.edges.values() if edge.target_id == node_id
+               and getattr(graph.nodes.get(edge.source_id), "kind", None) == NodeKind.DATASET_STAGE}
+    return feeding.pop() if len(feeding) == 1 else node_id

@@ -12,7 +12,7 @@ import math
 import numpy as np
 from scipy import optimize, stats
 
-from .context import CheckContext, public_column
+from .context import UNSERVED_OUTCOME, CheckContext, families_serving, public_column, served_outcome_types
 from .contracts import CheckOutcome, CheckSpec, Threshold
 
 _SEPARATION_TOLERANCE = 1e-7
@@ -217,6 +217,29 @@ def overdispersion(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
     return CheckOutcome("holds", f"No evidence of overdispersion (Cameron-Trivedi p = {p_value:.3g}).", evidence)
 
 
+def outcome_type_served(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
+    """The run detected an outcome type the fitted family is not declared for."""
+    from ..engine.registry import DEFAULT_BY_Y_TYPE
+
+    outcome_type = str(context.facts["outcome_type"])
+    served = served_outcome_types(context.model_type, context.model_id) or ()
+    alternatives = families_serving(outcome_type)
+    evidence: dict[str, Any] = {"outcome_type": outcome_type, "family": context.model_type, "family_serves": list(served),
+                                "families_serving_outcome_type": list(alternatives),
+                                "default_family_for_outcome_type": DEFAULT_BY_Y_TYPE.get(outcome_type)}
+    summary = (f"The outcome is {outcome_type}, and {context.model_type} is declared for "
+               f"{', '.join(served)} outcomes. Families declared for {outcome_type} outcomes: {', '.join(alternatives)}.")
+    fitted_values = getattr(context.fitted, "fittedvalues", None)
+    if outcome_type == "binary" and fitted_values is not None:
+        values = np.asarray(fitted_values, dtype=float)
+        outside = int(np.sum((values < 0) | (values > 1)))
+        evidence |= {"fitted_values": int(values.size), "fitted_outside_unit_interval": outside}
+        summary += (f" Fitted as a linear probability model: its coefficients are changes in probability, and "
+                    f"{outside} of {values.size} fitted values fall outside [0, 1].")
+    return CheckOutcome("caution", summary, evidence,
+                        f"Fit a family declared for {outcome_type} outcomes, or state why this one answers the question.")
+
+
 def design_size(context: CheckContext) -> int:
     return context.design.matrix.shape[1] if context.design is not None else 0
 
@@ -283,6 +306,19 @@ HETEROSKEDASTICITY = CheckSpec(
     blinding="post_fit",
     thresholds=(Threshold("alpha", 0.05, "Breusch-Pagan p below 0.05", "Breusch & Pagan (1979), Econometrica 47(5)"),),
     run=heteroskedasticity,
+)
+
+OUTCOME_TYPE_SERVED = CheckSpec(
+    check_id="outcome.type_served",
+    title="Outcome type and model family",
+    requires=frozenset({UNSERVED_OUTCOME}),
+    blinding="outcome_distribution",
+    thresholds=(
+        Threshold("fitted_outside_unit_interval", 0.0,
+                  "for a binary outcome, the number of fitted probabilities outside [0, 1] (reported, not a cutoff)",
+                  "Horrace & Oaxaca (2006), Economics Letters 90(3), on linear probability model bias"),
+    ),
+    run=outcome_type_served,
 )
 
 OVERDISPERSION = CheckSpec(

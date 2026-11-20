@@ -111,15 +111,16 @@ def _display(value: Any) -> str:
     return str(value)
 
 
-def plan_groups(frame: pd.DataFrame, column: str, *, max_groups: int = MAX_GROUPS) -> list[Group]:
-    """The groups of ``column``, sorted by value, the missing group last."""
+def _validated_group_values(frame: pd.DataFrame, column: str, max_groups: int):
+    import pandas as pd
+
     if column not in frame.columns:
         raise ByGroupRefusal("COLUMN_MISSING", f"the grouping column {column!r} is not in the data")
     values = frame[column]
-    present = values.dropna()
-    distinct = sorted(present.unique().tolist(), key=lambda item: (str(type(item)), item))
-    has_missing = bool(values.isna().any())
-    count = len(distinct) + int(has_missing)
+    unique = values.unique()
+    missing = pd.isna(unique)
+    has_missing = bool(missing.any())
+    count = len(unique) - int(missing.sum()) + int(has_missing)
     if count > max_groups:
         raise ByGroupRefusal(
             "TOO_MANY_GROUPS",
@@ -129,6 +130,18 @@ def plan_groups(frame: pd.DataFrame, column: str, *, max_groups: int = MAX_GROUP
         )
     if count < 2:
         raise ByGroupRefusal("ONE_GROUP", f"{column} has only {count} group; there is nothing to split.")
+    return values, unique[~missing], has_missing
+
+
+def check_group_cardinality(frame: pd.DataFrame, column: str, *, max_groups: int = MAX_GROUPS) -> None:
+    """Use the execution limit and missing-group semantics without building group masks."""
+    _validated_group_values(frame, column, max_groups)
+
+
+def plan_groups(frame: pd.DataFrame, column: str, *, max_groups: int = MAX_GROUPS) -> list[Group]:
+    """The groups of ``column``, sorted by value, the missing group last."""
+    values, present, has_missing = _validated_group_values(frame, column, max_groups)
+    distinct = sorted(present.tolist(), key=lambda item: (str(type(item)), item))
     groups = [
         Group(index=index, key=_display(value), value=value, mask=(values == value).to_numpy())
         for index, value in enumerate(distinct, start=1)

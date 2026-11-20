@@ -1,8 +1,8 @@
+import { ReportReviewPanel } from "./ReportReviewPanel";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
 import { loadAiActivity } from "../aiActivity/aiActivityLog";
-import { ReportReviewPanel } from "./ReportReviewPanel";
 import { ReportViewContent } from "./ReportView";
 import { ReportWorkspaceProvider } from "./ReportWorkspaceContext";
 
@@ -262,7 +262,7 @@ describe("ReportView", () => {
   it("the default workspace owns exactly one report document and collapsed sources", async () => {
     localStorage.removeItem("workbench:workspace");
     mockGenerate.current = vi.fn().mockResolvedValue({text: "Result [[c:c1]]", model: "test-model"});
-    render(<ReportWorkspaceProvider><ReportViewContent /></ReportWorkspaceProvider>);
+    render(<ReportView />);
     fireEvent.click(await screen.findByRole("button", {name: /generate report/i}));
     expect(await screen.findByTestId("report-body")).toHaveTextContent("Result");
     expect(screen.getAllByTestId("report-body")).toHaveLength(1);
@@ -496,6 +496,7 @@ describe("ReportView", () => {
       model: "m",
     });
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
 
     await waitFor(() => expect(mockFigureContext).toHaveBeenCalledWith("/tmp/projA", "run_c", "coef_plot"));
     fireEvent.click(screen.getByRole("button", { name: "Choose figures" }));
@@ -534,6 +535,7 @@ describe("ReportView", () => {
       new Error("LLM_RESPONSE_CONTRACT_INVALID"),
     );
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
@@ -650,6 +652,7 @@ describe("ReportView", () => {
   it("does not generate a report when the run figure inventory cannot load", async () => {
     mockFigureArtifactsError.current = new Error("artifact inventory unavailable");
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.getByRole("alert").textContent).toContain("figure inventory");
@@ -701,6 +704,7 @@ describe("ReportView", () => {
       .mockResolvedValueOnce({ text: "# Original\n\nResult [[c:c1]]", model: "m" })
       .mockResolvedValueOnce({ text: "# Revised\n\nResult [[c:c1]]", model: "m" });
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
@@ -755,6 +759,7 @@ describe("ReportView", () => {
       .mockResolvedValueOnce({ text: "# Original\n\nResult [[c:c1]]", model: "m" })
       .mockRejectedValueOnce(new Error("temporary writer failure"));
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
@@ -809,6 +814,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("unticking a fact excludes it from generation and discloses the exclusion", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Include fact c1" }));
 
     expect(screen.getByTestId("report-provenance").textContent).toContain(
@@ -846,6 +852,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("generated reports persist to history and reopen from it", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -881,6 +888,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("starts a new report with all facts included", async () => {
     render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Include fact c1" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
@@ -894,6 +902,7 @@ describe("ReportView curation & history (C-3)", () => {
 
   it("deleting a history record removes it", async () => {
     render(<ReportView projectRoot="/tmp/projB" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /generate report/i })).toBeEnabled(),
     );

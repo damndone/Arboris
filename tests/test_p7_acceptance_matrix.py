@@ -30,7 +30,7 @@ def test_current_p7_acceptance_denominator_is_deliberately_pinned() -> None:
         p7_pack_registry.get(operation_id).pack_family
         for operation_id in operation_ids
     }
-    assert (len(operation_ids), len(pack_families)) == (64, 18)
+    assert (len(operation_ids), len(pack_families)) == (65, 19)
 
 
 class _InjectedRegistry:
@@ -3329,9 +3329,9 @@ def test_cli_executes_every_live_p7_operation_through_generic_workflow(tmp_path)
     )
 
     operation_ids = set(p7_pack_registry.operation_ids())
-    assert payload["total_rows"] == len(operation_ids) == 64
-    assert payload["terminal_outcomes"] == 64
-    assert payload["counts"] == {"completed": 63, "expected_failure": 1}
+    assert payload["total_rows"] == len(operation_ids) == 65
+    assert payload["terminal_outcomes"] == 65
+    assert payload["counts"] == {"completed": 64, "expected_failure": 1}
     assert payload["browser_confirmation_performed"] is False
     assert payload["verification_status"] == "NOT VERIFIED"
     persisted = json.loads(results.read_text(encoding="utf-8"))

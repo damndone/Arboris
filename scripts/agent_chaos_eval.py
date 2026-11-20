@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import agent_live_eval as live  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from workbench.jsonl_store import jsonl_lines
 from workbench.app import app  # noqa: E402
 from workbench.llm import client as llm_client  # noqa: E402
 from workbench.llm.config import load_llm_config  # noqa: E402
@@ -190,7 +191,7 @@ def _session_events(root: Path, session_id: str) -> list[dict]:
     path = root / "workbench" / "agent-events" / f"{session_id}.jsonl"
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in jsonl_lines(path.read_text(encoding="utf-8")) if line.strip()]
 
 
 def _turn(client, root: Path, session_id: str, text: str) -> dict:

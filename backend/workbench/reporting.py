@@ -5,6 +5,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
+from . import native_io
 from .artifacts import register_artifact, write_text_durable
 
 
@@ -37,6 +38,10 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
         "causal_caution": "",
         "descriptive_stats": data.get("descriptive_stats"),
         "exploration": data.get("exploration"),
+        "specification_curve": data.get("specification_curve"),
+        "research_review": data.get("research_review"),
+        "research_specifications": data.get("research_specifications"),
+        "research_review_rows": data.get("research_review_rows"),
         "statistical_tests": data.get("statistical_tests"),
         "statistical_evidence": data.get("statistical_evidence"),
         "regression_table": data.get("regression_table"),
@@ -62,6 +67,8 @@ def render_html_report(
         loader=FileSystemLoader(Path(__file__).parent / "templates"),
         autoescape=True,
     )
+    # tojson embeds the whole model-family evidence: 40 MB for a 200,000-row Cox model.
+    environment.policies["json.dumps_function"] = native_io.dumps
     if view_model.get("report_kind") == "arma_garch":
         template = environment.get_template("arma_garch_report.html.j2")
         rendered_view_model = view_model

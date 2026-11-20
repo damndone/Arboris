@@ -1,0 +1,89 @@
+import "@testing-library/jest-dom/vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { PlanComparisonWorkspace } from "./PlanComparisonWorkspace";
+import type { NotebookReadyView } from "./contracts";
+import { canonicalOptionRevision } from "./fixtures/canonicalMocks";
+import { provisionalContextSlice } from "./fixtures/provisionalContextSlice";
+
+function ready(): NotebookReadyView {
+  return {
+    status: "ready",
+    notebook: {
+      notebook_id: "nb-memory",
+      run_family_id: "family-memory",
+      narrative: [],
+      options: [canonicalOptionRevision()],
+      contextSlice: provisionalContextSlice(),
+      confirmation: null,
+      execution: null,
+      result: null,
+      selection: null,
+    },
+  };
+}
+
+describe("PlanComparisonWorkspace domain memory integration", () => {
+  it("shows bounded hints and keeps both controls explicit", () => {
+    const onChange = vi.fn();
+    const view = ready();
+    view.notebook.contextSlice = {
+      ...view.notebook.contextSlice!,
+      domain_memory_projection: {
+        contract_version: "domain-memory-context-input/v1",
+        retrieval_ref: "retrieval-1",
+        scope_ref: "scope-1",
+        outcome: "used",
+        reason: "approved hint",
+        entries: [{
+          memory_id: "memory-1",
+          revision: 1,
+          content_hash: "sha256:memory",
+          memory_kind: "workflow_lesson",
+          domain_tags: ["econometrics"],
+          compact_lesson: "Check clustered dependence.",
+          recommended_effect_kind: "assumption_check_hint",
+          recommended_target_refs: ["model"],
+          source_summary_refs: ["summary-1"],
+          match_reason: ["analysis_family=ols"],
+        }],
+        omissions: [],
+        bounded: true,
+        preference_ref: "preference-1",
+      },
+    };
+
+    render(
+      <PlanComparisonWorkspace
+        view={view}
+        domainMemoryPreferences={{
+          cross_project_domain_memory_use: false,
+          cross_project_domain_memory_iteration: false,
+        }}
+        onDomainMemoryPreferencesChange={onChange}
+      />,
+    );
+
+    const controls = screen.getByTestId("domain-memory-controls");
+    const options = screen.getByTestId("notebook-option-list");
+    const useMemory = screen.getByTestId("domain-memory-use");
+    const suggestMemory = screen.getByTestId("domain-memory-iteration");
+    expect(controls).toHaveTextContent("Memory off");
+    expect(useMemory).toHaveAttribute("role", "switch");
+    expect(useMemory).toHaveClass("nb-memory-switch");
+    expect(suggestMemory).toHaveAttribute("role", "switch");
+    expect(suggestMemory).toHaveClass("nb-memory-switch");
+    expect(
+      Boolean(
+        controls.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(screen.getByTestId("domain-memory-entry-list")).toHaveTextContent("Check clustered dependence.");
+    fireEvent.click(useMemory);
+    expect(onChange).toHaveBeenCalledWith({
+      cross_project_domain_memory_use: true,
+      cross_project_domain_memory_iteration: false,
+    });
+  });
+});

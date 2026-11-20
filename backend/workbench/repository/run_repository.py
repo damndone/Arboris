@@ -98,7 +98,7 @@ def _summarize_manifest(manifest: dict, *, run_id: str | None = None) -> dict:
 
 
 def _artifact_counts(run_root: Path) -> dict[str, int]:
-    index = _read_artifacts_index(run_root)
+    index = read_artifacts_index(run_root)
     counts: dict[str, int] = {}
     for record in index.get("artifacts", []):
         artifact_type = record.get("artifact_type", "unknown")
@@ -106,7 +106,8 @@ def _artifact_counts(run_root: Path) -> dict[str, int]:
     return counts
 
 
-def _read_artifacts_index(run_root: Path) -> dict:
+def read_artifacts_index(run_root: Path) -> dict:
+    """Read a run's artifact index and enforce the supported registry version."""
     index_path = run_root / "artifacts_index.json"
     if not index_path.is_file():
         return {"artifacts": []}
@@ -136,8 +137,12 @@ def _read_artifacts_index(run_root: Path) -> dict:
     return data
 
 
+# Imported by the legacy workbench.api entry point and existing services.
+_read_artifacts_index = read_artifacts_index
+
+
 def _read_artifact_records(run_root: Path) -> list[dict]:
-    return list(_read_artifacts_index(run_root).get("artifacts", []))
+    return list(read_artifacts_index(run_root).get("artifacts", []))
 
 
 def _group_artifacts(records: list[dict]) -> list[dict]:

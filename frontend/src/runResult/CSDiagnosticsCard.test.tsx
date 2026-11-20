@@ -90,7 +90,6 @@ describe("CSDiagnosticsCard", () => {
     const partial = {
       ...diag,
       aggregations: { simple: diag.aggregations.simple },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any as CSDiagnostics;
     expect(() =>
       render(<CSDiagnosticsCard diagnostics={partial} />),

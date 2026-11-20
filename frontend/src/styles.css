@@ -137,27 +137,6 @@ button:disabled {
   outline-offset: 2px;
 }
 
-.bottom-panel {
-  background: var(--bg-canvas);
-}
-
-.bottom-panel__tabs {
-  border-bottom: 1px solid var(--separator);
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.bottom-panel__tab {
-  align-self: stretch;
-  height: 31px;
-  min-height: 0;
-}
-
-.bottom-panel__collapse {
-  height: 31px;
-  min-height: 0;
-}
-
 /* V1.5.1 T6 — segmented theme toggle. Token-only colours so it adapts
  * automatically when the user flips between dark and light. */
 .theme-toggle {
@@ -1189,6 +1168,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 13px; color: var(--status-caution-fg); background: var(--status-caution-bg);
   border-radius: 10px; padding: 8px 10px; margin-top: 8px;
 }
+
+.engine-provenance-notice__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+}
+
+.engine-provenance-notice__row > p { margin: 0; }
+.engine-provenance-notice__row > details { min-width: 0; max-width: 100%; }
 
 .run-result-tabs {
   display: flex;

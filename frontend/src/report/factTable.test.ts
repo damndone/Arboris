@@ -248,6 +248,21 @@ describe("buildPostEstimationFacts", () => {
     },
   };
 
+  function nativeResult(operationId: string, stepId: string, payload: Record<string, unknown>) {
+    return {
+      ...result,
+      artifact_id: `workflow_capability_${operationId.replace(/\./g, "_")}_${stepId}`,
+      artifact_type: "workflow_capability_result",
+      operation_id: operationId,
+      model_run_id: "",
+      workflow_id: "native-demo",
+      workflow_step_id: stepId,
+      source_sha256: "demo-source-sha256",
+      result_sha256: `demo-result-${stepId}`,
+      result: { operation_id: operationId, ...payload },
+    };
+  }
+
   it("makes a declared post-estimation result citable", () => {
     const facts = buildPostEstimationFacts([result]);
 
@@ -374,6 +389,204 @@ describe("buildPostEstimationFacts", () => {
     expect(fact?.artifact_ids).toEqual(["workflow_capability_test_correlations_abc"]);
   });
 
+  it("binds distinct native findings to their original results and interpretation limits", () => {
+    const acf = nativeResult("time_series.correlogram", "acf", {
+      metrics: { lag_one_acf: 0.31, lag_one_pacf: 0.31 },
+      policy: { max_lag: 8 },
+      n_observations: 100,
+    });
+    const arima = nativeResult("time_series.native_arima", "arima", {
+      fit: { aic: 47.1 },
+      forecast: { steps: 5, last: { mean: 1.2, lower: -3, upper: 5.4 } },
+      policy: { confidence_level: 0.95 },
+    });
+    const logistic = nativeResult("prediction.native_logistic", "binary", {
+      metrics: { log_loss: 0.36, brier_score: 0.12, roc_auc: 0.71 },
+      prevalence_baseline: { log_loss: 0.68 },
+      split: { test_rows: 25 },
+    });
+    const facts = buildPostEstimationFacts([acf, arima, logistic]);
+    expect(facts.find((fact) => fact.field.endsWith("metrics:lag_one_acf"))).toMatchObject({
+      value: 0.31, artifact_ids: [acf.artifact_id], qualifiers: { scope: "descriptive" },
+    });
+    expect(facts.find((fact) => fact.field.endsWith("forecast:last:lower"))).toMatchObject({
+      value: -3, artifact_ids: [arima.artifact_id], qualifiers: { interval: "conditional_prediction" },
+    });
+    expect(facts.find((fact) => fact.field.endsWith("metrics:roc_auc"))).toMatchObject({
+      value: 0.71, artifact_ids: [logistic.artifact_id], qualifiers: { evaluation: "held_out" },
+    });
+  });
+
+  it("cites held-out regression tree errors and structure without expanding the node table", () => {
+    const tree = nativeResult("prediction.native_cart_regression", "regression-tree", {
+      metrics: { mse: 2.5, rmse: 1.581, mae: 1.5 },
+      mean_baseline: { prediction: 2, mse: 4.5, rmse: 2.121 },
+      model_structure: { node_count: 3, root_predictor: "income" },
+      split: { test_rows: 2 },
+      prediction_basis: { nodes: [{ training_mean: 2 }] },
+    });
+    const facts = buildPostEstimationFacts([tree]);
+    expect(facts.find(fact => fact.field.endsWith("metrics:mse"))).toMatchObject({
+      value: 2.5, artifact_ids: [tree.artifact_id], qualifiers: { evaluation: "held_out" },
+    });
+    expect(facts.find(fact => fact.field.endsWith("mean_baseline:mse"))?.value).toBe(4.5);
+    expect(facts.find(fact => fact.field.endsWith("model_structure:root_predictor"))?.value).toBe("income");
+    expect(facts.some(fact => fact.field.includes("prediction_basis"))).toBe(false);
+  });
+
+  it("cites each computed Johansen hypothesis and keeps the rank criterion uncalibrated", () => {
+    const johansen = nativeResult("time_series.johansen_rank", "rank-diagnostic", {
+      n_effective: 78, policy: { difference_lags: 1 }, trace_statistics: [45.4, 16.9, 5.9],
+      max_eigenvalue_statistics: [28.5, 11, 5.9],
+    });
+    const facts = buildPostEstimationFacts([johansen]);
+    expect(facts.find(fact => fact.field.endsWith("trace_statistics:2"))).toMatchObject({
+      value: 5.9, artifact_ids: [johansen.artifact_id],
+      qualifiers: { evidence_scope: "statistics_only", rank_criterion: "uncalibrated" },
+    });
+    expect(facts.some(fact => fact.field.endsWith("trace_statistics:3"))).toBe(false);
+  });
+
+  it.each(["time_series.native_sarima", "time_series.native_sarimax"])("cites the saved season length for %s", operation => {
+    const model = nativeResult(operation, "hourly", { policy: { seasonal_order: [0, 1, 0, 24] } });
+    const facts = buildPostEstimationFacts([model]);
+    expect(facts.find(fact => fact.field.endsWith("policy:seasonal_order:3"))).toMatchObject({
+      value: 24, artifact_ids: [model.artifact_id],
+    });
+  });
+
+  it("cites each forecast series and an asset name containing a separator without changing its lookup", () => {
+    const varResult = nativeResult("time_series.native_var", "var", {
+      fit: { n_effective: 100 }, forecast: { steps: 4, last_by_series: {
+        "0": { series: "price", mean: 5, lower: 1, upper: 9 },
+        "1": { series: "income", mean: 25, lower: 21, upper: 29 },
+      } },
+    });
+    const portfolio = nativeResult("quant.min_variance", "portfolio", {
+      metrics: { sample_variance: 0.004 }, allocation: { "market:bond": 0.7, stock: 0.3 },
+    });
+    const facts = buildPostEstimationFacts([varResult, portfolio]);
+    expect(facts.find(fact => fact.label.includes("income marginal interval lower"))).toMatchObject({
+      value: 21, artifact_ids: [varResult.artifact_id], qualifiers: { interval: "conditional_marginal_prediction" },
+    });
+    expect(facts.find(fact => fact.label.includes("market:bond portfolio weight"))).toMatchObject({
+      value: 0.7, artifact_ids: [portfolio.artifact_id],
+    });
+  });
+
+  it("makes key findings from the first six native methods citable on the same run", () => {
+    const elasticNet = nativeResult("prediction.native_elastic_net", "elastic", {
+      metrics: { rmse: 0.19904001118420492, mae: 0.1754549801378836, r2: 0.9702210580180151 },
+      mean_baseline: { rmse: 9.709164342005081 },
+      coefficients: { x: 1.45 },
+    });
+    const ridge = nativeResult("prediction.native_ridge", "ridge", {
+      metrics: { rmse: 0.35440315112819853, mae: 0.3221103161449772 },
+      split: { test_rows: 10, train_last_time: "2020-01-01" },
+      native_build: { binary_sha256: "ridge-binary" },
+    });
+    const replay = nativeResult("quant.replay", "replay", {
+      metrics: {
+        cumulative_net_return: 0.48911330204225933, final_equity: 14891.133020422594,
+        total_fees: 147.49548373253788, max_drawdown: 0.025130751259443137,
+      },
+      engine: { binary_sha256: "replay-binary" },
+      series: { rows: [{ time: "2020-01-02", equity: 10100 }] },
+    });
+    const riskA = nativeResult("quant.rolling_risk", "risk8", {
+      metrics: { window: 8, latest_max_volatility: 0.01933013520137597, maximum_volatility: 0.020092551645141073 },
+      policy: { annualized: false, units: { volatility: "input_return_units" } },
+    });
+    const riskB = nativeResult("quant.rolling_risk", "risk12", {
+      metrics: { window: 12, latest_max_volatility: 0.017994013974982934, maximum_volatility: 0.018118562544935518 },
+      policy: { annualized: false },
+      latest_covariance: { matrix: [[0.01]] },
+    });
+    const fixed = nativeResult("time_series.local_level", "fixed", {
+      forecast: { steps: 6, last: { mean: 19.794874104542757, lower: 17.517079492793183, upper: 22.07266871629233 } },
+      holdout: { metrics: { rmse: 1.857760432510804 }, origin_time: "2020-02-01" },
+      policy: { confidence_level: 0.95 },
+    });
+    const fitted = nativeResult("time_series.local_level_fit", "fitted", {
+      forecast: { steps: 6, last: { mean: 19.76499813648659, lower: 17.830211410434114, upper: 21.699784862539065 } },
+      holdout: null,
+      policy: { confidence_level: 0.95 },
+    });
+    const entries = [elasticNet, ridge, replay, riskA, riskB, fixed, fitted];
+    const facts = buildPostEstimationFacts(entries);
+    const checks = [
+      [elasticNet, "metrics:rmse", 0.19904001118420492],
+      [elasticNet, "mean_baseline:rmse", 9.709164342005081],
+      [ridge, "metrics:rmse", 0.35440315112819853],
+      [replay, "metrics:cumulative_net_return", 0.48911330204225933],
+      [replay, "metrics:final_equity", 14891.133020422594],
+      [replay, "metrics:total_fees", 147.49548373253788],
+      [riskA, "metrics:latest_max_volatility", 0.01933013520137597],
+      [riskA, "policy:annualized", false],
+      [riskB, "metrics:latest_max_volatility", 0.017994013974982934],
+      [riskB, "metrics:window", 12],
+      [fixed, "forecast:last:mean", 19.794874104542757],
+      [fitted, "forecast:last:lower", 17.830211410434114],
+      [fitted, "forecast:last:upper", 21.699784862539065],
+    ] as const;
+    for (const [entry, field, value] of checks) {
+      expect(facts).toContainEqual(expect.objectContaining({
+        field: `post_estimation:${entry.workflow_step_id}:${field}`,
+        value,
+        artifact_ids: [entry.artifact_id],
+        provider_id: "evidence.workflow.capability.v1",
+        qualifiers: expect.objectContaining({
+          operation_id: entry.operation_id,
+          source_sha256: entry.source_sha256,
+          result_sha256: entry.result_sha256,
+        }),
+      }));
+    }
+    for (const entry of entries) {
+      expect(facts.filter((fact) => fact.artifact_ids?.includes(entry.artifact_id)).length).toBeLessThanOrEqual(6);
+    }
+    expect(facts.find((fact) => fact.field.endsWith("metrics:cumulative_net_return"))?.qualifiers)
+      .toMatchObject({ scope: "offline_simulation" });
+    expect(facts.find((fact) => fact.field.endsWith("metrics:latest_max_volatility"))?.qualifiers)
+      .toMatchObject({ frequency: "per_observation", annualized: false });
+    for (const entry of [elasticNet, ridge]) {
+      expect(facts.find((fact) => fact.artifact_ids?.[0] === entry.artifact_id)?.qualifiers)
+        .toMatchObject({ evaluation: "held_out" });
+    }
+    expect(facts.some((fact) => /sha256|coefficients|series|covariance|last_time|origin_time/.test(fact.field))).toBe(false);
+  });
+
+  it("shares the 80 positions with legacy evidence and gives every native result its first finding", () => {
+    const replayResults = Array.from({ length: 19 }, (_, i) => nativeResult("quant.replay", `replay${i}`, {
+      metrics: { cumulative_net_return: i / 100, total_fees: i, final_equity: 1000 + i, max_drawdown: 0.1 },
+    }));
+    const legacy = {
+      ...result,
+      result: Object.fromEntries(Array.from({ length: 81 }, (_, i) => [`metric_${i}`, i])),
+    };
+    const facts = buildPostEstimationFacts([...replayResults, legacy], 3);
+
+    expect(facts.map((fact) => fact.id)).toEqual(Array.from({ length: 80 }, (_, i) => `c${i + 4}`));
+    expect(facts.slice(0, 39).map((fact) => fact.artifact_ids?.[0])).toEqual(Array(39).fill(legacy.artifact_id));
+    expect(facts.slice(0, 39).map((fact) => fact.value)).toEqual(Array.from({ length: 39 }, (_, i) => i));
+    expect(facts.filter((fact) => fact.field.endsWith(":facts_truncated") && fact.value === true)).toHaveLength(2);
+    expect(facts.slice(40, 59).map((fact) => [fact.artifact_ids?.[0], fact.field, fact.value])).toEqual(
+      replayResults.map((entry, i) => [entry.artifact_id, `post_estimation:${entry.workflow_step_id}:metrics:cumulative_net_return`, i / 100]),
+    );
+  });
+
+  it("allows a native-only run to use the full 80 positions", () => {
+    const results = Array.from({ length: 20 }, (_, i) => nativeResult("time_series.local_level", `local${i}`, {
+      forecast: { steps: 6, last: { mean: i, lower: i - 1, upper: i + 1 } },
+      policy: { confidence_level: 0.95 },
+    }));
+    const facts = buildPostEstimationFacts(results);
+
+    expect(facts).toHaveLength(80);
+    expect(facts.slice(0, 20).map((fact) => fact.value)).toEqual(Array.from({ length: 20 }, (_, i) => i));
+    expect(facts[79]).toMatchObject({ field: expect.stringMatching(/:facts_truncated$/), value: true });
+  });
+
   it("publishes an explicit truncation fact for oversized workflow results", () => {
     const resultFields = Object.fromEntries(
       Array.from({ length: 81 }, (_, index) => [`metric_${index}`, index]),
@@ -448,5 +661,25 @@ describe("buildFamilyEvidenceFacts", () => {
   it("belongs to model and estimation evidence", () => {
     const manifest = reportCapabilityManifestForFacts(buildFamilyEvidenceFacts(evidence, 0, provenance));
     expect(manifest.map((entry) => entry.capability_id)).toEqual(["model.estimation"]);
+  });
+});
+
+describe("figure facts from a summarized time trend", () => {
+  it("cites the summary of every row and never the row sample", () => {
+    const facts = buildFigureFacts([{
+      artifact_id: "time_trend",
+      chart_type: "time trend of numeric variables",
+      source: {
+        preview_truncated: false,
+        preview_json: JSON.stringify({
+          rows: { protocol_version: "figure-rows/v1", observations: { rows: [{ year: 2000, wage: 7654.321 }] } },
+          summary: { protocol_version: "figure-series-summary/v1",
+            observations: { series: { wage: { n: 36, mean: 12.5 } } } },
+        }),
+      },
+    }]);
+    expect(facts.map((fact) => fact.value)).toContain(12.5);
+    expect(facts.map((fact) => fact.value)).not.toContain(7654.321);
+    expect(facts.some((fact) => fact.field.includes(".rows."))).toBe(false);
   });
 });

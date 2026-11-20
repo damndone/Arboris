@@ -99,7 +99,7 @@ SPECS = (
     native('data.subset',data.subset),native('data.recode',data.recode),native('data.rename',data.rename),
     native('data.fill_missing',data.fill_missing),native('data.dedupe',data.dedupe),native('data.merge',data.merge),
     native('data.append',data.append),native('data.aggregate',data.aggregate),native('data.reshape',data.reshape),
-    native('data.lag',data.lag),native('data.tsset',data.tsset),
+    native('data.lag',data.lag),native('data.tsset',data.tsset),native('data.row_index',data.row_index),
     native('model.ols',models.ols,ols_capability),native('model.logit',models.logit,generalized_capability),native('model.probit',models.probit,generalized_capability),
     native('model.poisson',models.poisson,generalized_capability),native('model.negative_binomial',models.negative_binomial,nb_capability),native('model.glm',models.glm,glm_capability),
     native('model.glm:binomial',models.glm_binomial,generalized_capability),native('model.glm:poisson',models.glm_poisson,generalized_capability),native('model.iv_2sls',models.iv_2sls,iv_capability),

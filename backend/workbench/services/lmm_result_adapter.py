@@ -16,7 +16,7 @@ from typing import Any, NoReturn
 from workbench.canonical import sha256_canonical
 from workbench.contracts.common.envelope import ContractError, PacketEnvelope
 from workbench.contracts.model.linear_mixed_effects import LMM_READABLE_ESTIMATOR_VERSIONS, LmmDiagnostic
-from workbench.services.pinned_run_directory import PinnedRunDirectory, PinnedRunError
+from workbench.services.pinned_run_directory import PinnedRunDirectory, PinnedRunError, open_pinned_run_directory
 
 
 _INDEX_FIELDS = {"schema_version", "artifacts"}
@@ -952,3 +952,126 @@ __all__ = [
     "read_lmm_public_results",
     "read_lmm_public_results_from_pinned_run",
 ]
+
+
+def read_lmm_completion_product(run_root: Path, artifact_id: str) -> dict[str, Any] | None:
+    """Verify the native result/seal/source companion and return a bounded view.
+
+    Legacy packets remain readable by their old readers. Only the delivery gate
+    requires this new companion; no estimate or permission is reconstructed.
+    """
+    terminal_id = 'linear_mixed_effects_1.result'
+    evidence_id = 'linear_mixed_effects_1.analysis_evidence'
+    if artifact_id not in {terminal_id, evidence_id}:
+        return None
+    try:
+        from workbench.canonical import canonical_json_v1
+        with open_pinned_run_directory(Path(run_root).parent, Path(run_root).name) as pinned:
+            results = read_lmm_public_results_from_pinned_run(pinned)
+            if len(results) != 1:
+                return None
+            result = results[0]
+            payload = result['payload']
+            terminal_raw = pinned.read_lmm_terminal_packet()
+            if _sha256_bytes(terminal_raw) != result['artifact_sha256']:
+                return None
+            if payload['status'] != 'complete' or payload['converged'] is not True:
+                return None
+            records = _read_index(_load_json(pinned.read_lmm_index()))
+            matches = [r for r in records if r['artifact_id'] == evidence_id]
+            if len(matches) != 1:
+                return None
+            record = matches[0]
+            path = 'artifacts/diagnostics/linear_mixed_effects_1.analysis_evidence.json'
+            if record['path'] != path or record['artifact_type'] != 'lmm_analysis_evidence':
+                return None
+            raw = pinned.read_lmm_analysis_evidence()
+            if _sha256_bytes(raw) != record['sha256']:
+                return None
+            envelope = PacketEnvelope.from_dict(_load_json(raw)).to_dict()
+            if (envelope['contract'], envelope['contract_version'], envelope['producer_version']) != (
+                    'linear_mixed_effects.analysis_evidence', '1.0', 'linear_mixed_effects@1.0'):
+                return None
+            value = envelope['payload']
+            if (value['status'] != 'complete' or value['reason'] is not None
+                    or value['model_id'] != payload['model_id'] or value['model_type'] != payload['model_type']
+                    or value['terminal_sha256'] != result['artifact_sha256']
+                    or value['result_identity'] != payload['result_identity']
+                    or value['execution_binding'] != payload['execution_binding']
+                    or value['nobs'] != payload['nobs']):
+                return None
+            binding = value['execution_binding']
+            seal = pinned.read_execution_seal()
+            if hashlib.sha256(seal).hexdigest() != binding['executed_input_digest']:
+                return None
+            representation = _load_json(seal)
+            snapshot = pinned.read_run_inputs_snapshot().value
+            # V1 writes executable_payload; some admitted historical snapshots
+            # also record executed_payload. Every present representation must
+            # agree with the actual seal; conflicting metadata is not selected
+            # away by preferring one spelling.
+            recorded = [snapshot[k] for k in ('executable_payload', 'executed_payload') if k in snapshot]
+            if not recorded or any(
+                    not isinstance(item, dict) or any(item.get(k) != representation[k]
+                        for k in ('model_type', 'model_options', 'model_options_binding')) for item in recorded):
+                return None
+            if (representation['model_type'] != payload['model_type']
+                    or representation['model_options']['fit_method'] != payload['fit_method']):
+                return None
+            if canonical_json_v1(representation).encode('utf-8') != seal:
+                return None
+            source = value['source']
+            actual = pinned.read_lmm_analysis_source(artifact_id=source['artifact_id'])
+            if actual is None or actual[0]['sha256'] != source['sha256']:
+                return None
+            from workbench.engine.packs.linear_mixed_effects.analysis_evidence import (
+                DEFINITIONS, read_analysis_frame, point_estimation_fingerprint)
+            from workbench.engine.packs.linear_mixed_effects.input import prepare_lmm_input
+            frame = read_analysis_frame(*actual)
+            if frame is None or len(frame) != source['row_count']:
+                return None
+            prepared = prepare_lmm_input(frame, outcome=value['outcome'], controls=value['controls'],
+                                         options=representation['model_options'])
+            if (prepared.formula != payload['fixed_effects_formula']
+                    or point_estimation_fingerprint(prepared, version=value.get('schema_version', 1)) != value['point_estimation_fingerprint']):
+                return None
+            if value.get('schema_version') == 2:
+                from workbench.services.completion_products import sample_metadata, frame_fingerprint
+                sample = sample_metadata(prepared.source_row_positions, len(frame))
+                if (value.get('sample') != sample
+                        or sample['positions_sha256'] != value['analysis_sample_sha256']
+                        or source.get('frame_fingerprint') != frame_fingerprint(frame)):
+                    return None
+            else:
+                rows = value['rows']
+                if not isinstance(rows, list) or len(rows) != payload['nobs'] or not rows:
+                    return None
+                positions = [r['source_row_position'] for r in rows]
+                if (any(type(p) is not int or p < 0 or p >= source['row_count'] for p in positions)
+                        or positions != list(prepared.source_row_positions)
+                        or sha256_canonical(positions) != value['analysis_sample_sha256']):
+                    return None
+            if value['residual_definitions'] != DEFINITIONS:
+                return None
+            for row in value.get('rows', []):
+                if not all(type(row[k]) in {float, int} and math.isfinite(row[k]) for k in (
+                        'conditional_residual', 'marginal_residual', 'scaled_conditional_residual', 'conditional_fitted')):
+                    return None
+            if set(value['summary']) != {'conditional', 'marginal', 'scaled_conditional'}:
+                return None
+            if not all(type(value['summary'][k][q]) in {float, int} and math.isfinite(value['summary'][k][q])
+                       for k in value['summary'] for q in ('mean', 'rms', 'min', 'max')):
+                return None
+            if record['inputs'] != [terminal_id, source['artifact_id']]:
+                return None
+            projection = {key: item for key, item in value.items() if key != 'rows'}
+            if artifact_id == terminal_id:
+                return {'payload': {**payload,
+                        'point_estimation_fingerprint': value['point_estimation_fingerprint'],
+                        'analysis_sample_fingerprint': value['analysis_sample_sha256']},
+                        'inputs': (evidence_id, source['artifact_id']),
+                        'sha256': result['artifact_sha256'], 'size_bytes': len(terminal_raw)}
+            return {'payload': projection, 'inputs': tuple(record['inputs']),
+                    'sha256': record['sha256'], 'size_bytes': len(raw)}
+    except (PinnedRunError, VersionedResultReadError, ContractError, KeyError, TypeError, ValueError, OSError):
+        return None

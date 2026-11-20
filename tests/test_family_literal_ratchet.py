@@ -18,11 +18,18 @@ ROOT = Path(__file__).resolve().parents[1] / "backend" / "workbench"
 # Modules that belong to a family, or declare the families, may name them.
 FAMILY_OWNED = (
     "engine/stages/estimation.py",
+    # The estimation stage's fit adapters, survey variance and run records,
+    # split out of estimation.py in v1.9.1.
+    "engine/stages/estimation_fits.py",
+    "engine/stages/estimation_survey.py",
+    "engine/stages/estimation_records.py",
     "engine/packs/",
     "econometrics/",
     "contracts/model/",
     "orchestrator/_model_types.py",
     "engine/registry.py",
+    # Declares the native research operations; "arch_1" there is the ARCH(1) variance option.
+    "native_research_declarations.py",
 )
 
 # A model id ("ols_1"), or a branch on a family name.
@@ -35,15 +42,16 @@ FAMILY_LITERAL = re.compile(
 
 BASELINE = {
     "agent/context_tools_support/model_tools.py": 2,
-    "agent/context_tools_support/summaries.py": 1,
+    "agent/context_tools_support/summaries_diagnostics.py": 1,
     "agent/notebook/materialization.py": 3,
-    "agent/notebook/service.py": 1,
+    "agent/notebook/service_preparation.py": 1,
     "agent/notebook/vocabulary.py": 1,
     "agent/planner_evaluation.py": 2,
     "agent/recipe_contracts.py": 2,
     "agent/recipes/lmm_public_result_view.py": 2,
     "agent/workflow_capability_adapters.py": 2,
-    "agent/workflow_runtime.py": 3,
+    "agent/workflow_runtime_parts/models.py": 2,
+    "agent/workflow_runtime_parts/postestimation.py": 1,
     "analysis_loop/resolver.py": 1,
     "diagnostic_preview/guidance.py": 1,
     "engine/recommended_actions.py": 5,

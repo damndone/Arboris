@@ -30,8 +30,7 @@ describe("AgentCapabilityPopover", () => {
     render(<AgentCapabilityPopover catalog={catalog} onPromptSelect={() => {}} />);
     fireEvent.click(screen.getByTestId("agent-capability-trigger"));
 
-    expect(screen.getByTestId("agent-capability-executable")).toHaveTextContent("graph.fork");
-    expect(screen.getByTestId("agent-capability-executable")).toHaveTextContent("required");
+    expect(screen.getByTestId("agent-capability-executable")).not.toHaveTextContent("graph.fork");
     expect(screen.getByTestId("agent-capability-advisory")).toHaveTextContent("Compare results and explain diagnostics");
     expect(screen.getByTestId("agent-capability-unsupported")).toHaveTextContent("Modify data-cleaning rules");
     expect(screen.getByText("Use example")).toBeInTheDocument();

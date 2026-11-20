@@ -144,6 +144,8 @@ def _project_native_family_params_for_execution(
     for field_name in family.context_spec_fields:
         if field_name in projected:
             family_spec[field_name] = projected[field_name]
+    if "estimation_engine" in projected:
+        family_spec["estimation_engine"] = projected["estimation_engine"]
     if "covariance" in projected:
         family_spec["covariance"] = projected["covariance"]
     try:

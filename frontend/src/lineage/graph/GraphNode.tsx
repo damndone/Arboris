@@ -34,6 +34,8 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
 import type { GraphViewNode, HeadSetNode, Stage, Trust } from "../api/graphViewTypes";
+import { useReportPreviewSelection } from "../api/reportPreviewSelection";
+import { formatReportPreviewInterval, resolveReportPreviewSelection } from "../detail/sections/ReportPreviewControls";
 import { ModelNodeBadge } from "../../workbench/ModelNodeBadge";
 import { roleAbbrev, roleColorVar, roleLabel, type Role } from "../roles";
 
@@ -159,6 +161,22 @@ export function GraphNode({ data }: GraphNodeProps) {
     groupId,
     onToggleGroup,
   } = data;
+  const { cardPreview } = node;
+  const [reportSelection] = useReportPreviewSelection(node.nodeKey);
+  let previewLines = cardPreview?.lines;
+  if (cardPreview?.report && reportSelection) {
+    const { choice, coefficient, interval } = resolveReportPreviewSelection(cardPreview.report, reportSelection);
+    if (coefficient) {
+      const estimate = coefficient.estimate == null ? "unavailable" : Number(coefficient.estimate.toPrecision(4));
+      const p = coefficient.p_value == null ? "p unavailable"
+        : coefficient.p_value === 0 ? "p ≈ 0" : `p = ${Number(coefficient.p_value.toPrecision(3))}`;
+      const missingInterval = choice.level == null ? "CI unavailable" : `${Math.round(choice.level * 100)}% CI unavailable`;
+      previewLines = [
+        `${coefficient.label} ${estimate} · ${p}`,
+        interval ? formatReportPreviewInterval(interval, 4) : missingInterval,
+      ];
+    }
+  }
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
   const isSelected = state === "selected";
@@ -279,16 +297,29 @@ export function GraphNode({ data }: GraphNodeProps) {
             </span>
           )}
         </div>
-        <div className="ln-graph-node__title">{node.title}</div>
+        <div
+          className="ln-graph-node__title"
+          title={cardPreview ? [cardPreview.title, cardPreview.detail].filter(Boolean).join("\n") : undefined}
+        >
+          {cardPreview?.title ?? node.title}
+        </div>
         {(() => {
           const id = forestModelIdentity(node);
           return id ? (
-            <div className="ln-graph-node__meta" data-testid="node-model-badge">
+            <div className="ln-graph-node__meta nodrag nopan" data-testid="node-model-badge">
               <ModelNodeBadge runId={id.runId} nodeHash={id.nodeHash} role={id.role} />
             </div>
           ) : null;
         })()}
-        {node.summary && (
+        {previewLines ? (
+          <div data-testid="node-summary">
+            {previewLines.map((line, index) => (
+              <div className="ln-graph-node__meta ln-graph-node__preview-line" title={line} key={index}>
+                {line}
+              </div>
+            ))}
+          </div>
+        ) : node.summary && (
           <div className="ln-graph-node__meta" data-testid="node-summary">
             {node.summary}
           </div>

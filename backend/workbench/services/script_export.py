@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from ..script_export.storage import publish_script_bundle
 import zipfile
 
-from ..egress import authorize_local_artifact_export
+from ..egress import authorize_local_artifact_export, export_boundary
 from ..script_export.builder import build_script_plan
 from ..script_export.plan import ScriptExportRefusal
 from ..script_export.render import export_script, resolve_exporter
@@ -68,6 +68,7 @@ def _prepare(project_root, run_id, target, language, require_native):
     return files, summary, columns
 
 
+@export_boundary("script.export")
 def export_analysis_script(project_root: Path | str, run_id: str, target: str, language: str, *, require_native: bool = False):
     """Only local artifacts are returned; no script or data enters tool output."""
     if language not in {'stata', 'r', 'python'} or type(require_native) is not bool:

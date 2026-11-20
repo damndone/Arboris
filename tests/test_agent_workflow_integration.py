@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -79,7 +81,7 @@ class MultiToolWorkflowAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-proposal",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "operation_version": "v1",
@@ -115,6 +117,8 @@ def _write_project_run(project_root: Path) -> None:
     runs_root = project_root / "runs"
     run_root = runs_root / "run-a"
     run_root.mkdir(parents=True)
+    from workbench.lineage.upload_store import store_upload_bytes
+    upload_sha = store_upload_bytes(project_root, b"y,x\n2,1\n4,2\n6,3\n", filename="source.csv")
     GraphStore(runs_root).write(
         Graph(
             schema_version=3,
@@ -138,7 +142,8 @@ def _write_project_run(project_root: Path) -> None:
         json.dumps({"model:ols_1": {"node_hash": "hash-a"}}), encoding="utf-8"
     )
     (run_root / "run_inputs.json").write_text(
-        json.dumps({"rerun_of": None, "form": {"model_type": "ols"}}), encoding="utf-8"
+        json.dumps({"rerun_of": None, "form": {"model_type": "ols", "y": "y", "x": "x"},
+                    "upload": {"sha256": upload_sha, "filename": "source.csv"}}), encoding="utf-8"
     )
     (run_root / "run_manifest.json").write_text(
         json.dumps(
@@ -283,11 +288,13 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
                 verification={"passed": True, "status": "completed"},
             )
 
-        completed = await orchestrator.execute_confirmed_proposal(
+        completed = await orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint=adapter.context_fingerprint,
             current_active_head_run_id="run-a",
-            executor=executor,
+            rerun_executor=executor,
         )
 
         assert completed.status == "completed"
@@ -373,7 +380,7 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
             agent_session_id="chain-session",
         )
         context_fingerprint = "nocv1:declared-model-terms"
-        proposal = orchestrator.create_proposal(
+        proposal = admit_proposal(orchestrator,
             chain_id="chain-a",
             operation_id="operation.multi_step",
             target={

@@ -341,6 +341,14 @@ def _cases() -> dict[str, tuple[pd.DataFrame | None, dict[str, object]]]:
             ),
         )
 
+    effects = np.random.default_rng(7)
+    effect_x = effects.normal(size=80)
+    effect_t = (effects.uniform(size=80) < 1 / (1 + np.exp(-effect_x))).astype(float)
+    cases["treatment_effects.estimate"] = (
+        pd.DataFrame({"t": effect_t, "x": effect_x, "y": effect_x + effect_t + effects.normal(size=80)}),
+        _request("treatment_effects.estimate", "frame", {"treatment": "t", "outcome": "y", "covariates": ["x"]}, {"estimand": "ATT"}),
+    )
+
     studies = pd.DataFrame(
         {"study": ["study-a", "study-b", "study-c"], "effect": [0.2, 0.8, 1.1], "variance": [0.04, 0.09, 0.16]}
     )

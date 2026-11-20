@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..estimation_engine import ENGINE_CHOICES
 from .imputation_registry import IMPUTATION_REGISTRY
 from .registry import MODEL_REGISTRY
 
@@ -372,6 +373,8 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
     "iv_2sls": _COMMON_MODEL_PARAMS + [
         {"key": "iv_endog", "kind": "columns", "label": "Endogenous", "required": True, "role": "endog"},
         {"key": "iv_instruments", "kind": "columns", "label": "Instruments", "required": True, "role": "instruments"},
+        {"key": "estimation_engine", "kind": "select", "label": "Estimation engine (fast is experimental; resource acceptance pending)",
+         "required": False, "value": "reference", "options": list(ENGINE_CHOICES)},
     ],
     "did": _PANEL_COMMON_MODEL_PARAMS + [
         {

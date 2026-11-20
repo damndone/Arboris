@@ -2,7 +2,7 @@
 
 # Agent tools and what they may send
 
-Every tool the Agent can call, and the class of content its result contains. The project's data-sharing policy decides, per class, what may be sent to a remote model provider; anything else stays on this computer and the model receives only a summary.
+Tool-result content classes, including historical persisted tool names. Retired tool names cannot be called; their classifications remain for reading old conversations. The project's data-sharing policy decides, per class, what may be sent to a remote model provider; anything else stays on this computer and the model receives only a summary.
 
 | Content class | Sent to a remote provider by default | Sent to a local model by default |
 |---|---|---|
@@ -12,20 +12,27 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `aggregate` | yes | yes |
 | `model_result` | yes | yes |
 | `rows` | no | yes |
+| `skill` | no | yes |
+| `extension` | no | yes |
 | `unclassified` | no | yes |
 
 | Tool | Content class |
 |---|---|
 | `calculate` | `workbench_state` |
+| `check_model_claims` | `model_result` |
 | `decline_notebook_plan` | `workbench_state` |
 | `export_analysis_script` | `workbench_state` |
 | `export_dataset` | `metadata` |
+| `inspect_analysis_completion` | `model_result` |
 | `inspect_analysis_loop_context` | `model_result` |
 | `inspect_artifact_preview` | `aggregate` |
+| `inspect_builtin_skills` | `workbench_state` |
 | `inspect_completed_operations` | `workbench_state` |
+| `inspect_custom_skills` | `skill` |
 | `inspect_data_schema` | `metadata` |
 | `inspect_design_advisories` | `aggregate` |
 | `inspect_diagnostics` | `model_result` |
+| `inspect_extensions` | `extension` |
 | `inspect_node_context` | `metadata` |
 | `inspect_notebook_state` | `workbench_state` |
 | `inspect_notebook_workflow_results` | `aggregate` |
@@ -44,11 +51,22 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `inspect_statistical_evidence` | `model_result` |
 | `inspect_time_series_summary` | `aggregate` |
 | `list_project_datasets` | `metadata` |
-| `propose_analysis_loop` | `workbench_state` |
-| `propose_operation` | `workbench_state` |
+| `plan_analysis` | `workbench_state` |
 | `read_project_conversation` | `workbench_state` |
+| `read_reports` | `model_result` |
 | `request_notebook_inspections` | `aggregate` |
+| `run_operation` | `workbench_state` |
+| `save_report_version` | `workbench_state` |
 | `search_project_conversations` | `workbench_state` |
+| `show_chart` | `model_result` |
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |
+| `update_plan` | `workbench_state` |
+
+## Historical result names (not callable)
+
+| Retired tool | Content class |
+|---|---|
+| `propose_analysis_loop` | `workbench_state` |
+| `propose_operation` | `workbench_state` |

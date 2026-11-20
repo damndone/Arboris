@@ -135,7 +135,7 @@ def test_a_union_reports_the_right_branch_for_each_operation() -> None:
     bad_rerun = {
         "operation_id": "model.rerun",
         "operation_version": "v1",
-        "target": {"run_id": "r", "node_ref": "n"},  # missing node_hash
+        "target": {"run_id": "r"},  # missing node_ref
         "preconditions": {
             "context_version": "v",
             "context_fingerprint": "f",
@@ -151,8 +151,8 @@ def test_a_union_reports_the_right_branch_for_each_operation() -> None:
     details = validation_details(schema, bad_rerun)
 
     blob = json.dumps(details)
-    # model.rerun genuinely does require node_hash — here saying so is correct.
-    assert "node_hash" in blob
+    # model.rerun genuinely requires node_ref (node_hash is backend-bound since v1.9.1).
+    assert "node_ref" in blob
     assert "casts" not in blob
 
 

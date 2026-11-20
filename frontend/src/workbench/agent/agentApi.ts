@@ -123,6 +123,23 @@ export function saveAgentInstructions(
   });
 }
 
+export function getProjectAgentPermissions(
+  projectRoot: string,
+): Promise<ResponseOf<"/projects/agent-permissions", "get">> {
+  return request(agentPath(projectRoot, "/projects/agent-permissions"));
+}
+
+export function saveProjectAgentPermissions(
+  projectRoot: string,
+  body: RequestOf<"/projects/agent-permissions", "put">,
+): Promise<ResponseOf<"/projects/agent-permissions", "put">> {
+  return request(agentPath(projectRoot, "/projects/agent-permissions"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 /** The project template filled with this project's datasets and models. */
 export function draftAgentInstructions(projectRoot: string): Promise<ResponseOf<"/agent/instructions/draft", "get">> {
   return request(agentPath(projectRoot, "/agent/instructions/draft"));
@@ -254,7 +271,7 @@ export function declineAgentProposal(
   projectRoot: string,
   sessionId: string,
   proposalId: string,
-  reason?: string,
+  body: RequestOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/decline", "post">,
 ): Promise<ResponseOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/decline", "post">> {
   return request(
     agentPath(
@@ -264,7 +281,7 @@ export function declineAgentProposal(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(reason ? { reason } : {}),
+      body: JSON.stringify(body),
     },
   );
 }
@@ -309,16 +326,29 @@ export async function sendAgentTurn(
   signal?: AbortSignal,
   contextPacket?: Record<string, unknown>,
   executionPolicy: "auto_read_only" | "proposal_only" = "auto_read_only",
+  executionMode: "ask" | "auto" = "ask",
+  attachments: string[] = [],
 ): Promise<ResponseOf<"/agent/sessions/{session_id}/turns", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({question, execution_policy: executionPolicy, ...(contextPacket ? {context_packet: contextPacket} : {})}),
+      body: JSON.stringify({question, execution_policy: executionPolicy, execution_mode: executionMode, ...(attachments.length ? {attachments} : {}), ...(contextPacket ? {context_packet: contextPacket} : {})}),
       signal,
     },
   );
+}
+
+export function uploadAgentAttachment(projectRoot: string, file: File): Promise<ResponseOf<"/agent/attachments", "post">> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  return request(apiUrl("/agent/attachments"), { method: "POST", body: form });
+}
+
+export function agentAttachmentUrl(projectRoot: string, attachmentId: string): string {
+  return agentPath(projectRoot, `/agent/attachments/${encodeURIComponent(attachmentId)}`);
 }
 
 /** Request cancellation for the active server-side turn in this session. */
@@ -347,4 +377,33 @@ export function fallbackProjectContext(runId: string, selectedKey: string | null
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   return readResponse<T>(response);
+}
+
+
+export function getAgentPlan(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")));
+}
+export function getAgentPlanVerification(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan/verification", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan/verification")));
+}
+export function getAgentPlanPreflight(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan/preflight", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan/preflight")));
+}
+export function patchAgentPlan(projectRoot: string, sessionId: string, body: RequestOf<"/agent/sessions/{session_id}/plan", "patch">): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "patch">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")), {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+}
+export function approveAgentPlan(projectRoot: string, sessionId: string, version: number): Promise<ResponseOf<"/agent/sessions/{session_id}/plan/approve", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan/approve")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({version})});
+}
+export function getAgentTurnState(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/turn-state", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/turn-state")));
+}
+export function continueAgentTurn(projectRoot: string, sessionId: string, body: RequestOf<"/agent/sessions/{session_id}/continue", "post">, signal?: AbortSignal): Promise<ResponseOf<"/agent/sessions/{session_id}/continue", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/continue")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal});
+}
+export function resumeAgentTurn(projectRoot: string, sessionId: string, turnId: string, signal?: AbortSignal): Promise<ResponseOf<"/agent/sessions/{session_id}/resume", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/resume")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({turn_id:turnId}),signal});
+}
+export function queueAgentTurnMessage(projectRoot: string, sessionId: string, kind: "steer"|"follow_up", text: string): Promise<ResponseOf<"/agent/sessions/{session_id}/steer", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, `/${kind}`)), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
 }

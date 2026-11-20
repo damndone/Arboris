@@ -422,12 +422,6 @@
   border-radius: 7px;
 }
 
-.wb-agent-capability-help {
-  margin: 0;
-  color: var(--label-secondary);
-  font-size: 10px;
-  line-height: 1.45;
-}
 
 .wb-agent-capability-title {
   display: flex;
@@ -436,19 +430,7 @@
   font-size: 11px;
 }
 
-.wb-agent-capability-description,
-.wb-agent-capability-meta,
-.wb-agent-capability-example,
-.wb-agent-capability-empty,
-.wb-agent-capability-unavailable {
-  margin-top: 2px;
-  color: var(--label-tertiary);
-  font-size: 10px;
-}
 
-.wb-agent-capability-meta {
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
 
 .wb-agent-capability-action {
   margin-top: 6px;
@@ -480,6 +462,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
   height: 100%;
   padding: 10px 12px 12px;
   gap: 8px;
@@ -488,6 +472,7 @@
 .wb-agent-terminal {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   padding: 8px 10px;
   border: 1px solid var(--separator);
@@ -500,11 +485,20 @@
 }
 
 .wb-agent-terminal-line {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
   overflow-wrap: anywhere;
   margin: 0;
   padding: 1px 0;
+}
+
+/* References and actions must not compete with the message for inline space. */
+.wb-agent-terminal-line > :not(.wb-agent-terminal-marker) {
+  grid-column: 2;
+  min-width: 0;
 }
 
 .wb-agent-turn + .wb-agent-turn {
@@ -512,10 +506,8 @@
 }
 
 .wb-agent-reasoning {
-  margin: 5px 0 6px 18px;
-  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--bg-card-2) 72%, transparent);
+  min-width: 0;
+  margin: 2px 0 6px;
 }
 
 .wb-agent-reasoning > summary {
@@ -523,8 +515,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 24px;
+  padding: 0;
   color: var(--label-secondary);
   cursor: pointer;
   list-style: none;
@@ -549,9 +541,11 @@
 }
 
 .wb-agent-reasoning > summary > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin-right: auto;
-  color: var(--label);
-  font-weight: 600;
+  color: var(--label-secondary);
+  font-weight: 500;
 }
 
 .wb-agent-reasoning > summary > span:last-of-type {
@@ -559,11 +553,18 @@
   font-size: 11px;
 }
 
+.wb-agent-reasoning > summary > span + span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .wb-agent-reasoning-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-  padding: 6px 9px 8px;
-  border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
+  padding: 2px 0 4px 12px;
+  border-left: 1px solid var(--separator);
+  margin-left: 3px;
 }
 
 .wb-agent-withdrawn-draft {
@@ -587,8 +588,20 @@
 }
 
 .wb-agent-terminal-markdown {
-  flex: 1;
   min-width: 0;
+  max-width: 100%;
+}
+
+.wb-agent-terminal-markdown img { max-width: 100%; height: auto; }
+
+.wb-agent-terminal-markdown pre,
+.wb-agent-terminal-markdown table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.wb-agent-terminal-markdown table {
+  display: block;
 }
 
 .wb-agent-terminal-markdown p:first-child,
@@ -604,8 +617,7 @@
 }
 
 .wb-agent-terminal-line[data-role="user"] {
-  color: var(--tint);
-  font-weight: 600;
+  color: var(--label);
 }
 
 .wb-agent-terminal-line[data-role="tool"] {
@@ -613,7 +625,8 @@
 }
 
 .wb-agent-terminal-marker {
-  flex: 0 0 auto;
+  grid-column: 1;
+  grid-row: 1;
   user-select: none;
   color: var(--label-tertiary);
 }
@@ -624,15 +637,29 @@
 
 .wb-agent-message-links {
   display: inline-flex;
-  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 3px;
   min-width: 0;
-  margin-left: 4px;
+  align-items: flex-start;
+}
+
+.wb-agent-message-references { min-width: 0; max-width: 100%; }
+.wb-agent-message-references > summary {
+  padding: 2px 4px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  font: 11px/1.35 var(--font-sans, system-ui, sans-serif);
+}
+.wb-agent-message-references > .wb-agent-message-links {
+  display: flex;
+  width: 100%;
+  margin-top: 4px;
 }
 
 .wb-agent-message-link {
-  max-width: 220px;
+  max-width: min(220px, 100%);
+  min-width: 0;
+  min-height: 22px;
   overflow: hidden;
   padding: 1px 4px;
   border: 1px solid color-mix(in oklch, var(--separator) 75%, transparent);
@@ -643,6 +670,63 @@
   font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-agent-tool-receipt > .wb-agent-terminal-marker { display: none; }
+.wb-agent-step { display: inline-flex; gap: 6px; align-items: baseline; min-width: 0; color: var(--label-secondary); }
+.wb-agent-step__mark { flex: 0 0 auto; color: var(--label-tertiary); }
+.wb-agent-step--failed .wb-agent-step__mark { color: var(--status-caution-fg); }
+.wb-agent-step--waiting .wb-agent-step__mark { color: var(--tint); }
+.wb-agent-step__detail { color: var(--label-tertiary); overflow-wrap: anywhere; }
+.wb-agent-step { width: 100%; }
+.wb-agent-step__text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.wb-agent-step__title { color: var(--label); font-weight: 500; }
+.wb-agent-step__target { color: var(--label-secondary); }
+.wb-agent-step__time { flex: 0 0 auto; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
+.agt-explored > summary { cursor: pointer; list-style: none; }
+.agt-explored > summary::-webkit-details-marker { display: none; }
+.agt-explored > summary:focus-visible { outline: 2px solid var(--tint); border-radius: 3px; }
+.agt-explored[open] > .wb-agent-terminal-line { padding-left: 14px; }
+.agt-result {
+  max-height: 320px;
+  margin: 4px 0 6px 14px;
+  padding: 6px 8px;
+  overflow: auto;
+  border-left: 2px solid var(--separator);
+  color: var(--label-secondary);
+  font: var(--text-caption) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agt-result__more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tint);
+  font: inherit;
+  cursor: pointer;
+}
+.wb-agent-work-count { color: var(--label-tertiary); font-weight: 400; }
+
+.wb-agent-tool-details { min-width: 0; }
+
+.wb-agent-tool-details > summary {
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  list-style: none;
+}
+.wb-agent-tool-details > summary::-webkit-details-marker { display: none; }
+
+.wb-agent-tool-details > summary:focus-visible {
+  outline: 2px solid var(--tint);
+  border-radius: 3px;
+}
+
+.wb-agent-tool-details > .wb-agent-message-links {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 6px;
 }
 
 .wb-agent-message-link:hover:not(:disabled) {
@@ -756,41 +840,19 @@
   user-select: none;
 }
 
-.wb-agent-proposal {
-  display: grid;
-  gap: 5px;
-  padding: 9px 10px;
-  border: 1px solid color-mix(in oklch, var(--tint) 35%, var(--separator));
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--tint) 7%, var(--bg-card));
-  font-size: 12px;
-}
 
+/* v1.9.1 — the approval bar sits on the message box, at its width and radius;
+   opened details take at most half the panel. */
 .wb-agent-action-rail {
   flex: 0 0 auto;
-  display: grid;
-  gap: 6px;
-  max-height: min(35%, 180px);
+  max-height: 50%;
   overflow: auto;
-  padding: 1px;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-3) 0;
 }
 
-.wb-agent-proposal-header {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
 
-.wb-agent-proposal-header > span {
-  color: var(--label-tertiary);
-  font-size: 11px;
-}
 
-.wb-agent-proposal-status {
-  margin-left: auto;
-  color: var(--tint) !important;
-  font-weight: 600;
-}
 
 .wb-agent-proposal-change {
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -802,53 +864,11 @@
   overflow-wrap: anywhere;
 }
 
-.wb-agent-proposal-confirm {
-  justify-self: start;
-  margin-top: 3px;
-  padding: 5px 9px;
-  border: 1px solid color-mix(in oklch, var(--tint) 45%, var(--separator));
-  border-radius: 6px;
-  background: transparent;
-  color: var(--tint);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-}
 
-.wb-agent-proposal-confirm:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
 
-.wb-agent-proposal-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 3px;
-}
 
-.wb-agent-proposal-decline,
-.wb-agent-proposal-revise {
-  padding: 5px 9px;
-  border: 1px solid var(--separator);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--label-secondary);
-  cursor: pointer;
-  font: inherit;
-}
 
-.wb-agent-proposal-decline:hover,
-.wb-agent-proposal-revise:hover {
-  color: var(--label);
-  border-color: var(--label-secondary);
-}
 
-.wb-agent-proposal-decline:disabled,
-.wb-agent-proposal-revise:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
 
 .wb-agent-proposal-editor {
   display: grid;
@@ -927,11 +947,11 @@
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 40%, transparent);
 }
 .wb-context-ring-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   z-index: 1000;
   min-width: 168px;
+  width: 320px;
+  max-width: calc(100vw - 16px);
   padding: 8px 10px;
   border: 1px solid var(--separator);
   border-radius: 8px;
@@ -963,17 +983,13 @@
 
 /* v1.9.0 — message actions and time under each message (user review 3):
    quiet until the message is hovered or focused, like Claude's. */
-.wb-agent-terminal-line:has(> .agt-actions) {
-  flex-wrap: wrap;
-}
-
 .agt-actions {
   display: flex;
-  flex-basis: 100%;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   min-height: 24px;
-  padding-left: 20px;
+  padding-left: 0;
   color: var(--label-tertiary);
   font-size: var(--text-caption);
   opacity: 0;
@@ -990,12 +1006,17 @@
   opacity: 1;
 }
 
+.wb-agent-tool-details[open] > .agt-actions {
+  opacity: 1;
+}
+
 .agt-actions time {
   margin-right: 4px;
   font-variant-numeric: tabular-nums;
 }
 
 .agt-actions button {
+  flex: 0 0 24px;
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -1097,20 +1118,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-.agt-working__steps {
-  flex-basis: 100%;
-  padding-left: 13px;
-  color: var(--label-tertiary);
+.agt-working__label {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
-.agt-working__steps summary {
-  cursor: pointer;
-}
 
-.agt-working__steps ul {
-  margin: 4px 0 0;
-  padding-left: 16px;
-}
+
 
 @keyframes agt-pulse {
   0%, 100% { opacity: 0.35; }
@@ -1193,20 +1208,166 @@
   cursor: default;
 }
 
-/* v1.9.0 — confirmed or declined proposals fold into one line (review 6). */
-.wb-agent-settled {
-  color: var(--label-secondary);
-  font-size: var(--text-caption);
-}
+/* v1.9.1: the plan is one line until opened; open, it takes at most half the panel. */
+.wb-agent-plan { box-sizing: border-box; flex: 0 0 auto; min-height: 0; overflow-wrap: anywhere; margin: 8px 12px 4px; border: 1px solid var(--separator); border-radius: 10px; font-size: 12px; color: var(--label); background: var(--bg-card); }
+.wb-agent-plan[open] { flex: 0 1 auto; max-height: 50%; overflow: auto; overscroll-behavior: contain; }
+.wb-agent-plan > summary { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 8px 4px 12px; list-style: none; cursor: pointer; background: var(--bg-card); border-radius: 10px; }
+.wb-agent-plan > summary::-webkit-details-marker { display: none; }
+.wb-agent-plan > summary::before { content: "›"; color: var(--label-tertiary); transition: transform var(--duration-fade, .15s) var(--ease-standard, ease); }
+.wb-agent-plan[open] > summary::before { transform: rotate(90deg); }
+.wb-agent-plan__title { font-weight: 600; }
+.wb-agent-plan__meta { flex: 1; min-width: 0; color: var(--label-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-agent-plan > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.wb-agent-plan > :last-child { margin-bottom: 10px; }
+.wb-agent-plan__actions, .wb-agent-run-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.wb-agent-plan__note, .wb-agent-plan small, .wb-agent-plan__detail { color: var(--label-secondary); }
+.wb-agent-plan__note { margin-top: 2px; font-size: 11px; }
+.wb-agent-plan__verification { min-width: 0; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--separator); }
+.wb-agent-plan__verification p { margin: 4px 0; }
+.wb-agent-plan__verification li { overflow-wrap: anywhere; }
+.wb-agent-plan__spec { box-sizing: border-box; max-width: 100%; max-height: 160px; overflow: auto; padding: 6px; font-size: 11px; background: var(--bg-card-2); border-radius: 4px; }
+.wb-agent-plan ul { margin: 4px 0 6px; padding-left: 16px; color: var(--label-secondary); }
+.wb-agent-plan ul li { margin: 2px 0; }
+.wb-agent-plan > p { margin: 6px 12px; }
+.wb-agent-plan ol { margin: 6px 0; padding: 0; list-style: none; }
+.wb-agent-plan ol > li { display: flex; gap: 8px; margin: 6px 0; }
+.wb-agent-plan__step { min-width: 0; }
+.wb-agent-plan__detail { font-size: 11px; line-height: 1.4; }
+.wb-agent-plan__dot { flex: 0 0 auto; width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; border: 1.5px solid var(--label-tertiary); }
+.wb-agent-plan li[data-status="done"] .wb-agent-plan__dot, .wb-agent-plan li[data-status="completed"] .wb-agent-plan__dot { background: var(--status-holds-fg); border-color: transparent; }
+.wb-agent-plan li[data-status="running"] .wb-agent-plan__dot, .wb-agent-plan li[data-status="in_progress"] .wb-agent-plan__dot { border-color: var(--tint); }
+.wb-agent-plan__approve { margin-left: auto; white-space: nowrap; }
+.wb-agent-plan label { display: block; margin: 8px 0; }
+.wb-agent-plan textarea, .wb-agent-plan input { box-sizing: border-box; width: 100%; padding: 6px; color: var(--label); background: var(--field-bg); border: 1px solid var(--separator); border-radius: 4px; font: inherit; }
+.wb-agent-plan textarea { min-height: 54px; resize: vertical; }
+.wb-agent-plan button, .wb-agent-run-controls button, .wb-agent-run-controls select { padding: 3px 9px; font: inherit; color: var(--label); background: var(--bg-card-2); border: 1px solid var(--separator); border-radius: 999px; }
+.wb-agent-plan .wb-agent-plan__approve { color: var(--on-tint); background: var(--tint-fill); border-color: transparent; }
+.wb-agent-plan button:disabled, .wb-agent-run-controls button:disabled { opacity: .5; }
+.wb-agent-run-controls { padding: 6px 0; font-size: 11px; }
+.wb-agent-run-controls select { max-width: 100%; }
 
-.wb-agent-settled > summary {
-  padding: 4px 2px;
-  cursor: pointer;
-}
+.wb-agent-target-recovery { border: 1px solid var(--separator); border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.wb-agent-target-recovery p { margin: 8px 0; }
+.wb-agent-target-recovery ol { padding-left: 20px; }
+.wb-agent-target-recovery button { margin: 4px 8px 4px 0; }
 
-.wb-agent-settled ul {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 2px;
+.wb-agent-usage { padding: 6px 10px; color: var(--label-secondary); font-size: 11px; border-bottom: 1px solid var(--separator); }
+.wb-agent-usage summary { cursor: pointer; }
+.wb-agent-usage p { max-width: 80ch; }
+.wb-agent-usage__scroll { max-height: 240px; overflow: auto; }
+.wb-agent-usage table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wb-agent-usage th, .wb-agent-usage td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--separator); }
+
+/* v1.9.1 — one muted row for usage and the audit link; the per-step table
+   opens over the conversation instead of pushing it down. */
+.wb-agent-meta { position: relative; flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 26px; padding: 0 12px; border-bottom: 1px solid var(--separator-faint, var(--separator)); color: var(--label-tertiary); font-size: 11px; }
+.wb-agent-meta > a { margin-left: auto; color: var(--label-secondary); text-decoration: none; white-space: nowrap; }
+.wb-agent-meta > a:hover { color: var(--label); }
+.wb-agent-usage--compact { position: static; min-width: 0; padding: 0; border: 0; }
+.wb-agent-usage--compact > summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; list-style: none; }
+.wb-agent-usage--compact > summary::-webkit-details-marker { display: none; }
+.wb-agent-usage--compact > summary:hover { color: var(--label-secondary); }
+.wb-agent-usage--compact[open] > .wb-agent-usage__body { position: absolute; z-index: 20; top: calc(100% + 4px); left: 8px; right: 8px; max-height: min(60vh, 420px); overflow: auto; padding: 10px; border: 1px solid var(--border, var(--separator)); border-radius: 10px; background: var(--bg-card); box-shadow: var(--shadow-pop); color: var(--label-secondary); }
+
+/* A stopped turn: a callout in the flow, never drawn over the conversation. */
+.wb-agent-callout { flex: 0 0 auto; margin: 6px 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--status-fails-fg) 30%, transparent); border-radius: 8px; background: color-mix(in oklch, var(--status-fails-fg) 7%, var(--bg-card)); color: var(--status-fails-fg); font-size: 12px; line-height: 1.4; }
+.wb-agent-stop-note { display: block; margin-top: 4px; }
+.agt-op-results { flex: 0 0 auto; display: block; font-size: 12px; max-height: 40%; overflow: auto; }
+.agt-op-results > summary { cursor: pointer; }
+.agt-op-results__list { display: grid; gap: 6px; margin-top: 6px; }
+.agt-op-results__line { font-variant-numeric: tabular-nums; }
+.wb-agent-stop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+/* The full (non-column) panel header: mono, one line. */
+.wb-agent-panel__header { display: flex; align-items: center; gap: 10px; font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); }
+.wb-agent-panel__header > strong { color: var(--label); }
+
+.wb-agent-approval { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--bg-card); box-shadow: var(--shadow-1); font-size: 12px; color: var(--label); }
+.wb-agent-approval__head { display: flex; align-items: center; gap: 8px; color: var(--label-secondary); font-size: 11px; font-weight: 500; }
+.wb-agent-approval__ask { color: var(--tint-label); }
+.wb-agent-approval__pager { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.wb-agent-approval__pager button { width: 20px; height: 20px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--label-secondary); cursor: pointer; }
+.wb-agent-approval__pager button:hover:not(:disabled) { background: var(--bg-elev); color: var(--label); }
+.wb-agent-approval__title { margin: 0; font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.wb-agent-approval__more { color: var(--label-secondary); font-weight: 400; }
+.wb-agent-approval__risk { margin: 0; color: var(--label-secondary); line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wb-agent-approval__details > summary { width: max-content; color: var(--label-tertiary); font-size: 11px; cursor: pointer; }
+.wb-agent-approval__details[open] > summary { margin-bottom: 4px; }
+.wb-agent-approval__details ol { margin: 4px 0; padding-left: 18px; }
+.wb-agent-approval__details pre { margin: 4px 0 0; white-space: pre-wrap; font-size: 11px; }
+.wb-agent-approval__actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.wb-agent-approval__actions button { min-height: 0; height: 26px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg-card); color: var(--label); font: inherit; font-weight: 500; cursor: pointer; }
+.wb-agent-approval__actions button:hover:not(:disabled) { background: var(--bg-elev); }
+.wb-agent-approval__actions .wb-agent-approval__primary { border-color: transparent; background: var(--tint-fill); color: var(--on-tint); }
+.wb-agent-approval__actions .wb-agent-approval__primary:hover:not(:disabled) { background: var(--tint-fill-pressed); }
+.wb-agent-approval__actions button:disabled { opacity: .5; cursor: default; }
+
+/* A decided proposal: one muted line where it happened in the conversation. */
+.wb-agent-receipt { margin: 4px 0; color: var(--label-secondary); font-size: 12px; }
+.wb-agent-receipt > summary { display: flex; align-items: baseline; gap: 6px; min-width: 0; list-style: none; cursor: pointer; }
+.wb-agent-receipt > summary::-webkit-details-marker { display: none; }
+.wb-agent-receipt__mark { flex: 0 0 auto; width: 12px; text-align: center; }
+.wb-agent-receipt[data-status="confirmed"] .wb-agent-receipt__mark { color: var(--status-holds-fg); }
+.wb-agent-receipt[data-status="declined"] .wb-agent-receipt__mark { color: var(--status-fails-fg); }
+.wb-agent-receipt__verb { flex: 0 0 auto; font-weight: 500; color: var(--label); }
+.wb-agent-receipt__title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wb-agent-receipt__time { flex: 0 0 auto; margin-left: auto; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
+.wb-agent-receipt > :not(summary) { margin: 4px 0 4px 18px; }
+.wb-agent-receipt ol { padding-left: 16px; }
+.wb-agent-terminal-line[data-role="assistant"] > .wb-agent-terminal-marker { display: none; }
+.wb-context-ring-left { margin-left: 4px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
+.wb-context-ring[data-level="danger"] .wb-context-ring-left { color: var(--status-caution-fg); }
+.wb-agent-thinking { margin: 0; color: var(--label-tertiary); }
+.wb-agent-thinking > summary { width: fit-content; cursor: pointer; font-style: italic; list-style: none; }
+.wb-agent-thinking > summary::-webkit-details-marker { display: none; }
+.wb-agent-thinking > summary::after { content: " ›"; font-style: normal; }
+.wb-agent-thinking__text { margin-top: 2px; padding-left: 10px; border-left: 1px solid var(--separator); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.agt-chart { margin: 6px 0 8px; min-width: 0; font-size: 12px; }
+.agt-chart__title { margin: 0 0 2px; font-weight: 600; color: var(--label); }
+.agt-chart__readout { min-height: 18px; color: var(--label-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.agt-chart__legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0; color: var(--label-secondary); }
+.agt-chart__swatch { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+.agt-chart svg { display: block; width: 100%; overflow: visible; }
+.agt-chart text { fill: var(--label-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.agt-chart__grid { stroke: var(--chart-grid); stroke-width: 1; }
+.agt-chart__reference { stroke: var(--chart-axis); stroke-width: 1; stroke-dasharray: 3 3; }
+.agt-chart__hit { fill: transparent; outline: none; }
+.agt-chart__hit:hover, .agt-chart__hit:focus { fill: color-mix(in oklch, var(--label) 7%, transparent); }
+.agt-chart__data { margin-top: 2px; color: var(--label-tertiary); }
+.agt-chart__data > summary { width: fit-content; cursor: pointer; }
+.agt-chart__data table { margin-top: 4px; border-collapse: collapse; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
+.agt-chart__data th, .agt-chart__data td { padding: 1px 8px 1px 0; text-align: left; font-weight: 400; }
+.wb-context-ring-tooltip-head { display: flex; justify-content: space-between; gap: 16px; }
+.wb-context-ring-bar { display: flex; gap: 1px; height: 6px; margin: 6px 0; overflow: hidden; border-radius: 3px; background: var(--bg-elev); }
+.wb-context-ring-parts { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+.wb-context-ring-parts li { display: grid; grid-template-columns: 10px 1fr auto 44px; align-items: center; gap: 8px; }
+.wb-context-ring-parts li > :nth-child(n+3) { text-align: right; }
+.wb-context-ring-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--bg-elev); }
+.wb-context-ring-tooltip:has(.wb-context-ring-parts) { width: 280px; min-width: 280px; max-width: min(280px, calc(100vw - 32px)); }
+/* Bridges the gap to the ring so the pointer can reach the panel's button. */
+.wb-context-ring-tooltip::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.wb-agent-attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 4px; font-weight: 400; }
+.wb-agent-attachment-image { display: block; line-height: 0; }
+.wb-agent-attachment-image img { width: 40px; height: 40px; object-fit: cover; border: var(--hairline) solid var(--separator); border-radius: var(--radius-sm); }
+.wb-agent-attachment-file {
+  overflow: hidden; max-width: 180px; padding: 1px 6px; border: var(--hairline) solid var(--separator); border-radius: var(--radius-sm);
+  color: var(--label-secondary); font-size: var(--text-small); text-decoration: none; text-overflow: ellipsis; white-space: nowrap;
 }
+a.wb-agent-attachment-file:hover { color: var(--label); }
+
+.wb-agent-audit-link { color: var(--label-secondary); }
+
+.wb-file-viewer { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: var(--scrim); }
+.wb-file-viewer__card { display: flex; flex-direction: column; overflow: hidden; width: min(960px, 100%); height: min(860px, 100%); border-radius: var(--radius-md); background: var(--bg-card-2); box-shadow: var(--shadow-pop); }
+.wb-file-viewer__head { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: var(--hairline) solid var(--separator); color: var(--label); font-size: var(--text-ui); }
+.wb-file-viewer__title { flex: 1; overflow: hidden; min-width: 0; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.wb-file-viewer__head a { color: var(--label-secondary); }
+.wb-file-viewer__head button { width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--label-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
+.wb-file-viewer__head button:hover { background: var(--bg-elev); color: var(--label); }
+.wb-file-viewer__frame { flex: 1; min-height: 0; width: 100%; border: 0; background: var(--bg-canvas); }
+.wb-file-viewer__image { display: flex; flex: 1; align-items: center; justify-content: center; overflow: auto; min-height: 0; padding: var(--space-3); background: var(--bg-canvas); }
+.wb-file-viewer__image img { max-width: 100%; max-height: 100%; }
+.wb-file-viewer__text { flex: 1; overflow: auto; min-height: 0; margin: 0; padding: var(--space-3); background: var(--bg-canvas); color: var(--label); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.agt-plan { list-style: none; margin: 4px 0 2px; padding: 0 0 0 18px; color: var(--label-secondary); }
+.agt-plan li[data-status="done"] { color: var(--label-tertiary); }

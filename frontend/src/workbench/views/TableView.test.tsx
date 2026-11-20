@@ -94,6 +94,14 @@ describe("TableView", () => {
     llmConfigMock.mockResolvedValue({ configured: true, supports_vision: false });
   });
 
+  it("shows each model's actual engine with its bounded receipt", async () => {
+    mockDetail.current = {model_results: [{model_id: "iv_1", model_type: "iv_2sls", coefficients: {},
+      engine_provenance: {requested: "fast", used: "reference", reason: "native engine is not built"}}], artifact_counts: {}};
+    renderTable();
+    expect(await screen.findByText("Actual engine: reference")).toBeTruthy();
+    expect(screen.getByText("native engine is not built")).toBeTruthy();
+  });
+
   it("calls fetchRunDetail + fetchRunArtifacts with (projectRoot, runId) in that order", async () => {
     renderTable(model("run-1"));
     await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
@@ -376,10 +384,10 @@ describe("TableView", () => {
     );
     expect(screen.getByText("Quadratic stationary point")).toBeTruthy();
     expect(screen.getByText("stationary point")).toBeTruthy();
-    expect(screen.getByText("211.5934")).toBeTruthy();
+    expect(screen.getByText("211.6")).toBeTruthy();
     // The out-of-range flag is the difference between a number and a claim.
     expect(screen.getByText("stationary point within observed range")).toBeTruthy();
-    expect(screen.getByText("no")).toBeTruthy();
+    expect(screen.getByText("No")).toBeTruthy();
     // Provenance, not decoration: it says which model the result describes.
     expect(screen.getByText(/stationary_point/)).toBeTruthy();
     // Internal schema tags are not reader-facing.
@@ -847,6 +855,8 @@ describe("TableView", () => {
     expect(figureCtxMock).toHaveBeenCalledWith("/tmp/demo", "run-1", "coef_plot");
     const askArgs = figureAskMock.mock.calls[0];
     expect((askArgs[0] as { source: { kind: string } }).source.kind).toBe("model");
+    // The project's data-sharing policy governs the send (2026-11-06 risk review, finding 1).
+    expect(askArgs[3]).toBe("/tmp/demo");
   });
 
   it("logs the figure explanation so it appears in AI activity", async () => {

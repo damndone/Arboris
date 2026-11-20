@@ -45,6 +45,39 @@ GraphNodeView = view_of(
 )
 
 
+class GraphReportInterval(TypedDict):
+    level: float | None
+    lower: float
+    upper: float
+
+
+class GraphReportCoefficient(TypedDict):
+    term: str
+    label: str
+    estimate: float | None
+    p_value: float | None
+    saved_interval: GraphReportInterval | None
+    intervals: list[GraphReportInterval]
+    interval_unavailable: NotRequired[str]
+
+
+class GraphReportPreview(TypedDict):
+    model_id: str
+    default_term: str | None
+    coefficients: list[GraphReportCoefficient]
+    distribution: NotRequired[Literal["t", "z"]]
+    df: NotRequired[float]
+
+
+class GraphCardPreview(TypedDict):
+    """Compact visual summary from the node's owning run."""
+
+    title: str
+    lines: list[str]
+    detail: NotRequired[str]
+    report: NotRequired[GraphReportPreview]
+
+
 class ForestNodeView(GraphNodeView):  # type: ignore[valid-type,misc]
     """A head-set or forest node: one per content key across the runs that share it."""
 
@@ -52,6 +85,7 @@ class ForestNodeView(GraphNodeView):  # type: ignore[valid-type,misc]
     cas_ref: CasRef | None
     runs: list[str]
     presentation_created_at: str
+    card_preview: NotRequired[GraphCardPreview]
     produced_by_rerun_request_id: NotRequired[str]
     # Node-level provenance: the source this node was rerun from, or, when
     # runs sharing the node disagree, every record (and no source).

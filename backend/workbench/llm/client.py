@@ -7,7 +7,9 @@ anything raised from here.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
@@ -17,6 +19,7 @@ import httpx
 
 from ..egress import EgressPolicyError, guard_outgoing_messages
 from .config import LLMConfig
+from .provider_store import REASONING_EFFORTS, default_efforts, takes_reasoning_effort
 
 # Test seam: monkeypatch to inject httpx.MockTransport-backed clients.
 _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Client(
@@ -25,6 +28,42 @@ _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Clie
 _async_client_factory: Callable[[LLMConfig], httpx.AsyncClient] = (
     lambda config: httpx.AsyncClient(timeout=config.timeout_s)
 )
+
+
+class LLMRequestBudgetExceeded(RuntimeError):
+    """The Core cannot admit a new request within its existing turn budget."""
+
+    def __init__(self, *, remaining_s: float, required_s: float, timeout_s: float,
+                 configured_wait_s: float | None = None) -> None:
+        super().__init__("provider_request_budget")
+        self.details = {"remaining_s": remaining_s, "required_s": required_s, "timeout_s": timeout_s,
+                        "configured_wait_s": required_s if configured_wait_s is None else configured_wait_s}
+        self.request_started = False
+
+
+async def _start_agent_request(request: httpx.Request) -> None:
+    """Check, then checkpoint an actual send; no budget or authority lives here.
+
+    The evaluation recorder invokes this after its queue, before reserving usage.
+    Ordinary HTTP clients invoke it as their final request hook before transport.
+    """
+    check = request.extensions.get("workbench_check_request_budget")
+    if check is not None:
+        check()
+    start = request.extensions.get("workbench_request_start")
+    if start is not None:
+        start()
+
+
+async def _agent_request_hook(request: httpx.Request) -> None:
+    if request.extensions.get("workbench_transport_starts_request"):
+        # The recorder owns a queue inside its transport. Only its post-queue
+        # boundary can checkpoint the send; this hook is a read-only precheck.
+        check = request.extensions.get("workbench_check_request_budget")
+        if check is not None:
+            check()
+    else:
+        await _start_agent_request(request)
 
 
 class LLMNotConfiguredError(Exception):
@@ -68,20 +107,32 @@ class LLMToolCallArgumentsError(LLMUpstreamError):
     """Provider completed a tool call whose arguments are not a JSON object."""
 
 
+def is_deepseek_v4(config: LLMConfig) -> bool:
+    """Whether the configured model is DeepSeek V4, by its id, also behind a gateway.
+
+    Gateways prefix a vendor (Magpie/WorkBuddy: ``workbuddy-ai/deepseek-v4.1-flash``)
+    and run on other hosts, so neither the provider name nor the host identifies it.
+    """
+
+    return takes_reasoning_effort(config.model)
+
+
 def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     """Return bounded, provider-owned controls for DeepSeek V4 requests.
 
     DeepSeek V4 enables high-effort private reasoning by default. Workbench's
     typed Notebook planner and evidence-bound Report writer both need bounded
     public responses, so they share this adapter policy instead of each caller
-    guessing provider controls independently.
+    guessing provider controls independently. No thinking is stated only as
+    ``thinking: disabled``: the Magpie/WorkBuddy gateway thinks whenever
+    ``reasoning_effort`` is present, whatever its value, even beside
+    ``thinking: disabled`` (probe 2026-10-22).
     """
 
-    provider = (config.provider_name or "").casefold()
-    host = (urlparse(config.base_url).hostname or "").casefold()
-    model = config.model.casefold()
-    is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
-    if is_deepseek and model.startswith("deepseek-v4"):
+    # "deepseek-flash" is the V4.1 Flash alias this Workbench is configured with;
+    # matching only "deepseek-v4*" left planner, report writer and conversation
+    # summaries in default high-effort thinking with a bounded output.
+    if is_deepseek_v4(config):
         return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
     return {}
 
@@ -93,13 +144,58 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
 STREAM_SILENCE_S = 30.0
 
 
+def is_nvidia_ultra(config: LLMConfig) -> bool:
+    """The exact official Ultra route with provider-specific controls."""
+    return (config.base_url.rstrip("/") == "https://integrate.api.nvidia.com/v1"
+            and config.model == "nvidia/nemotron-3-ultra-550b-a55b")
+
+
+def provider_stream_wait_s(config: LLMConfig, *, default_s: float) -> float:
+    """Honor NVIDIA's configured queue wait at both streaming boundaries."""
+    if urlparse(config.base_url).hostname == "integrate.api.nvidia.com":
+        return config.timeout_s
+    return default_s
+
+
 def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
     # Only silence after the connection is up is shortened: connecting can
     # legitimately be slow (a TLS handshake took 10-14 s in the same session).
-    return httpx.Timeout(config.timeout_s, read=min(config.timeout_s, STREAM_SILENCE_S))
+    # NVIDIA's free hosted models may queue before sending any response headers
+    # or tokens. Honor that provider's configured wait instead of silently
+    # replacing it with the short silence limit used by the other providers.
+    read = provider_stream_wait_s(config, default_s=min(config.timeout_s, STREAM_SILENCE_S))
+    return httpx.Timeout(config.timeout_s, read=read)
 
 
-def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
+def _positive_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def reported_capabilities(raw_model: Mapping[str, Any]) -> dict[str, Any]:
+    """What a model list says about a model, when it says it (Magpie/WorkBuddy, OpenRouter-style
+    fields): its context window, the thinking efforts it accepts, and image input. A field the
+    provider does not report is left out, so nothing is guessed."""
+
+    found: dict[str, Any] = {}
+    window = next((_positive_int(raw_model.get(key)) for key in ("context_length", "context_window", "max_input_tokens")
+                   if _positive_int(raw_model.get(key))), None)
+    if window:
+        found["context_window_tokens"] = window
+    levels = raw_model.get("reasoning_levels")
+    if not isinstance(levels, list):
+        supported = raw_model.get("supported_reasoning_levels")
+        levels = [item.get("effort") for item in supported if isinstance(item, Mapping)] if isinstance(supported, list) else None
+    if isinstance(levels, list):
+        found["reasoning_efforts"] = [level for level in REASONING_EFFORTS if level in levels]
+    elif raw_model.get("reasoning") is False:
+        found["reasoning_efforts"] = []
+    modalities = raw_model.get("modalities")
+    if isinstance(modalities, Mapping) and isinstance(modalities.get("input"), list):
+        found["supports_vision"] = "image" in modalities["input"]
+    return found
+
+
+def fetch_models(config: LLMConfig) -> list[dict[str, Any]]:
     """GET {base_url}/models and return the provider's model summaries."""
     if not config.base_url.strip() or not config.api_key.strip():
         raise LLMNotConfiguredError("Provider base URL and API key are required to fetch models.")
@@ -132,7 +228,7 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
         raw_models = payload["data"]
         if not isinstance(raw_models, list):
             raise TypeError
-        models: list[dict[str, str]] = []
+        models: list[dict[str, Any]] = []
         model_ids: set[str] = set()
         for raw_model in raw_models:
             if not isinstance(raw_model, dict):
@@ -146,7 +242,7 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
             if not isinstance(owned_by, str):
                 raise TypeError
             model_ids.add(model_id)
-            models.append({"id": model_id, "owned_by": owned_by})
+            models.append({"id": model_id, "owned_by": owned_by, **reported_capabilities(raw_model)})
     except (ValueError, KeyError, TypeError) as exc:
         raise LLMUpstreamError(
             "LLM provider returned an unexpected models response shape"
@@ -227,6 +323,8 @@ async def async_stream_chat_completion(
     *,
     tools: list[dict[str, Any]] | None = None,
     model_config: Mapping[str, Any] | None = None,
+    check_request_budget: Callable[[], None] | None = None,
+    on_request_start: Callable[[], None] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield normalized public Chat Completions SSE events.
 
@@ -248,8 +346,16 @@ async def async_stream_chat_completion(
     tool_fragments: dict[int, dict[str, Any]] = {}
     model = config.model
     finish_reason: str | None = None
+    nvidia_tail = is_nvidia_ultra(config)
+    completed_usage: dict[str, Any] | None = None
+    provider_request_id: str | None = None
+    tail_deadline: float | None = None
+    tail_lines = 0
     try:
         async with _async_client_factory(config) as client:
+            client.event_hooks["request"].append(_agent_request_hook)
+            if check_request_budget is not None:
+                check_request_budget()
             async with client.stream(
                 "POST",
                 f"{config.base_url.rstrip('/')}/chat/completions",
@@ -259,6 +365,10 @@ async def async_stream_chat_completion(
                 },
                 json=request_payload,
                 timeout=_stream_timeout(config),
+                extensions={
+                    "workbench_check_request_budget": check_request_budget,
+                    "workbench_request_start": on_request_start,
+                } if check_request_budget is not None or on_request_start is not None else None,
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
                     body = await response.aread() if response.status_code in {400, 413, 422} else b""
@@ -268,18 +378,41 @@ async def async_stream_chat_completion(
                         upstream_status=response.status_code,
                         context_overflow=is_context_overflow(response.status_code, body),
                     )
-                async for line in response.aiter_lines():
+                lines = response.aiter_lines()
+                while True:
+                    try:
+                        if tail_deadline is None:
+                            line = await anext(lines)
+                        else:
+                            tail_lines += 1
+                            if tail_lines > 256:
+                                raise LLMUpstreamError("NVIDIA completion usage tail exceeded its line bound")
+                            remaining = tail_deadline - asyncio.get_running_loop().time()
+                            line = await asyncio.wait_for(anext(lines), timeout=max(0, remaining))
+                    except StopAsyncIteration:
+                        break
                     if not line or line.startswith(":"):
                         continue
                     if not line.startswith("data:"):
                         continue
                     raw_data = line[5:].strip()
                     if raw_data == "[DONE]":
+                        if nvidia_tail:
+                            break
                         if finish_reason is not None:
                             return
                         break
                     try:
                         payload = json.loads(raw_data)
+                        if not isinstance(payload, dict):
+                            raise TypeError
+                        if nvidia_tail:
+                            if finish_reason is not None and isinstance(payload.get("usage"), dict):
+                                completed_usage = payload["usage"]
+                            if isinstance(payload.get("id"), str) and payload["id"]:
+                                provider_request_id = payload["id"]
+                            if payload.get("choices") == [] and isinstance(payload.get("usage"), dict):
+                                continue
                         choice = payload["choices"][0]
                         if not isinstance(choice, dict):
                             raise TypeError
@@ -299,26 +432,41 @@ async def async_stream_chat_completion(
                     if delta.get("reasoning_content") is not None:
                         # Keep private reasoning out of the public stream while
                         # preserving a provider-activity signal for retry
-                        # control in the generic adapter.
-                        yield {"type": "provider_activity"}
+                        # control in the generic adapter. The text travels with
+                        # it: DeepSeek requires it back on later requests that
+                        # carry tools (the adapter keeps it private).
+                        reasoning = delta.get("reasoning_content")
+                        yield {"type": "provider_activity",
+                               **({"reasoning": reasoning} if isinstance(reasoning, str) and reasoning else {})}
                     raw_tool_calls = delta.get("tool_calls") or []
                     if not isinstance(raw_tool_calls, list):
                         raise LLMUpstreamError(
                             "LLM provider returned an unexpected streaming response shape"
                         )
+                    meaningful_tool_progress = False
                     for raw_tool_call in raw_tool_calls:
+                        if nvidia_tail and isinstance(raw_tool_call, dict):
+                            index = raw_tool_call.get("index")
+                            previous = tool_fragments.get(index, {}) if type(index) is int else {}
+                            function = raw_tool_call.get("function") or {}
+                            if isinstance(function, dict):
+                                arguments = function.get("arguments")
+                                meaningful_tool_progress |= (
+                                    isinstance(arguments, str) and bool(arguments.strip())
+                                    or bool(raw_tool_call.get("id")) and raw_tool_call.get("id") != previous.get("tool_call_id")
+                                    or bool(function.get("name")) and function.get("name") != previous.get("tool_id")
+                                )
                         _merge_stream_tool_call(tool_fragments, raw_tool_call)
-                    if raw_tool_calls and any(
+                    if raw_tool_calls and (nvidia_tail or any(
                         _is_json_argument_prefix(str(fragment.get("arguments", "")))
                         for fragment in tool_fragments.values()
-                    ):
-                        # A tool call is assembled only after the provider sends
-                        # a finish reason, but receiving any valid fragment is
-                        # already actionable provider progress. Keep that
-                        # signal internal so the adapter does not retry a
-                        # request after a disconnect halfway through a typed
-                        # submission.
-                        yield {"type": "provider_activity", "public": True}
+                    )):
+                        # Public fragments prevent replay, including Ultra's
+                        # whitespace or malformed JSON prefixes. Only new ids
+                        # or non-whitespace arguments advance its idle clock;
+                        # tool assembly still requires validated JSON at finish.
+                        yield {"type": "provider_activity", "public": True,
+                               **({"meaningful": meaningful_tool_progress} if nvidia_tail else {})}
                     candidate_finish_reason = choice.get("finish_reason")
                     if candidate_finish_reason is not None:
                         if not isinstance(candidate_finish_reason, str) or not candidate_finish_reason:
@@ -326,20 +474,46 @@ async def async_stream_chat_completion(
                                 "LLM provider returned an unexpected streaming response shape"
                             )
                         finish_reason = candidate_finish_reason
+                        if nvidia_tail:
+                            if isinstance(payload.get("usage"), dict):
+                                completed_usage = payload["usage"]
+                            if tail_deadline is None:
+                                tail_deadline = asyncio.get_running_loop().time() + config.timeout_s
+                            continue
                         for tool_call in _complete_stream_tool_calls(tool_fragments):
                             yield {"type": "tool_call", "tool_call": tool_call}
                         yield {
                             "type": "done",
                             "finish_reason": finish_reason,
                             "model": model,
+                            **({"usage": payload["usage"]} if isinstance(payload.get("usage"), dict) else {}),
+                            **({"provider_request_id": payload["id"]}
+                               if isinstance(payload.get("id"), str) and payload["id"] else {}),
                         }
                         return
     except LLMUpstreamError:
         raise
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, TimeoutError) as exc:
         raise LLMUpstreamError(
             f"LLM provider request failed: {type(exc).__name__}"
         ) from exc
+    if nvidia_tail and finish_reason is not None:
+        if completed_usage is None or any(type(completed_usage.get(field)) is not int or completed_usage[field] < 0
+                for field in ("prompt_tokens", "completion_tokens")):
+            raise LLMUpstreamError("NVIDIA completion ended without valid token usage")
+        # NVIDIA reports usage after finish_reason. Close the HTTP response and
+        # client before exposing tools/done: the Agent closes this generator at done.
+        # A real output-limit finish owns the failure: even parseable fragments
+        # are incomplete execution intent. Preserve its usage and length status
+        # for the Core, rather than misclassifying partial JSON as a retryable
+        # tool-argument correction and dropping the provider's final accounting.
+        if finish_reason != "length":
+            for tool_call in _complete_stream_tool_calls(tool_fragments):
+                yield {"type": "tool_call", "tool_call": tool_call}
+        yield {"type": "done", "finish_reason": finish_reason, "model": model,
+            "usage": completed_usage,
+            **({"provider_request_id": provider_request_id} if provider_request_id else {})}
+        return
     raise LLMUpstreamError("LLM provider ended the stream without a completion")
 
 
@@ -358,24 +532,70 @@ def _chat_request_payload(
             base_url=config.base_url,
             provider_id=config.provider_id,
             model=config.model,
+            data_location=config.data_location,
         )
     except EgressPolicyError as exc:
         # A broken policy blocks the call; it never falls back to sending more.
         raise LLMUpstreamError(f"Data-sharing policy is invalid: {exc}") from exc
+    if any(message.get("attachment_image") for message in guarded):
+        from ..agent.attachments import expand_images
+        from ..egress import current_project
+        project = current_project()
+        guarded = expand_images(guarded, project, supports_vision=bool(config.supports_vision) and project is not None)
     payload: dict[str, Any] = {
         "model": config.model,
         "messages": guarded,
         "stream": stream,
     }
+    if stream and is_nvidia_ultra(config):
+        # Request accounting under the OpenAI-compatible contract. Ultra's live
+        # support remains unverified; a rejection must not retry without this field.
+        payload["stream_options"] = {"include_usage": True}
     if tools:
         payload["tools"] = tools
     if model_config:
         # Only server-owned, provider-neutral request controls cross this
         # boundary. The planner never forwards arbitrary model parameters.
-        for key in ("tool_choice", "thinking", "max_tokens"):
+        for key in ("tool_choice", "thinking", "reasoning_effort", "max_tokens"):
             if key in model_config:
                 payload[key] = model_config[key]
+    efforts = config.reasoning_efforts if config.reasoning_efforts is not None else default_efforts(config.model)
+    if efforts and "thinking" not in payload and "reasoning_effort" not in payload:
+        # The effort is always stated: a gateway serving the same model
+        # (Magpie/WorkBuddy) otherwise answers without thinking.
+        effort = agent_reasoning_effort(config)
+        # WorkBuddy's DeepSeek route treats any reasoning_effort as enabling
+        # thinking. Other compatible providers (including NVIDIA) accept the
+        # standard "none" value and must not receive DeepSeek-only controls.
+        if effort == "none" and is_deepseek_v4(config):
+            payload["thinking"] = {"type": "disabled"}
+        else:
+            payload["reasoning_effort"] = effort
+    if is_nvidia_ultra(config):
+        # Official ChatRequest schema: max_tokens is supported, 1..32768
+        # (documented default 16384). These are Workbench's bounded defaults;
+        # a caller's explicit limit stays authoritative, including validation.
+        payload.setdefault("max_tokens", 8192 if payload.get("reasoning_effort") == "none" else 32768)
     return payload
+
+
+def agent_reasoning_effort(config: LLMConfig | None = None) -> str:
+    """Effort for requests that do not bound it: WORKBENCH_REASONING_EFFORT, else the
+    model's choice in the Agent's model menu, else the documented V4 default ``high``.
+
+    Evaluation runs set the variable to compare a strong configuration (``max``)
+    and a weak one (``none``, no thinking) on the same tasks, whatever is stored.
+    """
+
+    stored = config.reasoning_effort if config is not None else None
+    efforts = (config.reasoning_efforts if config is not None and config.reasoning_efforts is not None
+               else default_efforts(config.model) if config is not None else ())
+    # The documented V4 default, else the strongest effort the model lists.
+    default = "high" if not efforts or "high" in efforts else efforts[-1]
+    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or stored or default
+    if value not in REASONING_EFFORTS:
+        raise LLMUpstreamError(f"WORKBENCH_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}")
+    return value
 
 
 def _merge_stream_tool_call(

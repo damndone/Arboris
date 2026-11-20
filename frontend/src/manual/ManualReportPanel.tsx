@@ -78,7 +78,7 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately partial dependency list.
   }, [projectRoot, runId]);
 
   async function newDraft() {

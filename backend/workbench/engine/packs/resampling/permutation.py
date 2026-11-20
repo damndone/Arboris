@@ -9,7 +9,9 @@ from typing import Any
 
 import numpy as np
 
+from workbench import native_kernels
 from workbench.contracts.model.replicate_combine import ReplicatePlan
+from workbench.engine.replicate_combine.runner import _derive_seed as derive_seed
 from workbench.engine.replicate_combine import (
     ReplicateAdapter,
     ReplicateCombiner,
@@ -35,6 +37,9 @@ from workbench.contracts.model.resampling import PERMUTATION_ALTERNATIVES
 
 
 
+_UNSET = object()
+
+
 def _reject(reason_code: str, message: str) -> None:
     raise ResamplingPackError(reason_code, message)
 
@@ -54,6 +59,7 @@ class _PermutationStrategy(ReplicateStrategy):
         self._pooled = np.concatenate((left, right))
         self._statistic_id = statistic_id
         self._exact = exact
+        self._batch = _UNSET
         self._exact_assignments = (
             tuple(combinations(range(len(self._pooled)), self._left_size))
             if exact
@@ -75,6 +81,12 @@ class _PermutationStrategy(ReplicateStrategy):
             left = self._pooled[left_mask]
             right = self._pooled[~left_mask]
         else:
+            if self._batch is _UNSET:
+                seeds = [derive_seed(plan.seed, index) for index in range(plan.requested_replicates)]
+                self._batch = native_kernels.permutation_statistics(
+                    self._pooled, self._left_size, seeds, self._statistic_id)
+            if self._batch is not None and math.isfinite(self._batch[replicate_index]):
+                return ReplicateEvidence(scalars={"statistic": float(self._batch[replicate_index])})
             generator = np.random.default_rng(seed)
             shuffled = generator.permutation(self._pooled)
             left = shuffled[: self._left_size]

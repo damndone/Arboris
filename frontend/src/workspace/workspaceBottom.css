@@ -141,11 +141,4 @@
   color: var(--tint-label);
 }
 
-.ws-runs__all {
-  display: inline-block;
-  margin-top: var(--space-2);
-  font-size: var(--text-small);
-  color: var(--tint);
-}
-
 .ws-bottom-panel__summary { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--label-secondary); font-size:11px; padding-inline:12px; }

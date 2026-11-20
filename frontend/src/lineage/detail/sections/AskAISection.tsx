@@ -233,7 +233,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     setError(null);
     setAnswer(null);
     try {
-      const response = await askAiForNode(packet, question);
+      const response = await askAiForNode(packet, question, projectRoot);
       if (
         latestContextIdentityRef.current !== requestIdentity ||
         requestVersionRef.current !== requestVersion

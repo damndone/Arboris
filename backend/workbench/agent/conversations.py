@@ -49,6 +49,9 @@ def summary(repository: JsonlSessionRepository, metadata: dict[str, Any]) -> dic
         else str(metadata.get("chain_id") or "").removeprefix("chain:") or "Analysis"
     )
     parent = metadata.get("inherited_parent_ref") or None
+    from .desktop_notifications import supported
+    notice = next((entry.payload for entry in reversed(own)
+                   if entry.entry_type in {'desktop_notification_result', 'desktop_notification_attempt'}), None)
     return {
         "session_id": session_id,
         "role": role,
@@ -63,6 +66,9 @@ def summary(repository: JsonlSessionRepository, metadata: dict[str, Any]) -> dic
         "archived": bool(metadata.get("archived")),
         "status": metadata.get("status"),
         "forked_from": parent.get("session_id") if isinstance(parent, dict) else None,
+        "desktop_notifications": metadata.get("desktop_notifications") is True,
+        "desktop_notifications_supported": supported(),
+        "desktop_notification_status": notice.get('status') if notice else None,
     }
 
 

@@ -1,15 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { PostEstimationResult } from "../../api";
+import { ApiError } from "../../api";
 import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
@@ -19,176 +10,45 @@ import type { LlmConfigInfo, LlmProvider } from "../../llm/llmTypes";
 import { useForest } from "../ForestContext";
 import { useWorkbench } from "../WorkbenchStateProvider";
 import { useAgentNavigationOptional } from "./agentNavigation";
-import {
-  abortAgentTurn,
-  createAgentSession,
-  createAgentForkProposal,
-  confirmAgentProposal,
-  declineAgentProposal,
-  fallbackProjectContext,
-  getAgentEvents,
-  getAgentCapabilities,
-  getAgentOperationProjection,
-  getAgentSession,
-  getAgentSessionProjection,
-  forkAgentSession,
-  pinAgentChapter,
-  reconcileAgentOperation,
-  rewindAgentSession,
-  compactAgentSession,
-  unpinAgentChapter,
-  reviseAgentProposal,
-  sendAgentTurn,
-} from "./agentApi";
-import type {
-  AgentChapter,
-  AgentSession,
-  AgentContextPacket,
-  AgentCapabilityCatalog,
-  AgentEvent,
-  AgentHierarchyNode,
-  AgentMessage,
-  AgentModelOption,
-  AgentNavigationRef,
-  AgentOperationRecord,
-  AgentProposal,
-  AgentRole,
-} from "./agentTypes";
-import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
-import type { ApiError } from "../../api";
-
-/** Terminal operation-record states — reconcile polling stops here. */
-const TERMINAL_OPERATION_STATUSES = new Set([
-  "completed",
-  "failed",
-  "stale",
-  "cancelled",
-]);
-
-export interface AgentOperationStatus {
-  record_id: string;
-  operation_id: string;
-  status: string;
-  target_run_id: string | null;
-  /** Program output captured from a sandboxed operation (code.execute). */
-  stdout: string | null;
-  /** Results of declared post-estimation steps in a completed workflow.
-   *
-   * A confirmed workflow that reports only "completed" leaves the question
-   * that prompted it unanswered, so the transcript carries the numbers it
-   * produced. */
-  postEstimationResults: PostEstimationResult[];
-  diff_ref: Record<string, unknown> | null;
-  verification: Record<string, unknown>;
-  diffFocused: boolean;
-}
-
-function toOperationStatus(
-  record: AgentOperationRecord,
-  diffFocused = false,
-): AgentOperationStatus {
-  const outputs = record.outputs as
-    | {
-        target_run_id?: unknown;
-        stdout?: unknown;
-        post_estimation_results?: unknown;
-      }
-    | undefined;
-  const target = outputs && typeof outputs === "object" ? outputs.target_run_id : null;
-  const stdout = outputs && typeof outputs === "object" ? outputs.stdout : null;
-  const rawResults =
-    outputs && typeof outputs === "object" ? outputs.post_estimation_results : null;
-  const rawDiff = record.diff_ref;
-  const rawVerification = record.verification;
-  return {
-    record_id: record.record_id,
-    operation_id: record.operation_id,
-    status: record.status,
-    target_run_id: typeof target === "string" ? target : null,
-    stdout: typeof stdout === "string" && stdout.length > 0 ? stdout : null,
-    postEstimationResults: Array.isArray(rawResults)
-      ? (rawResults.filter(
-          (entry) =>
-            entry !== null &&
-            typeof entry === "object" &&
-            typeof (entry as PostEstimationResult).operation_id === "string" &&
-            typeof (entry as PostEstimationResult).result === "object",
-        ) as PostEstimationResult[])
-      : [],
-    diff_ref: rawDiff && typeof rawDiff === "object"
-      ? rawDiff as Record<string, unknown>
-      : null,
-    verification: rawVerification && typeof rawVerification === "object"
-      ? rawVerification as Record<string, unknown>
-      : {},
-    diffFocused,
-  };
-}
-
-const MAX_GLOBAL_PROJECT_NODES = 120;
-const MAX_GLOBAL_PROJECT_RUNS = 200;
-
-function boundedGlobalProjectContext(
-  projectRoot: string,
-  forest: { forest: ForestViewModel; activeRunId: string },
-): AgentContextPacket {
-  const view = forest.forest;
-  const nodes = view.nodes.slice(0, MAX_GLOBAL_PROJECT_NODES).map((node) => ({
-    node_key: node.nodeKey,
-    kind: node.kind,
-    stage: node.stage,
-    title: node.title,
-    summary: node.summary ?? null,
-    runs: node.runs.slice(0, 12),
-  }));
-  const runs = Array.from(new Set(view.nodes.flatMap((node) => node.runs)))
-    .slice(0, MAX_GLOBAL_PROJECT_RUNS);
-  const heads = view.heads.map((head) => ({
-    run_id: head.runId,
-    head_node_hash: head.headNodeHash,
-    status: head.status,
-    rerun_of: head.rerunOf,
-    created_at: head.createdAt,
-  }));
-  const headFingerprint = view.heads
-    .map((head) => `${head.runId}:${head.headNodeHash ?? "none"}:${head.status ?? "unknown"}`)
-    .join("|");
-
-  return {
-    packet_version: "agent-project-context/v1",
-    context_fingerprint: `project:${projectRoot}:heads:${headFingerprint}:nodes:${view.nodes.length}`,
-    scope: "global_project",
-    project_overview: {
-      family_count: view.familyCount,
-      run_count: view.familyRunCount,
-      active_head_run_id: forest.activeRunId,
-      heads,
-      runs,
-      nodes,
-      truncation: {
-        nodes_truncated: view.nodes.length > MAX_GLOBAL_PROJECT_NODES,
-        runs_truncated: runs.length >= MAX_GLOBAL_PROJECT_RUNS,
-        raw_datasets_included: false,
-        full_artifacts_included: false,
-      },
-    },
-    response_guardrails: {
-      advisory_text_only: true,
-      executable_actions_allowed: false,
-      graph_mutations_allowed: false,
-      file_reads_allowed: false,
-      must_disclose_visibility_limits: true,
-    },
-  };
-}
-
+import { approveAgentPlan, getAgentPlan, getAgentPlanPreflight, getAgentPlanVerification, patchAgentPlan, getAgentTurnState, continueAgentTurn, resumeAgentTurn, queueAgentTurnMessage, abortAgentTurn, createAgentSession, createAgentForkProposal, confirmAgentProposal, declineAgentProposal, fallbackProjectContext, getAgentEvents, getAgentCapabilities, getAgentOperationProjection, agentAttachmentUrl, getAgentSession, uploadAgentAttachment, getAgentSessionProjection, forkAgentSession, pinAgentChapter, reconcileAgentOperation, rewindAgentSession, compactAgentSession, unpinAgentChapter, reviseAgentProposal, sendAgentTurn } from "./agentApi";
+import type { AgentPlan, AgentPlanPatch, AgentPlanVersion, AgentPlanPreflight, AgentPlanVerification, AgentDurableTurn, AgentChapter, AgentSession, AgentContextPacket, AgentCapabilityCatalog, AgentEvent, AgentHierarchyNode, AgentMessage, AgentModelOption, AgentModelSettings, AgentNavigationRef, AgentProposal, AgentRole } from "./agentTypes";
+import { groupPendingProposals } from "./proposalGroups";
+import { updateActiveToolCalls, type ActiveToolCall } from "./toolActivity";
+import { TERMINAL_OPERATION_STATUSES, type AgentOperationStatus, toOperationStatus, boundedGlobalProjectContext, readConversation, writeConversation } from "./agentSurfaceHelpers";
 export interface AgentSurfaceContextValue {
+  executionMode?: "ask" | "auto";
+  setExecutionMode?: (mode: "ask" | "auto") => void;
+  /** Reveal the current plan without approving or executing it. */
+  showPlan?: () => void;
+  planViewRequest?: number;
+  plan?: AgentPlan | null;
+  planVersions?: AgentPlanVersion[];
+  planBusy?: boolean;
+  planError?: string | null;
+  planVerification?: AgentPlanVerification | null;
+  planVerificationBusy?: boolean;
+  planVerificationError?: string | null;
+  verifyPlan?: () => Promise<void>;
+  readPlanPreflight?: () => Promise<AgentPlanPreflight>;
+  refreshPlan?: () => Promise<void>;
+  savePlan?: (draft: AgentPlanPatch) => Promise<void>;
+  approvePlan?: (version: number) => Promise<void>;
+  approveAndRunPlan?: (version: number) => Promise<void>;
+  durableTurns?: AgentDurableTurn[];
+  providerSteps?: AgentEvent[];
+  continueTurn?: () => Promise<void>;
+  resumeTurn?: (turnId: string) => Promise<void>;
+  queueTurnMessage?: (kind: "steer" | "follow_up", text: string) => Promise<void>;
+  queueMessageBusy?: boolean;
+  queueMessageNotice?: string | null;
   messages: AgentMessage[];
   prompt: string;
   setPrompt: (value: string) => void;
   executionPolicy?: "auto_read_only" | "proposal_only";
   setExecutionPolicy?: (value: "auto_read_only" | "proposal_only") => void;
-  sendPrompt: (value?: string) => Promise<void>;
+  sendPrompt: (value?: string, attachments?: AgentMessage["attachments"]) => Promise<void>;
+  attachFile?: (file: File) => Promise<NonNullable<AgentMessage["attachments"]>[number]>;
+  attachmentUrl?: (attachmentId: string) => string;
   abortTurn: () => Promise<void>;
   isSubmitting: boolean;
   error: string | null;
@@ -200,6 +60,7 @@ export interface AgentSurfaceContextValue {
   contextWindowAssumed?: boolean;
   /** Above this the earlier conversation is summarized before the next step. */
   compactAtTokens?: number | null;
+  contextBreakdown?: { label: string; tokens: number }[];
   /** Summarize the earlier conversation now (optionally keeping something in particular). */
   compactConversation?: (focus?: string) => Promise<void>;
   compacting?: boolean;
@@ -212,10 +73,13 @@ export interface AgentSurfaceContextValue {
   model: string;
   modelOptions: AgentModelOption[];
   setModel: (value: string) => Promise<void>;
+  /** Save the thinking effort or context window of one of the active provider's models. */
+  setModelSettings?: (requestModel: string, patch: AgentModelSettings) => Promise<void>;
   sessionStatus: string;
   proposals: AgentProposal[];
   confirmationBusyId: string | null;
-  confirmProposal: (proposalId: string) => Promise<void>;
+  confirmProposal: (proposalId: string, options?: { grantSession: true }) => Promise<void>;
+  confirmProposals?: (proposalIds: string[]) => Promise<void>;
   declineProposal: (proposalId: string, reason?: string) => Promise<boolean>;
   reviseProposal: (
     proposalId: string,
@@ -237,6 +101,7 @@ export interface AgentSurfaceContextValue {
   activeOperation: AgentOperationStatus | null;
   eventCursor: number;
   lastEventType: string | null;
+  activeToolCalls?: ActiveToolCall[];
   liveResponseText: string;
   activeTurnStartedAt?: number | null;
   capabilityCatalog?: AgentCapabilityCatalog | null;
@@ -252,34 +117,6 @@ export function useAgentSurface(): AgentSurfaceContextValue {
 
 export function useAgentSurfaceOptional(): AgentSurfaceContextValue | null {
   return useContext(AgentSurfaceContext);
-}
-
-// Which conversation a node or page continues. Kept across browser restarts
-// (it was per-tab sessionStorage, so closing the tab "lost" the conversation);
-// a value left in sessionStorage by an older build is carried over once.
-function readConversation(key: string): string | null {
-  try {
-    const stored = localStorage.getItem(key);
-    if (stored) return stored;
-    const legacy = sessionStorage.getItem(key);
-    if (legacy) {
-      localStorage.setItem(key, legacy);
-      sessionStorage.removeItem(key);
-    }
-    return legacy;
-  } catch {
-    return null;
-  }
-}
-
-function writeConversation(key: string, sessionId: string | null): void {
-  try {
-    if (sessionId) localStorage.setItem(key, sessionId);
-    else localStorage.removeItem(key);
-    sessionStorage.removeItem(key);
-  } catch {
-    // Storage can be unavailable (private windows); the conversation itself is on disk.
-  }
 }
 
 export function AgentSurfaceProvider({
@@ -306,6 +143,8 @@ export function AgentSurfaceProvider({
       return "";
     }
   });
+  const latestPromptRef = useRef(prompt);
+  latestPromptRef.current = prompt;
   const setPrompt = useCallback((value: string) => {
     setPromptState(value);
     try {
@@ -315,22 +154,67 @@ export function AgentSurfaceProvider({
       // Storage may be unavailable; the draft still lives for this page.
     }
   }, [draftKey]);
-  const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
+  const [{executionMode, executionPolicy}, setExecutionSettings] = useState<{
+    executionMode: "ask" | "auto"; executionPolicy: "auto_read_only" | "proposal_only";
+  }>({executionMode: "ask", executionPolicy: "proposal_only"});
+  const setExecutionMode = useCallback((mode: "ask" | "auto") => {
+    setExecutionSettings(current => ({executionMode: mode,
+      executionPolicy: mode === "auto" ? "auto_read_only" : current.executionPolicy}));
+  }, []);
+  const setExecutionPolicy = useCallback((policy: "auto_read_only" | "proposal_only") => {
+    setExecutionSettings(current => ({executionPolicy: policy,
+      executionMode: policy === "proposal_only" ? "ask" : current.executionMode}));
+  }, []);
+  const [planViewRequest, setPlanViewRequest] = useState(0);
+  const showPlan = useCallback(() => setPlanViewRequest(request => request + 1), []);
+  const [plan, setPlan] = useState<AgentPlan|null>(null);
+  const latestPlanRef = useRef(plan);
+  latestPlanRef.current = plan;
+  const [planVersions, setPlanVersions] = useState<AgentPlanVersion[]>([]);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState<string|null>(null);
+  const [planVerification, setPlanVerification] = useState<AgentPlanVerification | null>(null);
+  const [planVerificationBusy, setPlanVerificationBusy] = useState(false);
+  const [planVerificationError, setPlanVerificationError] = useState<string | null>(null);
+  const planVerificationRevision = useRef(0);
+  const [durableTurns, setDurableTurns] = useState<AgentDurableTurn[]>([]);
+  const [queueMessageBusy, setQueueMessageBusy] = useState(false);
+  const [queueMessageNotice, setQueueMessageNotice] = useState<string|null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sessionStatus, setSessionStatus] = useState("idle");
+  useEffect(() => { setPlanViewRequest(0); }, [sessionId]);
+  useEffect(() => {
+    planVerificationRevision.current += 1;
+    setPlanVerification(null);setPlanVerificationBusy(false);setPlanVerificationError(null);
+  }, [sessionId, plan?.plan_id, plan?.version]);
+  const planReadRevisionRef = useRef(0);
+  const turnReadRevisionRef = useRef(0);
+  const currentSessionRef = useRef(sessionId);
+  currentSessionRef.current = sessionId;
+  const [persistedSessionStatus, setSessionStatus] = useState("idle");
   // How full the next request is, as the server builds it (tool results and
   // standing instructions included, earlier summarized parts not).
   const [serverContext, setServerContext] = useState<AgentSession["context"] | null>(null);
   const [compacting, setCompacting] = useState(false);
   // Bumped to load another conversation (or none) for the same view.
   const [conversationVersion, setConversationVersion] = useState(0);
+  const restoredSessionRef = useRef<string | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
+  const latestProposalsRef = useRef(proposals);
+  latestProposalsRef.current = proposals;
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
   const [eventCursor, setEventCursor] = useState(0);
+  const [providerSteps, setProviderSteps] = useState<AgentEvent[]>([]);
   const [lastEventType, setLastEventType] = useState<string | null>(null);
+  const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [liveResponseText, setLiveResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Session metadata and replayed progress can outlive the runtime. Confirmed
+  // interrupted checkpoints take precedence, including over a late session poll.
+  // An explicit Resume still owns its live request while recovery is in flight.
+  const sessionStatus = !isSubmitting && durableTurns.length > 0
+    && durableTurns.every(turn => turn.status === "interrupted")
+    ? "interrupted" : persistedSessionStatus;
   const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [navigationLinks, setNavigationLinks] = useState<AgentNavigationRef[]>([]);
@@ -340,6 +224,8 @@ export function AgentSurfaceProvider({
   const [capabilityCatalog, setCapabilityCatalog] = useState<AgentCapabilityCatalog | null>(null);
   const activeTurnControllerRef = useRef<AbortController | null>(null);
   const activeTurnSessionIdRef = useRef<string | null>(null);
+  const confirmationControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { confirmationControllerRef.current?.abort(); }, []);
 
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
@@ -420,14 +306,28 @@ export function AgentSurfaceProvider({
   const activeScopeRef = useRef(sessionScope);
   const optimisticMessageCounterRef = useRef(0);
   const eventCursorRef = useRef(0);
+  const activeEventCommandRef = useRef<{ commandId: string | null; startedAt: number | null } | null>(null);
   const applyEvents = useCallback((events: AgentEvent[]) => {
     const unseen = events
       .filter((event) => event.seq > eventCursorRef.current)
       .sort((left, right) => left.seq - right.seq);
     if (unseen.length === 0) return;
     const latest = unseen[unseen.length - 1];
+    const observations = unseen.filter(event => event.event_type === "provider_step");
+    if (observations.length) setProviderSteps(current => [...current, ...observations]);
     eventCursorRef.current = latest.seq;
+    setActiveToolCalls(current => updateActiveToolCalls(current, unseen));
     for (const event of unseen) {
+      if (event.event_type === "turn_start") {
+        const commandId = event.command_id ?? null;
+        if (!activeEventCommandRef.current || activeEventCommandRef.current.commandId !== commandId) {
+          const startedAt = Date.parse(event.created_at);
+          activeEventCommandRef.current = { commandId, startedAt: Number.isFinite(startedAt) ? startedAt : null };
+        }
+        // Tool and numeric-rewrite rounds share the request's clock. The
+        // session/turn status owns whether the timer is visible or running.
+        setActiveTurnStartedAt(activeEventCommandRef.current.startedAt);
+      }
       if (event.event_type === "message_start") {
         setLiveResponseText("");
       } else if (event.event_type === "message_update") {
@@ -444,7 +344,9 @@ export function AgentSurfaceProvider({
       }
     }
     setEventCursor((current) => Math.max(current, latest.seq));
-    setLastEventType(latest.event_type);
+    // Usage observations do not change the work currently visible to the user.
+    const activity = [...unseen].reverse().find(event => event.event_type !== "provider_step");
+    if (activity) setLastEventType(activity.event_type);
   }, []);
   const replayEvents = useCallback(async (
     activeSessionId: string,
@@ -452,8 +354,9 @@ export function AgentSurfaceProvider({
     scope: string,
   ) => {
     const result = await getAgentEvents(projectRoot, activeSessionId, afterSeq);
-    if (activeScopeRef.current !== scope || !Array.isArray(result.events)) return;
+    if (activeScopeRef.current !== scope || currentSessionRef.current !== activeSessionId || !Array.isArray(result.events)) return;
     applyEvents(result.events);
+    return result.events.filter(event => event.seq > afterSeq);
   }, [applyEvents, projectRoot]);
   const refreshNavigation = useCallback(async (
     activeSessionId: string,
@@ -475,9 +378,16 @@ export function AgentSurfaceProvider({
     activeTurnControllerRef.current?.abort();
     activeTurnControllerRef.current = null;
     activeTurnSessionIdRef.current = null;
+    confirmationControllerRef.current?.abort();
+    confirmationControllerRef.current = null;
     activeScopeRef.current = sessionScope;
     optimisticMessageCounterRef.current = 0;
+    currentSessionRef.current = null;
+    planReadRevisionRef.current += 1;turnReadRevisionRef.current += 1;
     setSessionId(null);
+    setExecutionMode("ask");latestPlanRef.current=null;setPlan(null);setPlanVersions([]);setPlanError(null);setPlanBusy(false);
+    setPlanVerification(null);setPlanVerificationBusy(false);setPlanVerificationError(null);
+    setDurableTurns([]);setQueueMessageNotice(null);setQueueMessageBusy(false);
     setMessages([]);
     setServerContext(null);
     setChapters([]);
@@ -491,22 +401,29 @@ export function AgentSurfaceProvider({
     setActiveOperation(null);
     setIsSubmitting(false);
     setActiveTurnStartedAt(null);
+    activeEventCommandRef.current = null;
     setConfirmationBusyId(null);
     setEventCursor(0);
+    setProviderSteps([]);
     eventCursorRef.current = 0;
     setLastEventType(null);
+    setActiveToolCalls([]);
     setLiveResponseText("");
-    const stored = linkedSessionId ?? readConversation(storageKey);
+    const restored = restoredSessionRef.current;
+    const stored = restored ?? linkedSessionId ?? readConversation(storageKey);
+    if (restored && !linkedSessionId) writeConversation(storageKey, restored);
     if (!stored) return () => { cancelled = true; };
     getAgentSession(projectRoot, stored)
       .then(async (session) => {
         if (cancelled) return;
+        if (restoredSessionRef.current === restored) restoredSessionRef.current = null;
         setSessionId(session.session_id);
         setMessages(session.messages);
         setServerContext(session.context ?? null);
         setChapters(session.chapters ?? []);
         setProposals(session.proposals ?? []);
         setSessionStatus(session.status ?? "idle");
+        setExecutionMode(session.execution_mode ?? "ask");
         await refreshNavigation(session.session_id, sessionScope);
         if (linkedOperationId) {
           try {
@@ -543,12 +460,25 @@ export function AgentSurfaceProvider({
   }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
 
   useEffect(() => {
-    if (!sessionId || !isSubmitting) return;
+    if (!sessionId) return;
     let cancelled = false;
+    let refreshPending = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        await replayEvents(sessionId, eventCursor, sessionScope);
+        const events = await replayEvents(sessionId, eventCursorRef.current, sessionScope);
+        if (cancelled) return;
+        // Other entry points can continue a session while this page is idle or
+        // awaiting approval. Keep tailing; token deltas and usage observations
+        // use their existing projections without downloading the full history.
+        if (events?.some(event => !["message_update", "provider_step"].includes(event.event_type))) refreshPending = true;
+        if (refreshPending) {
+          const result = await getAgentSession(projectRoot, sessionId);
+          if (!cancelled && currentSessionRef.current === sessionId && activeScopeRef.current === sessionScope) {
+            setMessages(result.messages);setProposals(result.proposals ?? []);setSessionStatus(result.status ?? "idle");
+            refreshPending = false;
+          }
+        }
       } catch {
         // The request-response turn remains authoritative if polling fails.
       }
@@ -559,7 +489,7 @@ export function AgentSurfaceProvider({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [eventCursor, isSubmitting, replayEvents, sessionId, sessionScope]);
+  }, [isSubmitting, replayEvents, sessionId, sessionScope, projectRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -600,6 +530,10 @@ export function AgentSurfaceProvider({
           context_window_tokens: llmConfig.context_window_tokens,
           supports_1m: llmConfig.supports_1m,
           supports_vision: llmConfig.supports_vision,
+          // No provider record to save a choice on: the menu shows no thinking or limit control.
+          reasoning_efforts: [],
+          reasoning_effort: null,
+          context_limit_tokens: null,
         }]
       : [];
   }, [activeProvider, llmConfig?.model]);
@@ -623,9 +557,10 @@ export function AgentSurfaceProvider({
   // the window the server assumes for compaction, shown as an assumption.
   const activeModelRecord = modelOptions.find((option) => option.request_model === model);
   const ONE_MILLION = 1_000_000;
+  const modelWindow = activeModelRecord?.context_window_tokens ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null);
+  const limit = activeModelRecord?.context_limit_tokens ?? null;
   const declaredWindow =
-    activeModelRecord?.context_window_tokens
-    ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null)
+    (modelWindow !== null && limit !== null ? Math.min(modelWindow, limit) : modelWindow ?? limit)
     ?? llmConfig?.context_window_tokens
     ?? (llmConfig?.supports_1m ? ONE_MILLION : null)
     ?? (serverContext?.window_declared ? serverContext.window_tokens : null);
@@ -639,7 +574,7 @@ export function AgentSurfaceProvider({
     node.opNodeId === linkedTarget.node_ref && node.runs.includes(String(linkedTarget.run_id)),
   );
   const scopeLabel = linkedSessionId
-    ? linkedNode ? `Linked chain · ${linkedNode.title}` : "Linked Agent session"
+    ? linkedNode ? linkedNode.title : "Linked Agent session"
     : isGlobalScope && resolvedFocus.focus.kind === "project"
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
     : resolvedFocus.label;
@@ -656,9 +591,169 @@ export function AgentSurfaceProvider({
     }
   }, [activeProvider, llmConfig?.model]);
 
-  const sendPrompt = useCallback(async (value = prompt) => {
+  const setModelSettings = useCallback(async (requestModel: string, patch: AgentModelSettings) => {
+    if (!activeProvider) return;
+    setError(null);
+    try {
+      const models = (activeProvider.models ?? []).map((item) =>
+        item.request_model === requestModel ? { ...item, ...patch } : item);
+      const updated = await updateLlmProvider(activeProvider.id, { models });
+      setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
+      // The config's window is the working one: the model's, capped by the limit just saved.
+      setLlmConfig(await fetchLlmConfig());
+      // The summary point follows the limit, so the ring must not keep the old one.
+      if (sessionId) {
+        const session = await getAgentSession(projectRoot, sessionId);
+        setServerContext(session.context ?? null);
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update the model settings");
+    }
+  }, [activeProvider, llmConfig?.model, projectRoot, sessionId]);
+
+  const latestAdmissionRef = useRef({isSubmitting, sessionStatus, durableTurns, executionMode});
+  latestAdmissionRef.current = {isSubmitting, sessionStatus, durableTurns, executionMode};
+
+  const refreshPlan = useCallback(async () => {
+    if (!sessionId || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    const revision = ++planReadRevisionRef.current;
+    try {
+      const result = await getAgentPlan(projectRoot, sessionId);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || revision !== planReadRevisionRef.current) return;
+      latestPlanRef.current=result.plan;setPlan(result.plan);setPlanVersions(result.versions);setPlanError(null);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planReadRevisionRef.current) setPlanError(reason instanceof Error ? reason.message : "Could not load plan.");
+    }
+  }, [projectRoot,sessionId,sessionScope]);
+  const readPlanPreflight = useCallback(() => {
+    if (!sessionId || activeScopeRef.current !== sessionScope) {
+      return Promise.reject(new Error("The conversation changed. Reload the current plan."));
+    }
+    return getAgentPlanPreflight(projectRoot, sessionId);
+  }, [projectRoot, sessionId, sessionScope]);
+  const verifyPlan = useCallback(async () => {
+    if (!sessionId || !latestPlanRef.current || planVerificationBusy) return;
+    const scope = sessionScope;
+    const revision = ++planVerificationRevision.current;
+    setPlanVerification(null);setPlanVerificationError(null);setPlanVerificationBusy(true);
+    try {
+      const result = await getAgentPlanVerification(projectRoot, sessionId);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || revision !== planVerificationRevision.current) return;
+      if (latestPlanRef.current?.plan_id !== result.plan_id || latestPlanRef.current.version !== result.plan_version) {
+        setPlanVerificationError("The plan changed. Reload it and check the current deliverables.");
+        return;
+      }
+      setPlanVerification(result);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planVerificationRevision.current)
+        setPlanVerificationError(reason instanceof Error ? reason.message : "Could not verify registered deliverables.");
+    } finally {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planVerificationRevision.current) setPlanVerificationBusy(false);
+    }
+  }, [projectRoot,sessionId,sessionScope,planVerificationBusy]);
+  const refreshTurnState = useCallback(async () => {
+    if (!sessionId || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    const revision = ++turnReadRevisionRef.current;
+    try {
+      const result = await getAgentTurnState(projectRoot,sessionId);
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === turnReadRevisionRef.current) setDurableTurns(result.turns);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === turnReadRevisionRef.current) setError(reason instanceof Error ? reason.message : "Could not load turn recovery state.");
+    }
+  }, [projectRoot,sessionId,sessionScope]);
+  useEffect(() => { void refreshPlan();void refreshTurnState(); }, [refreshPlan,refreshTurnState,eventCursor,isSubmitting]);
+  const savePlan = useCallback(async (draft: AgentPlanPatch) => {
+    if (!sessionId || planBusy) return;
+    const scope = sessionScope;
+    planReadRevisionRef.current += 1;
+    setPlanBusy(true);setPlanError(null);
+    try {
+      const result = await patchAgentPlan(projectRoot,sessionId,draft);
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) {latestPlanRef.current=result.plan;setPlan(result.plan);await refreshPlan();}
+    } finally { if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanBusy(false); }
+  }, [projectRoot,sessionId,sessionScope,planBusy,refreshPlan]);
+  const approvePlanVersion = useCallback(async (version: number): Promise<AgentPlan | null> => {
+    if (!sessionId || planBusy) return null;
+    const scope = sessionScope;
+    planReadRevisionRef.current += 1;
+    setPlanBusy(true);setPlanError(null);
+    try {
+      const result = await approveAgentPlan(projectRoot,sessionId,version);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId) return null;
+      latestPlanRef.current=result.plan;setPlan(result.plan);
+      await refreshPlan();
+      return result.plan;
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanError(reason instanceof Error ? reason.message : "Could not approve plan.");
+      return null;
+    } finally { if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanBusy(false); }
+  }, [projectRoot,sessionId,sessionScope,planBusy,refreshPlan]);
+  const approvePlan = useCallback(async (version: number) => { await approvePlanVersion(version); }, [approvePlanVersion]);
+  const queueTurnMessage = useCallback(async (kind: "steer"|"follow_up", text: string) => {
+    if (!sessionId || !text.trim() || queueMessageBusy || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    setQueueMessageBusy(true);setQueueMessageNotice(null);
+    try {
+      await queueAgentTurnMessage(projectRoot,sessionId,kind,text.trim());
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) {if (latestPromptRef.current === text) setPrompt("");setQueueMessageNotice(kind === "steer" ? "Direction queued for the next tool boundary." : "Follow-up queued after this turn.");}
+    } catch(reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setError(reason instanceof Error ? reason.message : "Could not queue message.");
+    } finally {if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setQueueMessageBusy(false);}
+  }, [projectRoot,sessionId,sessionScope,queueMessageBusy,setPrompt]);
+  const runContinuation = useCallback(async (turnId?: string) => {
+    if (!sessionId || isSubmitting || activeTurnControllerRef.current) return;
+    if (!turnId && (["running","working","cancelling"].includes(sessionStatus) || durableTurns.length)) return;
+    const scope = sessionScope;
+    if (activeScopeRef.current !== scope) return;
+    const controller = new AbortController();
+    activeTurnControllerRef.current=controller;activeTurnSessionIdRef.current=sessionId;
+    setIsSubmitting(true);setActiveTurnStartedAt(Date.now());setError(null);
+    try {
+      const result = turnId ? await resumeAgentTurn(projectRoot,sessionId,turnId,controller.signal) : await continueAgentTurn(projectRoot,sessionId,{
+        execution_mode:executionMode,execution_policy:executionPolicy,...(isGlobalScope ? {context_packet:contextPacket} : {}),
+      },controller.signal);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || controller.signal.aborted) return;
+      setMessages(result.session.messages);setServerContext(result.session.context ?? null);
+      setChapters(result.session.chapters ?? []);setProposals(result.session.proposals ?? []);setSessionStatus(result.status ?? "idle");
+      if (result.session.execution_mode) setExecutionMode(result.session.execution_mode);
+      await refreshNavigation(sessionId,scope);await replayEvents(sessionId,eventCursorRef.current,scope);
+    } catch(reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setError(controller.signal.aborted ? null : reason instanceof Error ? reason.message : "Could not continue turn.");
+    } finally {
+      if(activeTurnControllerRef.current===controller){activeTurnControllerRef.current=null;activeTurnSessionIdRef.current=null;}
+      if(activeScopeRef.current===scope && currentSessionRef.current===sessionId){setIsSubmitting(false);setActiveTurnStartedAt(null);void refreshTurnState();void refreshPlan();}
+    }
+  }, [projectRoot,sessionId,sessionScope,isSubmitting,sessionStatus,durableTurns,executionMode,executionPolicy,isGlobalScope,contextPacket,refreshNavigation,replayEvents,refreshTurnState,refreshPlan]);
+  const continueTurn = useCallback(() => runContinuation(),[runContinuation]);
+  const resumeTurn = useCallback((turnId: string) => runContinuation(turnId),[runContinuation]);
+
+  const approveAndRunPlan = useCallback(async (version: number) => {
+    const scope = sessionScope;
+    const admissible = () => {
+      const current = latestAdmissionRef.current;
+      return current.executionMode === "auto" && !current.isSubmitting && !activeTurnControllerRef.current
+        && !["running","working","cancelling"].includes(current.sessionStatus) && current.durableTurns.length === 0
+        && activeScopeRef.current === scope && currentSessionRef.current === sessionId;
+    };
+    if (!sessionId || !admissible() || latestPlanRef.current?.version !== version) return;
+    const approved = await approvePlanVersion(version);
+    if (!approved || !admissible()) return;
+    const current = latestPlanRef.current;
+    if (approved.version !== version || approved.approved_version !== version || approved.status !== "approved"
+        || current?.plan_id !== approved.plan_id || current.version !== version
+        || current.approved_version !== version || current.status !== "approved") {
+      setPlanError("The plan changed. Review the current version before running it.");
+      return;
+    }
+    await runContinuation();
+  }, [sessionId,sessionScope,approvePlanVersion,runContinuation]);
+
+  const sendPrompt = useCallback(async (value = prompt, attachments: AgentMessage["attachments"] = []) => {
     const question = value.trim();
-    if (!question || isSubmitting) return;
+    if (!question || isSubmitting || activeTurnControllerRef.current || confirmationControllerRef.current || ["running","working","cancelling"].includes(sessionStatus)) return;
+    if (durableTurns.length) {setError("An unfinished turn needs recovery. Resume the original turn before sending a new request.");return;}
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
     optimisticMessageCounterRef.current += 1;
@@ -671,6 +766,7 @@ export function AgentSurfaceProvider({
       stop_reason: null,
       error: null,
       navigation: [],
+      ...(attachments?.length ? { attachments } : {}),
     };
     // The transcript is the conversation surface, so a sent turn must be
     // visible before the provider round-trip completes. The durable response
@@ -682,6 +778,7 @@ export function AgentSurfaceProvider({
     setActiveTurnStartedAt(Date.now());
     setError(null);
     setLiveResponseText("");
+    setActiveToolCalls([]);
     const controller = new AbortController();
     activeTurnControllerRef.current = controller;
     activeTurnSessionIdRef.current = null;
@@ -721,8 +818,10 @@ export function AgentSurfaceProvider({
         controller.signal,
         isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
         executionPolicy,
+        executionMode,
+        (attachments ?? []).map((item) => item.attachment_id),
       );
-      if (activeScopeRef.current !== requestScope) return;
+      if (activeScopeRef.current !== requestScope || activeTurnControllerRef.current !== controller || controller.signal.aborted) return;
       setMessages(result.session.messages);
       setServerContext(result.session.context ?? null);
       setChapters(result.session.chapters ?? []);
@@ -735,6 +834,7 @@ export function AgentSurfaceProvider({
         // The durable session response still contains the completed turn.
       }
     } catch (requestError) {
+      if (activeScopeRef.current !== requestScope) return;
       if (controller.signal.aborted) {
         setError(null);
         setSessionStatus("cancelled");
@@ -752,106 +852,173 @@ export function AgentSurfaceProvider({
         setActiveTurnStartedAt(null);
       }
     }
-  }, [contextPacket, eventCursor, executionPolicy, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, executionPolicy, executionMode, sessionStatus, durableTurns, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
-    if (!controller || !isSubmitting) return;
-    const activeSessionId = activeTurnSessionIdRef.current;
+    const requestScope = sessionScope;
+    // Stopping confirmation suppresses the next model request; the operation's
+    // durable receipt still determines whether its effect completed.
+    if (confirmationControllerRef.current) {
+      confirmationControllerRef.current.abort();
+      if (!controller) return;
+    }
+    if (!isSubmitting && !["running","working","cancelling"].includes(sessionStatus)) return;
+    const activeSessionId = activeTurnSessionIdRef.current ?? sessionId;
     setError(null);
     setSessionStatus("cancelling");
     if (activeSessionId) {
       try {
         await abortAgentTurn(projectRoot, activeSessionId);
-      } catch {
-        // A completed turn can leave the active map between the click and this
-        // request. The local request still needs to stop without showing a
-        // misleading provider failure.
+      } catch (reason) {
+        // Only this typed response proves the server has no active owner.
+        // A transport/server failure must leave the original request attached.
+        if (!(reason instanceof ApiError && reason.status === 409 && reason.code === "AGENT_TURN_NOT_ACTIVE")) {
+          if (activeScopeRef.current !== requestScope || currentSessionRef.current !== activeSessionId
+              || (controller && activeTurnControllerRef.current !== controller)) return;
+          const detail = reason instanceof Error ? ` ${reason.message}` : "";
+          setError(`Could not confirm a stop. The server may still be running. Retry Stop or inspect the original turn before starting another request.${detail}`);
+          setSessionStatus((current) => current === "cancelling"
+            ? (isSubmitting || sessionStatus === "cancelling" ? "running" : sessionStatus) : current);
+          return;
+        }
       }
     }
-    controller.abort();
-    setSessionStatus("cancelled");
-  }, [isSubmitting, projectRoot]);
+    if (activeScopeRef.current !== requestScope
+        || (activeSessionId && currentSessionRef.current !== activeSessionId)
+        || (controller && activeTurnControllerRef.current !== controller)) return;
+    controller?.abort();
+    if (controller) setSessionStatus("cancelled");
+  }, [isSubmitting, projectRoot, sessionId, sessionStatus, sessionScope]);
 
-  const confirmProposal = useCallback(async (proposalId: string) => {
-    if (!sessionId || confirmationBusyId !== null) return;
+  const confirmProposals = useCallback(async (proposalIds: string[], options?: { grantSession: true }) => {
+    if (!sessionId || confirmationBusyId !== null || confirmationControllerRef.current) return;
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
-    const proposal = proposals.find((item) => item.proposal_id === proposalId);
-    if (!proposal || proposal.status !== "pending") return;
+    const selected = proposalIds.map(id => proposals.find(item => item.proposal_id === id));
+    if (!selected.length || new Set(proposalIds).size !== selected.length
+        || selected.some(item => !item || item.status !== "pending")) return;
+    const batch = selected as AgentProposal[];
+    if (batch.length > 1 && (batch.some(item => item.session_id !== sessionId) || !groupPendingProposals(proposals, capabilityCatalog).some(group =>
+      batch.every(item => group.includes(item))))) {
+      setError("These proposals require separate confirmations.");
+      return;
+    }
     const ownership = contextPacket.ownership;
     const activeHead = ownership && typeof ownership === "object"
       ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
       : undefined;
-    const proposalHead = proposal.preconditions.active_head_run_id;
-    const activeHeadRunId = linkedSessionId && typeof proposalHead === "string" && proposalHead
-      ? proposalHead
-      : typeof activeHead === "string" && activeHead ? activeHead
-      : forest?.activeRunId ?? runId;
-    setConfirmationBusyId(proposalId);
+    const controller = new AbortController();
+    confirmationControllerRef.current = controller;
+    setConfirmationBusyId(batch[0].proposal_id);
     setError(null);
+    const ownsSession = () => activeScopeRef.current === requestScope && currentSessionRef.current === sessionId;
     try {
-      const result = await confirmAgentProposal(projectRoot, sessionId, proposalId, {
-        revision: proposal.revision,
-        fingerprint: proposal.fingerprint,
-        active_head_run_id: activeHeadRunId,
-      });
-      if (activeScopeRef.current !== requestScope) return;
-      setProposals((current) => current.map((item) => (
-        item.proposal_id === proposalId ? result.proposal : item
-      )));
-      // Confirmation EXECUTES (design §8.2): surface the running operation
-      // and poll the idempotent reconcile endpoint until the backend proves a
-      // terminal state. The forest's own polling picks up the child run.
-      let operation = toOperationStatus(result.operation);
-      setActiveOperation(operation);
-      while (!TERMINAL_OPERATION_STATUSES.has(operation.status)) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        if (activeScopeRef.current !== requestScope) return;
-        const reconciled = await reconcileAgentOperation(
-          projectRoot,
-          sessionId,
-          operation.record_id,
-        );
-        if (activeScopeRef.current !== requestScope) return;
-        operation = toOperationStatus(reconciled.operation);
+      for (const proposal of batch) {
+        if (controller.signal.aborted || !ownsSession()) return;
+        const latest = latestProposalsRef.current.find(item => item.proposal_id === proposal.proposal_id);
+        if (!latest || latest.status !== "pending" || latest.revision !== proposal.revision || latest.fingerprint !== proposal.fingerprint) {
+          throw new Error("A selected proposal changed. Review it before confirming again.");
+        }
+        const proposalId = proposal.proposal_id;
+        setConfirmationBusyId(proposalId);
+        const proposalHead = proposal.preconditions.active_head_run_id;
+        const activeHeadRunId = typeof proposalHead === "string" && proposalHead
+          ? proposalHead
+          : typeof activeHead === "string" && activeHead ? activeHead
+          : forest?.activeRunId ?? runId;
+        const result = await confirmAgentProposal(projectRoot, sessionId, proposalId, {
+          revision: proposal.revision,
+          fingerprint: proposal.fingerprint,
+          active_head_run_id: activeHeadRunId,
+          ...(options?.grantSession && { grant_session: true }),
+        });
+        if (!ownsSession()) return;
+        setProposals((current) => current.map((item) => (
+          item.proposal_id === proposalId ? result.proposal : item
+        )));
+        // Confirmation EXECUTES (design §8.2): surface the running operation
+        // and poll the idempotent reconcile endpoint until the backend proves a
+        // terminal state. The forest's own polling picks up the child run.
+        let operation = toOperationStatus(result.operation);
         setActiveOperation(operation);
+        // Keep the real approval/initial operation receipt, but Stop or a
+        // closed surface ends observation; it does not cancel the operation.
+        if (controller.signal.aborted) return;
+        while (!TERMINAL_OPERATION_STATUSES.has(operation.status)) {
+          if (controller.signal.aborted || !ownsSession()) return;
+          await new Promise<void>((resolve) => {
+            const finish = () => {
+              clearTimeout(timer);
+              controller.signal.removeEventListener("abort", finish);
+              resolve();
+            };
+            const timer = setTimeout(finish, 1500);
+            controller.signal.addEventListener("abort", finish, { once: true });
+          });
+          if (controller.signal.aborted || !ownsSession()) return;
+          const reconciled = await reconcileAgentOperation(
+            projectRoot,
+            sessionId,
+            operation.record_id,
+          );
+          if (controller.signal.aborted || !ownsSession()) return;
+          operation = toOperationStatus(reconciled.operation);
+          setActiveOperation(operation);
+        }
+        await refreshNavigation(sessionId, requestScope);
+        if (!ownsSession()) return;
+        if (operation.status !== "completed") {
+          setError(`Operation ${proposalId} ${operation.status}. Remaining proposals were not run.`);
+          return;
+        }
       }
-      await refreshNavigation(sessionId, requestScope);
+      if (!controller.signal.aborted && ownsSession()) await runContinuation();
     } catch (requestError) {
-      if (activeScopeRef.current !== requestScope) return;
+      if (!ownsSession()) return;
       setError(requestError instanceof Error ? requestError.message : "Proposal confirmation failed");
     } finally {
-      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+      if (confirmationControllerRef.current === controller) confirmationControllerRef.current = null;
+      if (ownsSession()) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
+  }, [capabilityCatalog, confirmationBusyId, contextPacket, forest?.activeRunId, projectRoot, proposals, refreshNavigation, runContinuation, runId, sessionId, sessionScope]);
+  const confirmProposal = useCallback((proposalId: string, options?: { grantSession: true }) =>
+    confirmProposals([proposalId], options), [confirmProposals]);
 
   const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
-    if (!sessionId || confirmationBusyId !== null) return false;
+    if (!sessionId || confirmationBusyId !== null || confirmationControllerRef.current) return false;
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return false;
     const proposal = proposals.find((item) => item.proposal_id === proposalId);
     if (!proposal || proposal.status !== "pending") return false;
+    const ownsSession = () => activeScopeRef.current === requestScope && currentSessionRef.current === sessionId;
+    const controller = new AbortController();
+    confirmationControllerRef.current = controller;
     setConfirmationBusyId(proposalId);
     setError(null);
     try {
-      const result = await declineAgentProposal(projectRoot, sessionId, proposalId, reason);
-      if (activeScopeRef.current !== requestScope) return false;
+      const result = await declineAgentProposal(projectRoot, sessionId, proposalId,
+        { revision: proposal.revision, fingerprint: proposal.fingerprint, reason });
+      if (!ownsSession()) return false;
       setProposals((current) => current.map((item) => (
         item.proposal_id === proposalId ? result.proposal : item
       )));
       await refreshNavigation(sessionId, requestScope);
       await replayEvents(sessionId, eventCursor, requestScope);
+      if (ownsSession() && !controller.signal.aborted && result.continue_after_decline) {
+        await runContinuation();
+      }
       return true;
     } catch (requestError) {
-      if (activeScopeRef.current === requestScope) {
+      if (ownsSession()) {
         setError(requestError instanceof Error ? requestError.message : "Proposal decline failed");
       }
       return false;
     } finally {
-      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+      if (confirmationControllerRef.current === controller) confirmationControllerRef.current = null;
+      if (ownsSession()) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, eventCursor, projectRoot, proposals, refreshNavigation, replayEvents, sessionId, sessionScope]);
+  }, [confirmationBusyId, eventCursor, projectRoot, proposals, refreshNavigation, replayEvents, runContinuation, sessionId, sessionScope]);
 
   const reviseProposal = useCallback(async (
     proposalId: string,
@@ -939,6 +1106,7 @@ export function AgentSurfaceProvider({
     setChapters(session.chapters ?? []);
     setProposals(session.proposals ?? []);
     setSessionStatus(session.status ?? "idle");
+    setExecutionMode(session.execution_mode ?? "ask");
   }, []);
   const historyAction = useCallback(async (run: () => Promise<void>, failure: string) => {
     if (isSubmitting) return;
@@ -951,10 +1119,28 @@ export function AgentSurfaceProvider({
   }, [isSubmitting]);
   const rewindTo = useCallback((entryId: string) => historyAction(async () => {
     if (!sessionId) return;
+    const scope = sessionScope;
     const change = await rewindAgentSession(projectRoot, sessionId, entryId);
+    if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId) return;
+    restoredSessionRef.current = change.session.session_id;
+    writeConversation(storageKey, change.session.session_id);
+    if (linkedSessionId) {
+      const params = new URLSearchParams(searchParams);
+      params.set("agent_session", change.session.session_id);
+      params.delete("operation");params.delete("diff");
+      setSearchParams(params, {replace:true});
+    }
+    if (change.lineage) {
+      if (change.lineage.run_id) forest?.setActiveRunId(change.lineage.run_id);
+      const focus = change.lineage.focus;
+      workbench.dispatch.setAgentFocus(focus ? {kind:focus.kind,id:focus.id,runId:focus.run_id ?? undefined} : null);
+    }
+    setSessionId(change.session.session_id);
     showSession(change.session);
     if (change.restored_prompt) setPrompt(change.restored_prompt);
-  }, "Could not rewind the conversation"), [historyAction, projectRoot, sessionId, setPrompt, showSession]);
+    setConversationVersion(value => value + 1);
+  }, "Could not restore the analysis"), [historyAction, projectRoot, sessionId, sessionScope, storageKey,
+    linkedSessionId, searchParams, setSearchParams, forest, workbench.dispatch, setPrompt, showSession]);
   const forkConversation = useCallback((entryId: string) => historyAction(async () => {
     if (!sessionId) return;
     const change = await forkAgentSession(projectRoot, sessionId, entryId);
@@ -999,6 +1185,9 @@ export function AgentSurfaceProvider({
   const openConversation = useCallback((nextSessionId: string) => switchConversation(nextSessionId), [switchConversation]);
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
+    executionMode,setExecutionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    planVerification,planVerificationBusy,planVerificationError,verifyPlan,readPlanPreflight,
+    durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     messages,
     prompt,
     setPrompt,
@@ -1013,7 +1202,10 @@ export function AgentSurfaceProvider({
     contextWindowTokens,
     contextPercent,
     contextWindowAssumed,
+    attachFile: (file: File) => uploadAgentAttachment(projectRoot, file),
+    attachmentUrl: (attachmentId: string) => agentAttachmentUrl(projectRoot, attachmentId),
     compactAtTokens: serverContext?.compact_at_tokens ?? null,
+    contextBreakdown: serverContext?.breakdown ?? [],
     compactConversation,
     compacting,
     sessionId,
@@ -1022,10 +1214,12 @@ export function AgentSurfaceProvider({
     model,
     modelOptions,
     setModel,
+    setModelSettings,
     sessionStatus,
     proposals,
     confirmationBusyId,
     confirmProposal,
+    confirmProposals,
     declineProposal,
     reviseProposal,
     forkFromMessage,
@@ -1038,12 +1232,16 @@ export function AgentSurfaceProvider({
     navigationLinks,
     hierarchy,
     activeOperation,
-    eventCursor,
+    eventCursor,providerSteps,
     lastEventType,
+    activeToolCalls,
     liveResponseText,
     activeTurnStartedAt,
     capabilityCatalog,
   }), [
+    executionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    planVerification,planVerificationBusy,planVerificationError,verifyPlan,readPlanPreflight,
+    durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     activeOperation,
     contextPercent,
     contextUsedTokens,
@@ -1068,10 +1266,12 @@ export function AgentSurfaceProvider({
     sendPrompt,
     abortTurn,
     setModel,
+    setModelSettings,
     sessionStatus,
     proposals,
     confirmationBusyId,
     confirmProposal,
+    confirmProposals,
     declineProposal,
     reviseProposal,
     forkFromMessage,
@@ -1081,8 +1281,9 @@ export function AgentSurfaceProvider({
     pinChapter,
     unpinChapter,
     navigation,
-    eventCursor,
+    eventCursor,providerSteps,
     lastEventType,
+    activeToolCalls,
     liveResponseText,
     activeTurnStartedAt,
     capabilityCatalog,

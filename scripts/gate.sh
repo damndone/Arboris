@@ -247,6 +247,10 @@ run_frontend_typecheck() {
   ( cd frontend && npx tsc --noEmit )
 }
 
+run_frontend_lint() {
+  ( cd frontend && npx eslint . --max-warnings 0 )
+}
+
 run_diff_check() {
   git diff --check
   git diff --cached --check
@@ -348,7 +352,7 @@ run_quick() {
       backend/workbench/development_control/*|tests/test_devline_control_*.py|scripts/devline_control.py|AGENTS.md|.agent/development-control/*)
         has_dev_control_surface=1
         ;;
-      .agent/devlines/*/context-pack.md|.agent/devlines/*/context-pack.manifest.json|.agent/devlines/*/events.jsonl.anchor)
+      .agent/devlines/*/context-pack.md|.agent/devlines/*/context-pack.manifest.json|.agent/devlines/*/events.jsonl.anchor|.agent/devlines/*/events.jsonl.gz)
         has_dev_control_surface=1
         ;;
       .agent/devlines/*/events.jsonl|.agent/devlines/*/RETROSPECTIVE.md)
@@ -400,6 +404,7 @@ run_quick() {
   if [ "$has_frontend" -eq 1 ]; then
     run_stage "QUICK frontend tests" run_frontend_tests
     run_stage "QUICK frontend typecheck" run_frontend_typecheck
+    run_stage "QUICK frontend lint (eslint)" run_frontend_lint
   fi
 
   if [ "$has_gate_script" -eq 1 ]; then
@@ -421,7 +426,10 @@ stage_number=0
 finish_gate() {
   local status=$?
   trap - EXIT
-  python3 "$METRICS_HELPER" finish "$GATE_ARTIFACT_DIR" "$status" || status=1
+  # The evidence key reads the test interpreter's environment; a gate that never
+  # resolved one (docs-only quick mode) records its identity as incomplete.
+  resolve_pytest_python >/dev/null 2>&1 || true
+  python3 "$METRICS_HELPER" finish "$GATE_ARTIFACT_DIR" "$status" "${PYTHON:-}" || status=1
   printf '\nGate logs and timings: %s\n' "$GATE_ARTIFACT_DIR"
   exit "$status"
 }
@@ -439,6 +447,7 @@ else
   run_stage "GOLDEN / invariants / snapshot (0-drift)" run_golden
   run_stage "FRONTEND tests (vitest)" run_frontend_tests
   run_stage "FRONTEND typecheck (tsc --noEmit)" run_frontend_typecheck
+  run_stage "FRONTEND lint (eslint --max-warnings 0)" run_frontend_lint
 fi
 
 if [ "$fail" -ne 0 ]; then

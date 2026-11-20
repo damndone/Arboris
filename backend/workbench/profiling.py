@@ -38,11 +38,12 @@ def profile_frame(frame: pd.DataFrame) -> dict[str, Any]:
     for name in frame.columns:
         series = frame[name]
         row_count = len(series)
+        unique_count = int(series.nunique(dropna=True))
         columns[str(name)] = {
             "dtype": str(series.dtype),
             "missing_rate": 0.0 if row_count == 0 else float(series.isna().mean()),
-            "unique_count": int(series.nunique(dropna=True)),
-            "unique_ratio": float(series.nunique(dropna=True) / max(row_count, 1)),
+            "unique_count": unique_count,
+            "unique_ratio": float(unique_count / max(row_count, 1)),
         }
         if pd.api.types.is_numeric_dtype(series):
             columns[str(name)].update(_numeric_summary(series))

@@ -26,6 +26,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Agent Attachment */
+        post: operations["upload_agent_attachment_agent_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Agent Attachment */
+        get: operations["read_agent_attachment_agent_attachments__attachment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/capabilities": {
         parameters: {
             query?: never;
@@ -372,6 +406,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Agent Turn
+         * @description Resume the Agent after a confirmed proposal finished (Ask every step).
+         */
+        post: operations["continue_agent_turn_agent_sessions__session_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -383,6 +437,26 @@ export interface paths {
         get: operations["get_agent_events_agent_sessions__session_id__events_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/follow_up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow Up Agent Turn
+         * @description Queue a request to run after the current turn finishes (v1.9.1).
+         */
+        post: operations["follow_up_agent_turn_agent_sessions__session_id__follow_up_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -448,6 +522,107 @@ export interface paths {
          *     failed) record, and the child chain/fork activation. Safe to poll.
          */
         post: operations["reconcile_agent_operation_agent_sessions__session_id__operations__record_id__reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/operations/{record_id}/revoke-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Operation Approval */
+        post: operations["revoke_operation_approval_agent_sessions__session_id__operations__record_id__revoke_approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Plan
+         * @description The conversation's current plan and version history.
+         */
+        get: operations["get_agent_plan_agent_sessions__session_id__plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Revise Agent Plan
+         * @description Apply a versioned human edit; execution state is server-owned.
+         */
+        patch: operations["revise_agent_plan_agent_sessions__session_id__plan_patch"];
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/plan/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Agent Plan
+         * @description Approve exactly the version the person reviewed, without a model call.
+         */
+        post: operations["approve_agent_plan_agent_sessions__session_id__plan_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/plan/preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preflight Agent Plan
+         * @description Check the current version's exact proposals without fitting or authorizing them.
+         */
+        get: operations["preflight_agent_plan_agent_sessions__session_id__plan_preflight_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/plan/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify Agent Plan
+         * @description Check registered deliverables on demand; never execute operations or call a model.
+         */
+        get: operations["verify_agent_plan_agent_sessions__session_id__plan_verification_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -539,6 +714,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Agent Turn
+         * @description Resume the original command, not a new prompt/continuation budget.
+         */
+        post: operations["resume_agent_turn_agent_sessions__session_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/rewind": {
         parameters: {
             query?: never;
@@ -550,12 +745,49 @@ export interface paths {
         put?: never;
         /**
          * Rewind Agent Session
-         * @description Go back to just before one of your messages; its text returns to the input.
-         *
-         *     The later conversation is kept in the session log (rewinding is recorded,
-         *     not deleted); the next message continues from here.
+         * @description Restore the conversation and analysis head together on a retained branch.
          */
         post: operations["rewind_agent_session_agent_sessions__session_id__rewind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Steer Agent Turn
+         * @description Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1).
+         */
+        post: operations["steer_agent_turn_agent_sessions__session_id__steer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/turn-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Turn State
+         * @description Inspect compact durable state without executing tools or a provider.
+         */
+        get: operations["get_agent_turn_state_agent_sessions__session_id__turn_state_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1292,6 +1524,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm/providers/{provider_id}/models/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect Llm Provider Models
+         * @description Read the provider's model list and update what it reports about the models already
+         *     configured (context window, thinking efforts, image input). No model is added or removed;
+         *     a provider whose list reports nothing leaves its models as they are.
+         */
+        post: operations["detect_llm_provider_models_llm_providers__provider_id__models_detect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/llm/providers/{provider_id}/models/refresh": {
         parameters: {
             query?: never;
@@ -1412,6 +1666,24 @@ export interface paths {
          */
         put: operations["set_notebook_focus_endpoint_notebooks__notebook_id__focus_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notebooks/{notebook_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notebook Notes Endpoint */
+        get: operations["list_notebook_notes_endpoint_notebooks__notebook_id__notes_get"];
+        put?: never;
+        /** Save Notebook Note Endpoint */
+        post: operations["save_notebook_note_endpoint_notebooks__notebook_id__notes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1841,6 +2113,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/agent-extensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** View */
+        get: operations["view_projects_agent_extensions_get"];
+        /** Admit */
+        put: operations["admit_projects_agent_extensions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/agent-extensions/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable */
+        post: operations["disable_projects_agent_extensions_disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/agent-extensions/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review */
+        post: operations["review_projects_agent_extensions_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/agent-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project Agent Permissions */
+        get: operations["get_project_agent_permissions_projects_agent_permissions_get"];
+        /** Save Project Agent Permissions */
+        put: operations["save_project_agent_permissions_projects_agent_permissions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/egress": {
         parameters: {
             query?: never;
@@ -2203,6 +2545,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/figures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draw Figures Endpoint
+         * @description Draw the run's figures if it deferred them; a no-op once drawn. GET routes stay read-only.
+         */
+        post: operations["draw_figures_endpoint_runs__run_id__figures_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/graph": {
         parameters: {
             query?: never;
@@ -2555,14 +2917,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Preview Statistical Upload
-         * @description Preview rows of an SPSS/Stata file the browser cannot parse itself.
+         * Preview Upload
+         * @description Preview the first rows of an upload as the run will import them.
          *
-         *     CSV and Excel are previewed client-side; this returns the same row shape
-         *     (first rows as JSON records, codes as stored) plus the file's labels and
-         *     total row count, so the form can suggest roles the same way.
+         *     CSV and Excel are read by the import's own reader in a child process the
+         *     server stops after a time limit; SPSS/Stata also return their labels. The
+         *     total row count is the whole file's.
          */
-        post: operations["preview_statistical_upload_uploads_preview_post"];
+        post: operations["preview_upload_uploads_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2594,7 +2956,7 @@ export interface components {
         /** ActiveProviderEgress */
         ActiveProviderEgress: {
             /** Allowed Classes */
-            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             /**
              * Locality
              * @enum {string}
@@ -2664,6 +3026,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** Admission */
+        Admission: {
+            /** Expected Sha256 */
+            expected_sha256: string;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** Previous Sha256 */
+            previous_sha256?: string | null;
+        };
         /** AgentActivity */
         AgentActivity: {
             /** Activities */
@@ -2671,6 +3044,57 @@ export interface components {
             /** Events */
             events: components["schemas"]["ActivityEventItem"][];
             hierarchy: components["schemas"]["HierarchyNodeView"] | null;
+        };
+        /** AgentAnalysisPlan */
+        AgentAnalysisPlan: {
+            /** Allowed Classes */
+            allowed_classes: string[];
+            /** Approved At */
+            approved_at: string | null;
+            /** Approved Version */
+            approved_version: number | null;
+            /** Budget */
+            budget: {
+                [key: string]: number;
+            };
+            completion?: components["schemas"]["PlanCompletionView"];
+            /** Completion Evidence */
+            completion_evidence?: {
+                [key: string]: unknown;
+            };
+            /** Criteria */
+            criteria: string[];
+            /** Plan Id */
+            plan_id: string;
+            /** Question */
+            question: string;
+            /** Status */
+            status: string;
+            /** Steps */
+            steps: components["schemas"]["AgentPlanStepView"][];
+            /** Task Requirements */
+            task_requirements?: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /** AgentAttachment */
+        AgentAttachment: {
+            /** Attachment Id */
+            attachment_id: string;
+            /** Bytes */
+            bytes: number;
+            /** Kind */
+            kind: string;
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
         };
         /**
          * AgentAuditExport
@@ -2737,11 +3161,20 @@ export interface components {
             /** Focus */
             focus?: string | null;
         };
+        /** AgentContextPart */
+        AgentContextPart: {
+            /** Label */
+            label: string;
+            /** Tokens */
+            tokens: number;
+        };
         /**
          * AgentContextUsage
          * @description How full the next request is, as the server will send it.
          */
         AgentContextUsage: {
+            /** Breakdown */
+            breakdown?: components["schemas"]["AgentContextPart"][];
             /** Compact At Tokens */
             compact_at_tokens: number;
             /** Estimated Tokens */
@@ -2750,6 +3183,31 @@ export interface components {
             window_declared: boolean;
             /** Window Tokens */
             window_tokens: number;
+        };
+        /**
+         * AgentContinueRequest
+         * @description Continue the Agent after something happened outside a turn (v1.9.1).
+         *
+         *     In Ask every step a confirmed proposal runs between turns; this resumes the
+         *     Agent with the outcome so the person never has to say "continue".
+         */
+        AgentContinueRequest: {
+            /** Context Packet */
+            context_packet?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Execution Mode
+             * @default ask
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
+            /**
+             * Execution Policy
+             * @default auto_read_only
+             * @enum {string}
+             */
+            execution_policy?: "auto_read_only" | "proposal_only";
         };
         /**
          * AgentConversation
@@ -2762,6 +3220,12 @@ export interface components {
             archived: boolean;
             /** Created At */
             created_at: string;
+            /** Desktop Notification Status */
+            desktop_notification_status?: string | null;
+            /** Desktop Notifications */
+            desktop_notifications?: boolean;
+            /** Desktop Notifications Supported */
+            desktop_notifications_supported?: boolean;
             focus: components["schemas"]["AgentConversationFocus"] | null;
             /** Forked From */
             forked_from: string | null;
@@ -2809,6 +3273,8 @@ export interface components {
         AgentConversationUpdate: {
             /** Archived */
             archived?: boolean | null;
+            /** Desktop Notifications */
+            desktop_notifications?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -2929,8 +3395,11 @@ export interface components {
         };
         /** AgentMessage */
         AgentMessage: {
+            activity?: components["schemas"]["AgentToolActivity"];
             /** At */
             at: string;
+            /** Attachments */
+            attachments?: components["schemas"]["AgentAttachment"][];
             compaction?: components["schemas"]["AgentCompactionView"];
             /** Content */
             content: string;
@@ -2944,6 +3413,8 @@ export interface components {
             navigation: components["schemas"]["AgentNavigationRef"][];
             /** Numeric Check */
             numeric_check?: components["schemas"]["NumericCheckUnverified"] | components["schemas"]["NumericCheckFailed"];
+            /** Reasoning */
+            reasoning?: string;
             /**
              * Role
              * @enum {string}
@@ -2951,6 +3422,21 @@ export interface components {
             role: "user" | "assistant" | "tool" | "summary";
             /** Stop Reason */
             stop_reason: string | null;
+        };
+        /** AgentMessageQueued */
+        AgentMessageQueued: {
+            /**
+             * Queue
+             * @enum {string}
+             */
+            queue: "steer" | "follow_up";
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "queued";
         };
         /** AgentNavigationRef */
         AgentNavigationRef: {
@@ -2979,6 +3465,171 @@ export interface components {
             operation: components["schemas"]["OperationRecordView"];
             projection: components["schemas"]["NavigationProjectionView"];
         };
+        /** AgentPlanApproveRequest */
+        AgentPlanApproveRequest: {
+            /** Version */
+            version: number;
+        };
+        /** AgentPlanMutationResponse */
+        AgentPlanMutationResponse: {
+            plan: components["schemas"]["AgentAnalysisPlan"];
+        };
+        /** AgentPlanPatchRequest */
+        AgentPlanPatchRequest: {
+            /** Completion */
+            completion?: {
+                [key: string]: unknown;
+            } | null;
+            /** Criteria */
+            criteria?: string[] | null;
+            /** Question */
+            question?: string | null;
+            /** Steps */
+            steps?: components["schemas"]["AgentPlanStepEdit"][] | null;
+            /** Version */
+            version: number;
+        };
+        /** AgentPlanPreflightCheck */
+        AgentPlanPreflightCheck: {
+            /** Code */
+            code: string;
+            /** Columns */
+            columns?: string[];
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "L0" | "L1";
+            /** Message */
+            message: string;
+            /** Operation Id */
+            operation_id?: string;
+            /** Parameter Fields */
+            parameter_fields?: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "deferred" | "blocked";
+            /** Workflow Step Id */
+            workflow_step_id?: string;
+        };
+        /** AgentPlanPreflightResponse */
+        AgentPlanPreflightResponse: {
+            /** Can Approve */
+            can_approve: boolean;
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Version */
+            plan_version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "deferred" | "blocked";
+            /** Steps */
+            steps: components["schemas"]["AgentPlanPreflightStep"][];
+        };
+        /** AgentPlanPreflightSource */
+        AgentPlanPreflightSource: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Node Ref */
+            node_ref: string;
+            /** Run Id */
+            run_id: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** AgentPlanPreflightStep */
+        AgentPlanPreflightStep: {
+            /** Checks */
+            checks: components["schemas"]["AgentPlanPreflightCheck"][];
+            /** Estimated Seconds */
+            estimated_seconds: number | null;
+            source?: components["schemas"]["AgentPlanPreflightSource"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "deferred" | "blocked";
+            /** Step Id */
+            step_id: string;
+        };
+        /** AgentPlanProposalRef */
+        AgentPlanProposalRef: {
+            /** Fingerprint */
+            fingerprint: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Revision */
+            revision: number;
+        };
+        /** AgentPlanResponse */
+        AgentPlanResponse: {
+            plan: components["schemas"]["AgentAnalysisPlan"] | null;
+            /** Versions */
+            versions: components["schemas"]["AgentPlanVersion"][];
+        };
+        /** AgentPlanStepEdit */
+        AgentPlanStepEdit: {
+            /** Depends On */
+            depends_on?: string[];
+            /** Expected Outputs */
+            expected_outputs?: string[];
+            /** Operation Ids */
+            operation_ids: string[];
+            proposal_ref?: components["schemas"]["AgentPlanProposalRef"] | null;
+            /** Step Id */
+            step_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentPlanStepView */
+        AgentPlanStepView: {
+            /** Added After Results */
+            added_after_results: boolean;
+            /** Completed Operation Ids */
+            completed_operation_ids?: string[];
+            /** Depends On */
+            depends_on: string[];
+            /** Expected Outputs */
+            expected_outputs: string[];
+            /** Operation Ids */
+            operation_ids: string[];
+            /** Permission Class */
+            permission_class: string;
+            proposal_ref?: components["schemas"]["PlanProposalRefView"];
+            /** Status */
+            status: string;
+            /** Step Id */
+            step_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentPlanVerificationResponse */
+        AgentPlanVerificationResponse: {
+            /** Criteria Not Machine Checked */
+            criteria_not_machine_checked?: boolean;
+            criteria_verification: components["schemas"]["PlanCriteriaVerification"];
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Version */
+            plan_version: number;
+            /** Playbook Status */
+            playbook_status: string;
+            /** Status */
+            status: string;
+        };
+        /** AgentPlanVersion */
+        AgentPlanVersion: {
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
         /** AgentProposalConfirmRequest */
         AgentProposalConfirmRequest: {
             /** Active Head Run Id */
@@ -2987,13 +3638,22 @@ export interface components {
             confirmed_payload_hash?: string | null;
             /** Fingerprint */
             fingerprint: string;
+            /**
+             * Grant Session
+             * @default false
+             */
+            grant_session?: boolean;
             /** Revision */
             revision: number;
         };
         /** AgentProposalDeclineRequest */
         AgentProposalDeclineRequest: {
+            /** Fingerprint */
+            fingerprint?: string | null;
             /** Reason */
             reason?: string | null;
+            /** Revision */
+            revision?: number | null;
         };
         /** AgentProposalList */
         AgentProposalList: {
@@ -3013,6 +3673,29 @@ export interface components {
             /** Risks */
             risks?: string[] | null;
         };
+        /** AgentRestoredFocus */
+        AgentRestoredFocus: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "project" | "dataset" | "node" | "plan" | "report";
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** AgentRestoredLineage */
+        AgentRestoredLineage: {
+            focus: components["schemas"]["AgentRestoredFocus"] | null;
+            /** Run Id */
+            run_id: string | null;
+        };
+        /** AgentResumeRequest */
+        AgentResumeRequest: {
+            /** Turn Id */
+            turn_id: string;
+        };
         /** AgentSession */
         AgentSession: {
             /** Chain Id */
@@ -3024,6 +3707,11 @@ export interface components {
             context_fingerprint: string | null;
             /** Context Window Tokens */
             context_window_tokens: number | null;
+            /**
+             * Execution Mode
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
             /** Messages */
             messages: components["schemas"]["AgentMessage"][];
             /** Model */
@@ -3044,6 +3732,7 @@ export interface components {
          * @description A session after a rewind or fork, and the message to put back in the input.
          */
         AgentSessionChange: {
+            lineage?: components["schemas"]["AgentRestoredLineage"];
             /** Restored Prompt */
             restored_prompt: string | null;
             session: components["schemas"]["AgentSession"];
@@ -3066,6 +3755,21 @@ export interface components {
             /** Run Id */
             run_id?: string | null;
         };
+        /** AgentSteerRequest */
+        AgentSteerRequest: {
+            /** Text */
+            text: string;
+        };
+        /**
+         * AgentToolActivity
+         * @description What a tool step was about and how long the tool took; absent when unknown.
+         */
+        AgentToolActivity: {
+            /** Seconds */
+            seconds: number | null;
+            /** Target */
+            target: string | null;
+        };
         /** AgentTurn */
         AgentTurn: {
             assistant: components["schemas"]["AgentMessage"];
@@ -3083,12 +3787,75 @@ export interface components {
              */
             status: "cancelling";
         };
+        /** AgentTurnRecord */
+        AgentTurnRecord: {
+            /** Budget */
+            budget: {
+                [key: string]: number;
+            };
+            /** Cancel Requested */
+            cancel_requested: boolean;
+            /** Checkpoint */
+            checkpoint: {
+                [key: string]: string;
+            } | null;
+            /** Command Id */
+            command_id: string;
+            /** Execution Mode */
+            execution_mode: string;
+            /** Input Entry Id */
+            input_entry_id: string;
+            /** Lease Epoch */
+            lease_epoch: number;
+            /** Lease Expires At */
+            lease_expires_at: number | null;
+            /** Lease Owner */
+            lease_owner: string | null;
+            /** Queue */
+            queue: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Reconciliation */
+            reconciliation: {
+                [key: string]: string;
+            } | null;
+            /** Requires Reconcile */
+            requires_reconcile: boolean;
+            /** Schema Version */
+            schema_version: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Steps Used */
+            steps_used: number;
+            /** Tool Calls */
+            tool_calls: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            } | null;
+            /** Turn Id */
+            turn_id: string;
+            /** Version */
+            version: number;
+            /** Wall S Used */
+            wall_s_used: number;
+        };
         /** AgentTurnRequest */
         AgentTurnRequest: {
+            /** Attachments */
+            attachments?: string[];
             /** Context Packet */
             context_packet?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Execution Mode
+             * @default ask
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
             /**
              * Execution Policy
              * @default auto_read_only
@@ -3097,6 +3864,11 @@ export interface components {
             execution_policy?: "auto_read_only" | "proposal_only";
             /** Question */
             question: string;
+        };
+        /** AgentTurnStateResponse */
+        AgentTurnStateResponse: {
+            /** Turns */
+            turns: components["schemas"]["AgentTurnRecord"][];
         };
         /** AiReportList */
         AiReportList: {
@@ -3238,6 +4010,7 @@ export interface components {
             last_at: string | null;
             /** Markdown */
             markdown: string;
+            research_specifications: components["schemas"]["ResearchSpecificationSections"];
             /** Run Id */
             run_id: string;
             settings: components["schemas"]["DisclosureSettings-Output"];
@@ -3516,6 +4289,8 @@ export interface components {
             packet: {
                 [key: string]: unknown;
             };
+            /** Project Root */
+            project_root?: string | null;
             /** Question */
             question: string;
             /** Response Guardrails */
@@ -3666,12 +4441,19 @@ export interface components {
             /** Y List */
             y_list: string;
         };
-        /** Body_preview_statistical_upload_uploads_preview_post */
-        Body_preview_statistical_upload_uploads_preview_post: {
+        /** Body_preview_upload_uploads_preview_post */
+        Body_preview_upload_uploads_preview_post: {
             /** File */
             file: string;
             /** Project Root */
             project_root: string;
+            /** Sheet Name */
+            sheet_name?: string | null;
+            /**
+             * Transpose
+             * @default false
+             */
+            transpose?: boolean;
         };
         /** Body_run_endpoint_runs_post */
         Body_run_endpoint_runs_post: {
@@ -3765,6 +4547,12 @@ export interface components {
              * @default
              */
             entity_col?: string;
+            /**
+             * Estimation Engine
+             * @description Estimation engine: reference (default; bit for bit) | fast (opt-in native engine; agrees with the reference within 1e-9 relative, covers IV 2SLS with robust or unadjusted covariance).
+             * @default
+             */
+            estimation_engine?: string;
             /** File */
             file: string;
             /**
@@ -3975,6 +4763,13 @@ export interface components {
              * @description Outcome column.
              */
             y: string;
+        };
+        /** Body_upload_agent_attachment_agent_attachments_post */
+        Body_upload_agent_attachment_agent_attachments_post: {
+            /** File */
+            file: string;
+            /** Project Root */
+            project_root: string;
         };
         /** Body_upload_dataset_endpoint_uploads_post */
         Body_upload_dataset_endpoint_uploads_post: {
@@ -5384,6 +6179,15 @@ export interface components {
              */
             trust_label: "analysis_running" | "ready_to_interpret" | "interpret_with_caution" | "not_ready_to_interpret" | "run_failed" | "lifecycle_unavailable" | "legacy_unavailable" | "contract_unavailable";
         };
+        /** Disable */
+        Disable: {
+            /** Disabled */
+            disabled: boolean;
+            /** Expected Sha256 */
+            expected_sha256: string;
+            /** Id */
+            id: string;
+        };
         /** DisclosureCounts */
         DisclosureCounts: {
             /** Data Changes */
@@ -5661,7 +6465,7 @@ export interface components {
              * Content Class
              * @enum {string}
              */
-            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified";
+            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified";
             /** Decision */
             decision: string;
             /** Index */
@@ -5680,9 +6484,9 @@ export interface components {
         /** EgressDefaults */
         EgressDefaults: {
             /** Local */
-            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             /** Remote */
-            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
         };
         /** EgressPolicyDocument */
         EgressPolicyDocument: {
@@ -5701,7 +6505,7 @@ export interface components {
         EgressPolicyView: {
             active_provider: components["schemas"]["ActiveProviderEgress"] | null;
             /** Content Classes */
-            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             defaults: components["schemas"]["EgressDefaults"];
             policy: components["schemas"]["EgressPolicyDocument"];
             /** Policy Source */
@@ -5908,7 +6712,7 @@ export interface components {
              * Operator
              * @enum {string}
              */
-            operator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
+            operator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in" | "between";
             /** Value */
             value: unknown;
         };
@@ -6037,6 +6841,68 @@ export interface components {
             schema_version: string;
             /** Selected Columns */
             selected_columns: string[];
+        };
+        /** ExtensionCatalogView */
+        ExtensionCatalogView: {
+            /** Disabled */
+            disabled: string[];
+            manifest: components["schemas"]["ExtensionManifestView"];
+            /** Sha256 */
+            sha256: string | null;
+        };
+        /** ExtensionHookView */
+        ExtensionHookView: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "record" | "deny";
+            /**
+             * Event
+             * @enum {string}
+             */
+            event: "before_operation" | "after_operation" | "turn_end" | "plan_approved";
+            /** Id */
+            id: string;
+            /** Operation Ids */
+            operation_ids: string[];
+            /** Origin */
+            origin: string;
+            /** Reason */
+            reason: string;
+            /** Version */
+            version: string;
+        };
+        /** ExtensionManifestView */
+        ExtensionManifestView: {
+            /** Hooks */
+            hooks: components["schemas"]["ExtensionHookView"][];
+            /**
+             * Schema
+             * @constant
+             */
+            schema: "arboris.extensions.v1";
+            /** Tools */
+            tools: components["schemas"]["ExtensionToolView"][];
+        };
+        /** ExtensionToolView */
+        ExtensionToolView: {
+            /** Endpoint */
+            endpoint: string;
+            /** Id */
+            id: string;
+            /** Input Schema */
+            input_schema: {
+                [key: string]: unknown;
+            };
+            /** Origin */
+            origin: string;
+            /** Output Schema */
+            output_schema: {
+                [key: string]: unknown;
+            };
+            /** Version */
+            version: string;
         };
         /** FeatureRecipeApplied */
         FeatureRecipeApplied: {
@@ -6307,6 +7173,11 @@ export interface components {
             /** Sha256 */
             sha256: string | null;
         };
+        /** FiguresDrawn */
+        FiguresDrawn: {
+            /** Figures */
+            figures: number;
+        };
         /**
          * FigureSource
          * @description The data the figure was drawn from, as a bounded JSON preview.
@@ -6429,6 +7300,7 @@ export interface components {
             artifacts?: components["schemas"]["NodeArtifact"][];
             /** Branch Id */
             branch_id: string;
+            card_preview?: components["schemas"]["GraphCardPreview"];
             cas_ref: components["schemas"]["CasRef"] | null;
             /** Created At */
             created_at: string;
@@ -6531,6 +7403,19 @@ export interface components {
             /** Id */
             id: string;
         };
+        /**
+         * GraphCardPreview
+         * @description Compact visual summary from the node's owning run.
+         */
+        GraphCardPreview: {
+            /** Detail */
+            detail?: string;
+            /** Lines */
+            lines: string[];
+            report?: components["schemas"]["GraphReportPreview"];
+            /** Title */
+            title: string;
+        };
         /** GraphEdgeView */
         GraphEdgeView: {
             /** Id */
@@ -6598,6 +7483,47 @@ export interface components {
             trust: components["schemas"]["Trust"];
             /** Trust Reason */
             trust_reason: string | null;
+        };
+        /** GraphReportCoefficient */
+        GraphReportCoefficient: {
+            /** Estimate */
+            estimate: number | null;
+            /** Interval Unavailable */
+            interval_unavailable?: string;
+            /** Intervals */
+            intervals: components["schemas"]["GraphReportInterval"][];
+            /** Label */
+            label: string;
+            /** P Value */
+            p_value: number | null;
+            saved_interval: components["schemas"]["GraphReportInterval"] | null;
+            /** Term */
+            term: string;
+        };
+        /** GraphReportInterval */
+        GraphReportInterval: {
+            /** Level */
+            level: number | null;
+            /** Lower */
+            lower: number;
+            /** Upper */
+            upper: number;
+        };
+        /** GraphReportPreview */
+        GraphReportPreview: {
+            /** Coefficients */
+            coefficients: components["schemas"]["GraphReportCoefficient"][];
+            /** Default Term */
+            default_term: string | null;
+            /** Df */
+            df?: number;
+            /**
+             * Distribution
+             * @enum {string}
+             */
+            distribution?: "t" | "z";
+            /** Model Id */
+            model_id: string;
         };
         /** GraphStats */
         GraphStats: {
@@ -6879,6 +7805,11 @@ export interface components {
             configured: boolean;
             /** Context Window Tokens */
             context_window_tokens: number | null;
+            /**
+             * Data Location
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Key Present */
             key_present: boolean;
             /** Model */
@@ -6891,7 +7822,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "local" | "environment" | "none" | "explicit_config_missing" | "explicit_config_invalid" | "explicit_config_unconfigured";
+            source: "local" | "environment" | "none" | "explicit_config_missing" | "explicit_config_invalid" | "explicit_config_unconfigured" | "config_invalid";
             /** Supports 1M */
             supports_1m: boolean;
             /** Supports Vision */
@@ -7035,9 +7966,9 @@ export interface components {
         ManualReportRecord: {
             /**
              * Author
-             * @constant
+             * @enum {string}
              */
-            author: "user";
+            author: "user" | "agent";
             /** Created At */
             created_at: string;
             /** Document Id */
@@ -7673,6 +8604,30 @@ export interface components {
             /** Interaction Mode */
             interaction_mode?: ("plan" | "action") | null;
         };
+        /** NotebookNoteRequest */
+        NotebookNoteRequest: {
+            /** Source Label */
+            source_label: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Text */
+            text: string;
+        };
+        /** NotebookNoteView */
+        NotebookNoteView: {
+            /** Created At */
+            created_at: string;
+            /** Note Id */
+            note_id: string;
+            /** Notebook Id */
+            notebook_id: string;
+            /** Source Label */
+            source_label: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Text */
+            text: string;
+        };
         /** NotebookOptions */
         NotebookOptions: {
             context: components["schemas"]["PlanningContextView"];
@@ -7819,6 +8774,18 @@ export interface components {
             /** Unverified */
             unverified: components["schemas"]["Finding"][];
         };
+        /** OperationApprovalRevoked */
+        OperationApprovalRevoked: {
+            /** Approval Id */
+            approval_id: string;
+            /** Operation Record Id */
+            operation_record_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "revoked";
+        };
         /** OperationAvailability */
         OperationAvailability: {
             /** Message */
@@ -7918,6 +8885,8 @@ export interface components {
             output_schema_ref: string | null;
             /** Risk Level */
             risk_level: string;
+            /** Saved Models */
+            saved_models?: components["schemas"]["SavedNativePredictionModel"][];
             /** Spec Schema */
             spec_schema: {
                 [key: string]: unknown;
@@ -8402,6 +9371,11 @@ export interface components {
              */
             memory_authority: "server_owned";
         };
+        /**
+         * PermissionClass
+         * @enum {string}
+         */
+        PermissionClass: "read" | "analyze" | "derive" | "modify" | "external" | "high";
         /** PipelineDraft */
         PipelineDraft: {
             /** Created At */
@@ -8532,6 +9506,45 @@ export interface components {
             /** Execution Mode */
             execution_mode?: ("rerun_child" | "new_run" | "genesis") | null;
         };
+        /** PlanCompletionView */
+        PlanCompletionView: {
+            /** Playbooks */
+            playbooks?: string[];
+            /** Requirements */
+            requirements?: components["schemas"]["PlanRequirementDefinition"][];
+            /** Scope */
+            scope?: string;
+            /** Source */
+            source?: {
+                [key: string]: unknown;
+            };
+            /** Target */
+            target?: {
+                [key: string]: unknown;
+            };
+        };
+        /** PlanCriteriaVerification */
+        PlanCriteriaVerification: {
+            /** Basis Sha256 */
+            basis_sha256: string;
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Version */
+            plan_version: number;
+            /** Requirements */
+            requirements: components["schemas"]["PlanRequirementVerification"][];
+            /** Status */
+            status: string;
+            /** Unbound Slots */
+            unbound_slots: (components["schemas"]["PlanCriterionTextSlot"] | components["schemas"]["PlanOutputSlot"])[];
+            /** Unchecked Requirements */
+            unchecked_requirements?: string[];
+        };
+        /** PlanCriterionTextSlot */
+        PlanCriterionTextSlot: {
+            /** Criterion Index */
+            criterion_index: number;
+        };
         /** PlanningCancelled */
         PlanningCancelled: {
             /** Attempt Id */
@@ -8632,6 +9645,63 @@ export interface components {
             user_focus: {
                 [key: string]: unknown;
             };
+        };
+        /** PlanOutputSlot */
+        PlanOutputSlot: {
+            /** Output Index */
+            output_index: number;
+            /** Step Id */
+            step_id: string;
+        };
+        /** PlanProposalRefView */
+        PlanProposalRefView: {
+            /** Fingerprint */
+            fingerprint: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Revision */
+            revision: number;
+        };
+        /** PlanRequirementDefinition */
+        PlanRequirementDefinition: {
+            /** Allow Not Applicable */
+            allow_not_applicable?: boolean;
+            /** Covers */
+            covers: (components["schemas"]["PlanCriterionTextSlot"] | components["schemas"]["PlanOutputSlot"])[];
+            /** Id */
+            id: string;
+            operation: components["schemas"]["PlanRequirementOperation"];
+        };
+        /** PlanRequirementOperation */
+        PlanRequirementOperation: {
+            /** Operation Id */
+            operation_id: string;
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** Step Id */
+            step_id: string;
+        };
+        /** PlanRequirementVerification */
+        PlanRequirementVerification: {
+            /** Id */
+            id: string;
+            /** Reason */
+            reason: string;
+            /** Status */
+            status: string;
+            /** Verified Artifacts */
+            verified_artifacts: components["schemas"]["PlanVerifiedArtifact"][];
+        };
+        /** PlanVerifiedArtifact */
+        PlanVerifiedArtifact: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Sha256 */
+            sha256?: string;
         };
         /**
          * PostEstimationResult
@@ -8828,6 +9898,33 @@ export interface components {
              */
             status: "pending_index" | "indexed";
         };
+        /** ProjectAgentPermissionRule */
+        ProjectAgentPermissionRule: {
+            class: components["schemas"]["PermissionClass"];
+            /** Operation Id */
+            operation_id?: string;
+        };
+        /** ProjectAgentPermissionRules */
+        ProjectAgentPermissionRules: {
+            /** Allow */
+            allow: components["schemas"]["ProjectAgentPermissionRule"][];
+            /** Ask */
+            ask: components["schemas"]["ProjectAgentPermissionRule"][];
+            /** Deny */
+            deny: components["schemas"]["ProjectAgentPermissionRule"][];
+        };
+        /** ProjectAgentPermissionsUpdate */
+        ProjectAgentPermissionsUpdate: {
+            /** Expected Revision */
+            expected_revision: string;
+            rules: components["schemas"]["ProjectAgentPermissionRules"];
+        };
+        /** ProjectAgentPermissionsView */
+        ProjectAgentPermissionsView: {
+            /** Revision */
+            revision: string;
+            rules: components["schemas"]["ProjectAgentPermissionRules"];
+        };
         /** ProjectCreated */
         ProjectCreated: {
             /** Project Root */
@@ -8954,6 +10051,14 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ProposalDeclined */
+        ProposalDeclined: {
+            /** Continue After Decline */
+            continue_after_decline: boolean;
+            proposal: components["schemas"]["PublicProposal"];
+            /** Status */
+            status: string;
+        };
         /** ProposalRevisionView */
         ProposalRevisionView: {
             /** Chain Id */
@@ -9018,7 +10123,7 @@ export interface components {
         /** ProviderAllowance */
         ProviderAllowance: {
             /** Allow */
-            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
         };
         /** ProviderList */
         ProviderList: {
@@ -9029,10 +10134,16 @@ export interface components {
         };
         /** ProviderModel */
         ProviderModel: {
+            /** Context Limit Tokens */
+            context_limit_tokens: number | null;
             /** Context Window Tokens */
             context_window_tokens: number | null;
             /** Display Name */
             display_name: string;
+            /** Reasoning Effort */
+            reasoning_effort: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Reasoning Efforts */
+            reasoning_efforts: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max")[];
             /** Request Model */
             request_model: string;
             /** Supports 1M */
@@ -9042,10 +10153,16 @@ export interface components {
         };
         /** ProviderModelRequest */
         ProviderModelRequest: {
+            /** Context Limit Tokens */
+            context_limit_tokens?: number | null;
             /** Context Window Tokens */
             context_window_tokens?: number | null;
             /** Display Name */
             display_name: string;
+            /** Reasoning Effort */
+            reasoning_effort?: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Reasoning Efforts */
+            reasoning_efforts?: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max")[] | null;
             /** Request Model */
             request_model: string;
             /**
@@ -9070,6 +10187,12 @@ export interface components {
              * @default false
              */
             clear_api_key?: boolean;
+            /**
+             * Data Location
+             * @default remote
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Icon */
             icon?: string | null;
             /** Id */
@@ -9128,6 +10251,11 @@ export interface components {
             revision: number;
             /** Risks */
             risks: string[];
+            /**
+             * Session Grant Class
+             * @enum {string}
+             */
+            session_grant_class?: "analyze" | "derive" | "modify";
             /** Session Id */
             session_id: string;
             /** Status */
@@ -9144,6 +10272,11 @@ export interface components {
         PublicProvider: {
             /** Base Url */
             base_url: string | null;
+            /**
+             * Data Location
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Icon */
             icon: string;
             /** Id */
@@ -9305,6 +10438,41 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
+        /** ResearchSpecificationLine */
+        ResearchSpecificationLine: {
+            /** At */
+            at: string | null;
+            /** Operation Id */
+            operation_id: string;
+            /** Question Id */
+            question_id: string | null;
+            /** Reason */
+            reason: string;
+            /** Record Id */
+            record_id: string | null;
+            /** Run Id */
+            run_id: string | null;
+            /** Specification Event Id */
+            specification_event_id: string | null;
+            /**
+             * Specification Status
+             * @enum {string}
+             */
+            specification_status: "pre_specified" | "exploratory";
+            /** Status */
+            status: string | null;
+            /** Step Id */
+            step_id: string;
+            /** Verification */
+            verification: string;
+        };
+        /** ResearchSpecificationSections */
+        ResearchSpecificationSections: {
+            /** Exploratory */
+            exploratory: components["schemas"]["ResearchSpecificationLine"][];
+            /** Pre Specified */
+            pre_specified: components["schemas"]["ResearchSpecificationLine"][];
+        };
         /** ResolvedExecution */
         ResolvedExecution: {
             /** Compare Source Available */
@@ -9415,6 +10583,13 @@ export interface components {
             rank: number;
             /** Rationale */
             rationale: string;
+        };
+        /** Review */
+        Review: {
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
         };
         /** RiskAuthorizationView */
         RiskAuthorizationView: {
@@ -9721,6 +10896,26 @@ export interface components {
             /** Label */
             label: string;
         };
+        /** SavedNativePredictionModel */
+        SavedNativePredictionModel: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Label */
+            label: string;
+            /**
+             * Model Type
+             * @enum {string}
+             */
+            model_type: "native_random_forest_regression" | "native_random_forest_classification";
+            /** Node Id */
+            node_id: string;
+            /** Predictors */
+            predictors: string[];
+            /** Run Id */
+            run_id: string;
+            /** Sha256 */
+            sha256: string;
+        };
         /** ScatterPlot */
         ScatterPlot: {
             /** Artifact Id */
@@ -9904,7 +11099,7 @@ export interface components {
              * Operator
              * @enum {string}
              */
-            operator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
+            operator: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in" | "between";
             /** Value */
             value: unknown;
         };
@@ -9955,6 +11150,10 @@ export interface components {
             rows: {
                 [key: string]: unknown;
             }[];
+            /** Selected Sheet */
+            selected_sheet: string | null;
+            /** Sheet Names */
+            sheet_names: string[];
             /** Total Rows */
             total_rows: number;
         };
@@ -10236,6 +11435,7 @@ export interface components {
         WorkflowConfirmed: {
             /** Execution */
             execution?: components["schemas"]["ExecutionView"] | components["schemas"]["ExecutionV11View"];
+            operation?: components["schemas"]["OperationRecordView"];
             outcome?: components["schemas"]["ExecutionOutcomeView"];
             /** Trace Id */
             trace_id: string;
@@ -10287,6 +11487,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentActivity"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_agent_attachment_agent_attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_agent_attachment_agent_attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAttachment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_attachment_agent_attachments__attachment_id__get: {
+        parameters: {
+            query: {
+                project_root: string;
+                view?: "original" | "text";
+            };
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -10954,6 +12221,43 @@ export interface operations {
             };
         };
     };
+    continue_agent_turn_agent_sessions__session_id__continue_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentContinueRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurn"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_agent_events_agent_sessions__session_id__events_get: {
         parameters: {
             query: {
@@ -10975,6 +12279,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentEvents"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    follow_up_agent_turn_agent_sessions__session_id__follow_up_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageQueued"];
                 };
             };
             /** @description Validation Error */
@@ -11080,6 +12421,213 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationReconciled"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_operation_approval_agent_sessions__session_id__operations__record_id__revoke_approval_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                record_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationApprovalRevoked"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_plan_agent_sessions__session_id__plan_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_agent_plan_agent_sessions__session_id__plan_patch: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPlanPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_agent_plan_agent_sessions__session_id__plan_approve_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPlanApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preflight_agent_plan_agent_sessions__session_id__plan_preflight_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanPreflightResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_agent_plan_agent_sessions__session_id__plan_verification_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanVerificationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11221,7 +12769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProposalStatus"];
+                    "application/json": components["schemas"]["ProposalDeclined"];
                 };
             };
             /** @description Validation Error */
@@ -11273,6 +12821,43 @@ export interface operations {
             };
         };
     };
+    resume_agent_turn_agent_sessions__session_id__resume_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentResumeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurn"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rewind_agent_session_agent_sessions__session_id__rewind_post: {
         parameters: {
             query: {
@@ -11297,6 +12882,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentSessionChange"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    steer_agent_turn_agent_sessions__session_id__steer_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageQueued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_turn_state_agent_sessions__session_id__turn_state_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnStateResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12792,6 +14447,37 @@ export interface operations {
             };
         };
     };
+    detect_llm_provider_models_llm_providers__provider_id__models_detect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicProvider"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     refresh_llm_provider_models_llm_providers__provider_id__models_refresh_post: {
         parameters: {
             query?: never;
@@ -13044,6 +14730,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotebookView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notebook_notes_endpoint_notebooks__notebook_id__notes_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookNoteView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_notebook_note_endpoint_notebooks__notebook_id__notes_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                notebook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotebookNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookNoteView"];
                 };
             };
             /** @description Validation Error */
@@ -13909,6 +15665,208 @@ export interface operations {
             };
         };
     };
+    view_projects_agent_extensions_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admit_projects_agent_extensions_put: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_projects_agent_extensions_disable_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Disable"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_projects_agent_extensions_review_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Review"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_project_agent_permissions_projects_agent_permissions_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAgentPermissionsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_project_agent_permissions_projects_agent_permissions_put: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectAgentPermissionsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAgentPermissionsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     egress_policy_endpoint_projects_egress_get: {
         parameters: {
             query: {
@@ -14316,6 +16274,7 @@ export interface operations {
         parameters: {
             query: {
                 project_root: string;
+                view?: "download" | "local";
             };
             header?: never;
             path: {
@@ -14648,6 +16607,39 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draw_figures_endpoint_runs__run_id__figures_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FiguresDrawn"];
                 };
             };
             /** @description Validation Error */
@@ -15310,7 +17302,7 @@ export interface operations {
             };
         };
     };
-    preview_statistical_upload_uploads_preview_post: {
+    preview_upload_uploads_preview_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -15319,7 +17311,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_preview_statistical_upload_uploads_preview_post"];
+                "multipart/form-data": components["schemas"]["Body_preview_upload_uploads_preview_post"];
             };
         };
         responses: {

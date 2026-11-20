@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from ..jsonl_store import _exclusive_jsonl_lock
+from ..jsonl_store import _exclusive_jsonl_lock, jsonl_lines
 
 
 def _now() -> str:
@@ -106,17 +107,30 @@ class AgentEventStream:
             # leave at most a partial last line, which reading skips.
             with path.open("ab") as handle:
                 handle.write(line)
+            if tail.seqs and event.seq <= tail.seqs[-1]:
+                tail.ordered = False
+            tail.seqs.append(event.seq)
+            tail.offsets.append(tail.size)
             tail.size += len(line)
             tail.last_seq = event.seq
             tail.ids.add(event.event_id)
             return event
 
-    def _tail(self, path: Path) -> "_Tail":
-        """The log's end state, reading only what was appended since last time."""
+    def _tail(self, path: Path, *, repair: bool = True) -> "_Tail":
+        """The log's end state, reading only what was appended since last time.
 
-        size = path.stat().st_size if path.exists() else 0
+        Each complete line's seq and byte offset go into the index replay seeks with.
+        ``repair`` (writers, under the file lock) ends an interrupted last line; readers
+        hold no file lock, may see another writer's line half written, and leave it.
+        """
+
+        stat = path.stat() if path.exists() else None
+        size, inode = (stat.st_size, stat.st_ino) if stat else (0, None)
         cached = self._tails.get(path)
+        if cached is not None and cached.inode not in (None, inode):
+            cached = None  # deleted and written again elsewhere (run deletion): index it afresh
         if cached is not None and cached.size == size:
+            cached.inode = inode
             return cached
         if cached is None or cached.size > size:
             cached = _Tail()
@@ -127,22 +141,33 @@ class AgentEventStream:
                 chunk = handle.read(size - cached.size)
         # Only complete lines move the read position forward.
         complete = chunk[: chunk.rfind(b"\n") + 1]
-        for raw in complete.splitlines():
+        position = 0
+        while position < len(complete):
+            end = complete.index(b"\n", position)
+            raw = complete[position:end]
+            offset = cached.size + position
+            position = end + 1
             if not raw.strip():
                 continue
             try:
                 value = json.loads(raw)
             except json.JSONDecodeError:
                 continue  # a line cut short by an interrupted write, since repaired
-            cached.last_seq = max(cached.last_seq, int(value["seq"]))
+            seq = int(value["seq"])
+            if cached.seqs and seq <= cached.seqs[-1]:
+                cached.ordered = False  # emitters keep seq ascending; a hand-edited log may not
+            cached.last_seq = max(cached.last_seq, seq)
             cached.ids.add(str(value["event_id"]))
+            cached.seqs.append(seq)
+            cached.offsets.append(offset)
         cached.size += len(complete)
-        if cached.size != size:
+        if cached.size != size and repair:
             # A partial last line from an interrupted write: the next append
             # starts on a fresh line so both stay readable.
             with path.open("ab") as handle:
                 handle.write(b"\n")
             cached.size = size + 1
+        cached.inode = inode
         self._tails[path] = cached
         return cached
 
@@ -155,15 +180,42 @@ class AgentEventStream:
             self._tails.pop(path, None)
 
     def replay(self, session_id: str, *, after_seq: int = 0) -> list[AgentEvent]:
+        """Events after ``after_seq``: an idle poll costs a stat, a busy one reads only new lines.
+
+        Reading and parsing the whole log on every poll made an idle 50,000-event session
+        cost about 118 ms per poll (2026-11-06 risk review, finding 7).
+        """
+        path = self._path(session_id)
         with self._lock:
-            return [event for event in self._read(session_id) if event.seq > after_seq]
+            if not path.exists():
+                self._tails.pop(path, None)
+                return []
+            tail = self._tail(path, repair=False)
+            first = bisect_right(tail.seqs, after_seq) if tail.ordered else 0
+            if first == len(tail.seqs):
+                return []
+            start = tail.offsets[first]
+            with path.open("rb") as handle:
+                handle.seek(start)
+                data = handle.read(tail.size - start)
+        events: list[AgentEvent] = []
+        for line in jsonl_lines(data.decode("utf-8")):
+            if not line.strip():
+                continue
+            try:
+                event = AgentEvent.from_dict(json.loads(line))
+            except json.JSONDecodeError:
+                continue  # a line cut short by an interrupted write
+            if event.seq > after_seq:
+                events.append(event)
+        return events
 
     def _read(self, session_id: str) -> list[AgentEvent]:
         path = self._path(session_id)
         if not path.exists():
             return []
         events: list[AgentEvent] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in jsonl_lines(path.read_text(encoding="utf-8")):
             if not line.strip():
                 continue
             try:
@@ -178,4 +230,8 @@ class _Tail:
     size: int = 0
     last_seq: int = 0
     ids: set[str] = field(default_factory=set)
+    seqs: list[int] = field(default_factory=list)
+    offsets: list[int] = field(default_factory=list)
+    ordered: bool = True
+    inode: int | None = None
 

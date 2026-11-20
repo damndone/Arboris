@@ -67,6 +67,40 @@ class CheckContext:
     facts: dict[str, Any] = field(default_factory=dict)
 
 
+UNSERVED_OUTCOME = "outcome.type_unserved"
+#: Traits a fit adds beyond its family's declared ones: from the inference kernel, and from the
+#: run's detected outcome type.
+FIT_TRAIT_VOCABULARY = frozenset({"vce.cluster", "weights.sampling", UNSERVED_OUTCOME})
+
+
+def families_serving(outcome_type: str) -> tuple[str, ...]:
+    """Registered model families that declare they serve this outcome type."""
+    from ..engine.registry import MODEL_REGISTRY
+
+    return tuple(sorted(name for name, handler in MODEL_REGISTRY.items() if outcome_type in handler.serves_y_types))
+
+
+def served_outcome_types(model_type: str, model_id: str) -> tuple[str, ...] | None:
+    """The outcome types the fitting family declares. A result type such as `ols_robust` is not a
+    registry key, so the families that write this model id answer for it; None when none is registered."""
+    from ..engine.registry import MODEL_REGISTRY
+
+    handler = MODEL_REGISTRY.get(model_type)
+    if handler is not None:
+        return handler.serves_y_types
+    writers = [handler for handler in MODEL_REGISTRY.values() if handler.model_id == model_id]
+    return tuple(sorted({kind for handler in writers for kind in handler.serves_y_types})) if writers else None
+
+
+def outcome_traits(model_type: str, model_id: str, facts: Mapping[str, Any]) -> frozenset[str]:
+    """`outcome.type_unserved` when the run detected an outcome type this family does not declare
+    and some registered family does; an unregistered family or an unknown type adds nothing."""
+    outcome_type, served = facts.get("outcome_type"), served_outcome_types(model_type, model_id)
+    if not isinstance(outcome_type, str) or served is None or outcome_type in served:
+        return frozenset()
+    return frozenset({UNSERVED_OUTCOME}) if families_serving(outcome_type) else frozenset()
+
+
 def fit_traits(kernel: Mapping[str, Any] | None) -> frozenset[str]:
     """Facts of this fit that checks can require."""
     if not kernel:
@@ -131,7 +165,7 @@ def build_context(
     return CheckContext(
         model_id=model_id,
         model_type=model_type,
-        traits=family_traits | fit_traits(kernel),
+        traits=family_traits | fit_traits(kernel) | outcome_traits(model_type, model_id, facts or {}),
         nobs=nobs,
         design=design,
         outcome=outcome,

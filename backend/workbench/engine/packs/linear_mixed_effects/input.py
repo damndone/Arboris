@@ -61,6 +61,8 @@ class PreparedLmmInput:
     formula: str
     fixed_effects: tuple[str, ...]
     random_effects: tuple[str, ...]
+    source_row_positions: tuple[int, ...]
+    outcome: str
     primary_result_id: str = LMM_PRIMARY_RESULT_ID
 
 
@@ -219,6 +221,8 @@ def prepare_lmm_input(
 
     return PreparedLmmInput(
         frame=retained,
+        outcome=outcome,
+        source_row_positions=tuple(i for i, keep in enumerate(frame[list(required_columns)].notna().all(axis=1)) if keep),
         input=model_input,
         reference_group=groups[0],
         comparison_group=groups[1],

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
+import hashlib
+import struct
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 
 from .artifacts import register_artifact, write_json
@@ -148,28 +152,58 @@ def run_prediction_model_v186(
         feature_recipe_ref=feature_recipe.content_hash if feature_recipe is not None else None,
         split_plan_ref=split.content_hash,
     )
-    prediction_identity = build_prediction_identity(
-        sample_spec,
-        model_type=model_type,
-        model_id=model_id,
-    )
-    identity_cache = PredictionIdentityCache(_prediction_project_root(run_root))
-    cache_status = identity_cache.status(prediction_identity)
-    if estimator_factory is None:
-        estimator_factory = _make_v186_estimator_factory(model_type, random_seed)
+    caller_factory = estimator_factory
+    observed_estimator: dict[str, Any] | None = None
+    consistent_estimator = True
+    if caller_factory is None:
+        fit_factory = _make_v186_estimator_factory(model_type, random_seed)
+    else:
+        def fit_factory() -> Any:
+            nonlocal observed_estimator, consistent_estimator
+            estimator = caller_factory()
+            if consistent_estimator:
+                identity = _built_estimator_identity(estimator)
+                if identity is None or (observed_estimator is not None and identity != observed_estimator):
+                    consistent_estimator = False
+                else:
+                    observed_estimator = identity
+            return estimator
+
     result = run_oos_prediction(
         frame=protocol_frame,
         target=y,
         features=tuple(x),
         sample_spec=sample_spec,
         split_receipt=split,
-        estimator_factory=estimator_factory,
+        estimator_factory=fit_factory,
         model_id=model_id,
         control_seed=random_seed,
         imputation_method=imputation_method,
         imputation_max_iter=imputation_max_iter,
         imputation_max_missing_rate=imputation_max_missing_rate,
     )
+    estimator_identity = None
+    if caller_factory is not None:
+        estimator_identity = {"source": "caller_factory", "parameter_encoding": 1}
+        if consistent_estimator and observed_estimator is not None:
+            estimator_identity.update(observed_estimator)
+        else:
+            # An opaque or varying factory has only a run-local prediction
+            # identity. Its data transformation can still match across runs.
+            estimator_identity["run_nonce"] = uuid4().hex
+
+    prediction_identity = build_prediction_identity(
+        sample_spec,
+        model_type=model_type,
+        model_id=model_id,
+        specification=_prediction_specification(
+            y=y, x=x, model_type=model_type, random_seed=random_seed, estimator_identity=estimator_identity,
+            imputation_method=imputation_method, imputation_max_iter=imputation_max_iter,
+            imputation_max_missing_rate=imputation_max_missing_rate,
+        ),
+    )
+    identity_cache = PredictionIdentityCache(_prediction_project_root(run_root))
+    cache_status = identity_cache.status(prediction_identity)
 
     sample_payload = {
         **sample_spec.to_dict(),
@@ -444,6 +478,77 @@ def _record_prediction_graph(
             "sample_spec_hash": sample_spec_identity,
         },
     }
+
+
+#: The fixed parameters _make_v186_estimator_factory gives each built-in model type.
+_V186_ESTIMATOR_PARAMETERS = {
+    "prediction_lasso": {"estimator": "Lasso", "alpha": 1.0, "max_iter": 5000, "scaler": "StandardScaler"},
+    "prediction_ridge": {"estimator": "Ridge", "alpha": 1.0, "scaler": "StandardScaler"},
+    "prediction_random_forest": {"estimator": "RandomForestRegressor", "n_estimators": 100, "n_jobs": 1,
+                                 "scaler": "StandardScaler"},
+}
+
+
+def _prediction_specification(*, y: str, x: list[str], model_type: str, random_seed: int,
+                              estimator_identity: dict[str, Any] | None, imputation_method: str | None,
+                              imputation_max_iter: int, imputation_max_missing_rate: float) -> dict[str, Any]:
+    """Everything besides data, sampling and split that changes what a prediction run computes."""
+    if estimator_identity is None:
+        estimator = {"source": "v186_builtin", "model_type": model_type,
+                     "parameters": _V186_ESTIMATOR_PARAMETERS.get(model_type), "random_seed": random_seed}
+    else:
+        estimator = estimator_identity
+    return {
+        "target": y,
+        "features": list(x),
+        "estimator": estimator,
+        "imputation": {"method": imputation_method, "max_iter": imputation_max_iter,
+                       "max_missing_rate": imputation_max_missing_rate},
+        "control_seed": random_seed,
+    }
+
+
+def _estimator_parameter(value: Any) -> Any:
+    kind = type(value)
+    if value is None or kind in (bool, int, str):
+        return value
+    if kind is float:
+        return {"float64": struct.pack("!d", value).hex()}
+    if kind is bytes:
+        return {"bytes": value.hex()}
+    if kind in (list, tuple):
+        return {kind.__name__: [_estimator_parameter(item) for item in value]}
+    if kind is dict and all(type(key) is str for key in value):
+        return {"dict": [[key, _estimator_parameter(item)] for key, item in value.items()]}
+    if kind is np.ndarray or isinstance(value, np.generic):
+        array = np.asarray(value)
+        if array.dtype.kind in "biufcmMSU" and array.dtype.metadata is None:
+            byte_view = np.ascontiguousarray(array).view(np.uint8)
+            return {
+                "type": "ndarray" if kind is np.ndarray else "numpy_scalar",
+                "dtype": array.dtype.str,
+                "shape": list(array.shape),
+                "sha256": hashlib.sha256(byte_view).hexdigest(),
+            }
+    raise TypeError("estimator parameter has no stable encoding")
+
+
+def _built_estimator_identity(estimator: Any) -> dict[str, Any] | None:
+    """Describe an actual fit instance's configuration before fitting it."""
+    kind = type(estimator)
+    try:
+        get_params = getattr(estimator, "get_params", None)
+        if get_params is not None:
+            field, state = "parameters", get_params(deep=True)
+        else:
+            if any("__slots__" in cls.__dict__ for cls in kind.__mro__):
+                return None
+            field, state = "state", vars(estimator)
+        if type(state) is not dict:
+            return None
+        return {"type": f"{kind.__module__}.{kind.__qualname__}", field: _estimator_parameter(state)}
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return None
 
 
 def _make_v186_estimator_factory(model_type: str, random_seed: int) -> Callable[[], Any]:

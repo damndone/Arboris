@@ -6,6 +6,7 @@ conversation up to a message; chapters are named messages to jump to.
 """
 
 from __future__ import annotations
+from workbench.http import agent_route_runtime
 
 from pathlib import Path
 
@@ -20,8 +21,8 @@ from workbench.app import app
 def conversation(tmp_path: Path, monkeypatch):
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     params = {"project_root": str(project_root)}
@@ -58,8 +59,19 @@ def test_rewind_goes_back_before_a_message_and_keeps_the_log(conversation):
     log = (project_root / "workbench" / "agent-sessions" / f"{session_id}.jsonl").read_text()
     assert "Second question" in log
     # The next message continues from the rewound point.
-    assert client.post(f"/agent/sessions/{session_id}/turns", params=params, json={"question": "Instead"}).status_code == 200
-    assert [m["content"] for m in _messages(client, params, session_id) if m["role"] == "user"] == ["First question", "Instead"]
+    restored_id = body["session"]["session_id"]
+    assert restored_id != session_id
+    assert body["lineage"]["run_id"] == "run-a"
+    refused = client.post(f"/agent/sessions/{session_id}/turns", params=params, json={"question": "Old branch"})
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "AGENT_ANALYSIS_REWOUND"
+    for endpoint, payload in (("continue", {}), ("plan/approve", {"version": 1}),
+                              ("proposals/old-card/confirm", {"revision": 1, "fingerprint": "old", "active_head_run_id": "run-a"})):
+        retired = client.post(f"/agent/sessions/{session_id}/{endpoint}", params=params, json=payload)
+        assert retired.status_code == 409, retired.text
+        assert retired.json()["error"]["code"] == "AGENT_ANALYSIS_REWOUND"
+    assert client.post(f"/agent/sessions/{restored_id}/turns", params=params, json={"question": "Instead"}).status_code == 200
+    assert [m["content"] for m in _messages(client, params, restored_id) if m["role"] == "user"] == ["First question", "Instead"]
 
 
 def test_rewind_only_to_your_own_messages_on_this_branch(conversation):

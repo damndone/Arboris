@@ -14,7 +14,11 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "ols", label: "OLS", group: "Linear" },
         { key: "panel_ols", label: "Panel OLS", group: "Panel" },
         { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel", params: [{ key: "x", kind: "columns" }, { key: "model_options", kind: "object" }] },
-        { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
+        { key: "iv_2sls", label: "IV / 2SLS", group: "IV", params: [
+          { key: "covariance", kind: "select", label: "Covariance", value: "robust" },
+          { key: "estimation_engine", kind: "select", label: "Estimation engine (experimental; resource acceptance pending)",
+            options: ["reference", "fast"], value: "reference" },
+        ] },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
         {
           key: "time_series.arma_garch",
@@ -48,7 +52,7 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         sampling_weight_families: ["ols", "logit", "probit", "poisson"],
       },
       imputation_methods: [],
-      covariance_options: [{ key: "robust", label: "Robust" }],
+      covariance_options: [{ key: "robust", label: "Robust" }, { key: "hac", label: "HAC" }],
       prediction_models: [{ key: "prediction_ridge", label: "Ridge" }],
       sampling_methods: [{ key: "smote", label: "SMOTE" }],
     },
@@ -177,7 +181,81 @@ function etsSchemaResponse(
   return response;
 }
 
+function ivEngineDraft(engine?: "reference" | "fast"): api.PipelineDraftResponse {
+  const response = draftResponse("iv-hash", "configured", "configured");
+  response.draft.graph.nodes = response.draft.graph.nodes.map((node) =>
+    node.node_type === "input.upload" || node.node_type === "table"
+      ? { ...node, columns: ["y", "w", "d", "z"] }
+      : node.node_type === "model"
+        ? { ...node, model_type: "iv_2sls", params: {
+            model_type: "iv_2sls", y: "y", x: ["w"], iv_endog: ["d"], iv_instruments: ["z"], covariance: "robust",
+            ...(engine ? { estimation_engine: engine } : {}),
+          } }
+        : node,
+  );
+  return response;
+}
+
 describe("GenesisWizard", () => {
+  it("restores an experimental IV engine and explicitly clears it when reference is selected", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummaryFixture({ draft_id: "draft_g1" })]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivEngineDraft("fast"));
+    const patch = vi.spyOn(api, "patchDraftNode").mockImplementation(async (_root, _draftId, _nodeId, body) =>
+      ivEngineDraft(body.params.estimation_engine === "fast" ? "fast" : "reference"));
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    const engine = await screen.findByLabelText("estimation engine");
+    expect(engine).toHaveValue("fast");
+    expect(screen.getByText(/resource acceptance has not passed/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("/proj", "draft_g1", "model_1", {
+      params: expect.objectContaining({ estimation_engine: "fast", model_type: "iv_2sls" }),
+    }));
+    fireEvent.change(engine, { target: { value: "reference" } });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith("/proj", "draft_g1", "model_1", {
+      params: expect.objectContaining({ estimation_engine: "reference" }),
+    }));
+  });
+
+  it("keeps the default IV engine absent from saved parameters", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummaryFixture({ draft_id: "draft_g1" })]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivEngineDraft());
+    const patch = vi.spyOn(api, "patchDraftNode").mockResolvedValue(ivEngineDraft());
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    expect(await screen.findByLabelText("estimation engine")).toHaveValue("reference");
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0][3].params).not.toHaveProperty("estimation_engine");
+  });
+
+  it("does not carry the IV engine into another model family", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummaryFixture({ draft_id: "draft_g1" })]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivEngineDraft("fast"));
+    const patch = vi.spyOn(api, "patchDraftNode").mockResolvedValue(draftResponse("ols-hash", "configured", "configured"));
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await screen.findByLabelText("estimation engine");
+    fireEvent.change(screen.getByLabelText("model type"), { target: { value: "ols" } });
+    expect(screen.queryByLabelText("estimation engine")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0][3].params).not.toHaveProperty("estimation_engine");
+  });
+
+  it("shows the shared server refusal for an uncovered fast covariance", async () => {
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummaryFixture({ draft_id: "draft_g1" })]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivEngineDraft("fast"));
+    vi.spyOn(api, "patchDraftNode").mockRejectedValue(new Error("ESTIMATION_ENGINE_NOT_COVERED: fast IV requires covariance robust, unadjusted. Choose reference to retain this covariance, or choose a supported covariance."));
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await screen.findByLabelText("estimation engine");
+    fireEvent.change(screen.getByLabelText("covariance"), { target: { value: "hac" } });
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    expect(await screen.findByText(/ESTIMATION_ENGINE_NOT_COVERED.*Choose reference/)).toBeInTheDocument();
+  });
+
   it("uses the returned schema to edit a recipe without a recipe-specific form branch", async () => {
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
     vi.spyOn(api, "previewFile").mockResolvedValue(preview());

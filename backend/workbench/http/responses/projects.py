@@ -23,3 +23,5 @@ class StatisticalUploadPreview(TypedDict):
     rows: list[dict[str, Any]]
     total_rows: int
     labels: RunLabels
+    sheet_names: list[str]
+    selected_sheet: str | None

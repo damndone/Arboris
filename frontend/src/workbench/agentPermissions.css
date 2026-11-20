@@ -1,0 +1,73 @@
+.agent-permissions-panel {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 880px;
+}
+
+.agent-permissions-panel > p {
+  margin: 0;
+  color: var(--label-secondary);
+}
+
+.agent-permissions-panel [role="alert"] {
+  color: var(--status-fails-fg);
+}
+
+.agent-permissions-panel form,
+.agent-permissions-panel fieldset {
+  display: grid;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.agent-permissions-panel fieldset {
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+}
+
+.agent-permissions-panel__rule {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(11rem, 2fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.agent-permissions-panel__rule label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-ui);
+}
+
+.agent-permissions-panel :is(input, select, button) {
+  padding: 6px 10px;
+  min-width: 0;
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  color: var(--label);
+  font: inherit;
+}
+
+.agent-permissions-panel :is(input, select, button):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.agent-permissions-panel button {
+  justify-self: start;
+  cursor: pointer;
+}
+
+.agent-permissions-panel button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.agent-permissions-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

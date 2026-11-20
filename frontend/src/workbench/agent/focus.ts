@@ -127,7 +127,7 @@ const reportProvider: FocusProvider = (focus, env) => ({
 const planProvider: FocusProvider = (focus, env) => ({
   ...projectProvider(focus, env)!,
   focus,
-  label: `Plan · ${focus.id}`,
+  label: "Comparing plans",
 });
 
 export const FOCUS_PROVIDERS: Readonly<Record<FocusKind, FocusProvider>> = {

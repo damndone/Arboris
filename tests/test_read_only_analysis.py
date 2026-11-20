@@ -8,6 +8,8 @@ ledger, whoever authorized it.
 
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -91,7 +93,7 @@ class _Fixture:
         self.orchestrator.read_only_runner = runner
 
     def propose(self, steps: list[dict]):
-        proposal = self.orchestrator.create_proposal(
+        proposal = admit_proposal(self.orchestrator,
             chain_id="chain-a",
             operation_id="operation.multi_step",
             target={"run_id": self.run_id, "node_ref": "stage:source", "artifact_id": self.artifact_id},
@@ -215,10 +217,18 @@ def test_choosing_columns_is_not_a_data_change_but_choosing_rows_is() -> None:
 
 
 def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> None:
+    from workbench.agent.model import _error_label
     from workbench.agent.turn_messages import provider_failure_message
+    from workbench.llm.client import LLMUpstreamError
 
-    assert "没有改动你的数据或模型" in provider_failure_message("zh", "LLMUpstreamError")
-    assert "nothing in your data or models was changed" in provider_failure_message("en", "LLMUpstreamError")
+    # The production adapter passes a classified label, never the raw body.
+    error = _error_label(LLMUpstreamError("private-provider-body synthetic-secret"))
+    zh, en = (provider_failure_message(language, error) for language in ("zh", "en"))
+    assert "此前已执行的操作与证据仍保留" in zh
+    assert "earlier operations and evidence are retained" in en
+    assert "没有改动你的数据或模型" not in zh
+    assert "nothing in your data or models was changed" not in en
+    assert all("private-provider-body" not in message and "synthetic-secret" not in message for message in (zh, en))
     # A rejected key is not a transient failure: point at the key, not at retrying.
     assert "API key" in provider_failure_message("zh", "LLMUpstreamError:upstream_401")
     assert "稍后重试" not in provider_failure_message("zh", "LLMUpstreamError:upstream_401")
@@ -239,7 +249,8 @@ def test_many_workflows_on_one_run_do_not_break_the_next_one(tmp_path: Path) -> 
     assert len(latest) == MAX_PROJECTED_POST_ESTIMATION_RESULTS
 
 
-def test_identical_rows_are_kept_as_observations(tmp_path: Path) -> None:
+@pytest.mark.parametrize("with_duplicates", [True, False], ids=["duplicates", "distinct"])
+def test_identical_rows_are_kept_as_observations(tmp_path: Path, monkeypatch, with_duplicates: bool) -> None:
     """Found live: a women-only subset with three columns had 24 distinct
     combinations among 176 respondents; the run dropped 152 of them as
     'duplicates' and refused the logit for too small a sample."""
@@ -251,6 +262,18 @@ def test_identical_rows_are_kept_as_observations(tmp_path: Path) -> None:
 
     rng = np.random.default_rng(9)
     frame = pd.DataFrame({"union": rng.binomial(1, 0.3, 176), "education": rng.integers(9, 21, 176), "female": 1})
+    if not with_duplicates:
+        frame["respondent_id"] = np.arange(len(frame))
+    expected_duplicates = int(frame.duplicated().sum())
+    duplicated = pd.DataFrame.duplicated
+    scanned = []
+
+    def count_duplicate_scan(data, *args, **kwargs):
+        if len(data) == len(frame) and tuple(data.columns) == tuple(frame.columns):
+            scanned.append(id(data))
+        return duplicated(data, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "duplicated", count_duplicate_scan)
     source = tmp_path / "women.csv"
     frame.to_csv(source, index=False)
     root = create_project(tmp_path, "p").root
@@ -260,7 +283,13 @@ def test_identical_rows_are_kept_as_observations(tmp_path: Path) -> None:
     [result] = [item for item in analysis_ledger_read_models(run_root)]
     assert result["nobs"] == 176
     issues = json.loads((run_root / "errors.json").read_text())["issues"]
-    assert any(issue["code"] == "DUPLICATE_ROWS_KEPT" for issue in issues)
+    duplicate_issues = [issue["evidence"] for issue in issues if issue["code"] == "DUPLICATE_ROWS_KEPT"]
+    actions = json.loads((run_root / "processed" / "cleaning_actions.json").read_text())["actions"]
+    duplicate_actions = [action for action in actions if action["action"] == "duplicate_rows_found"]
+    assert duplicate_issues == ([{"rows": expected_duplicates}] if with_duplicates else [])
+    assert duplicate_actions == ([{"action": "duplicate_rows_found", "rows": expected_duplicates, "kept": True}]
+                                 if with_duplicates else [])
+    assert len(scanned) == 1, f"{len(scanned)} duplicate scans on {len(set(scanned))} frames"
 
 
 def analysis_ledger_read_models(run_root: Path) -> list[dict]:

@@ -20,6 +20,7 @@ from typing_extensions import TypedDict
 from ...agent.context_compiler import NotebookPlanningContextV1
 from ...agent.notebook.service import ExecutionOutcome
 from ...agent.notebook.store import Notebook, WorkflowSource
+from ...agent.notebook.notes import NotebookNote
 from ...capability_factory.notebook_bridge import NotebookExecutionDispatch
 from ...contracts.agent.notebook_option import (
     ArtifactContract,
@@ -35,6 +36,7 @@ from ...contracts.agent.notebook_option import (
 )
 from .common import define_view, view_of
 from .drafts import PipelineDraft
+from .data_operations import OperationRecordView
 
 
 # to_dict omits source_kind for the default run_artifact.
@@ -61,6 +63,8 @@ NotebookView = view_of(
     record_type=Literal["notebook"],
     projection_source=Annotated[RunProjectionSource | DatasetProjectionSource, Field(discriminator="kind")] | None,
 )
+
+NotebookNoteView = view_of(NotebookNote, "NotebookNoteView")
 
 ArtifactContractView = view_of(
     ArtifactContract, "ArtifactContractView", checked_dimensions=list[str], not_evaluated_dimensions=list[str]
@@ -130,6 +134,7 @@ class WorkflowConfirmed(TypedDict):
     execution: NotRequired[ExecutionView]
     outcome: NotRequired[ExecutionOutcomeView]
     workflow_execution: NotRequired[dict[str, Any]]
+    operation: NotRequired[OperationRecordView]
     trace_id: str
 
 

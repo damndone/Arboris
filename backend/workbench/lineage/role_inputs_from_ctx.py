@@ -60,8 +60,8 @@ def build_resolved_inputs(ctx) -> ResolvedRoleInputs:
     elif family == "panel":
         idc = art.get("_id_candidates") or []
         tc = art.get("_time_candidates") or []
-        unit = idc[0] if idc else None
-        time = tc[0] if tc else None
+        # The columns the panel fit used for its effects (routing.py), not every detected one.
+        unit, time = art.get("_panel_effect_columns") or (idc[0] if idc else None, tc[0] if tc else None)
 
     return ResolvedRoleInputs(
         estimator_family=family,

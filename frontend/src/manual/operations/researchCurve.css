@@ -1,0 +1,163 @@
+.research-curve {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.research-curve__caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: 0 var(--space-1) var(--space-1);
+  color: var(--label);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.research-curve__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--label-secondary);
+  font-weight: 400;
+}
+
+.research-curve__legend::before {
+  content: "";
+  flex: 0 0 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--tint);
+  opacity: 0.25;
+}
+
+.research-curve__legend--primary::before {
+  height: 2px;
+  opacity: 1;
+}
+
+.research-curve__legend--comparison::before {
+  height: 0;
+  border-block-start: 2px dashed var(--label-secondary);
+  background: none;
+  opacity: 1;
+}
+
+.research-curve__plot {
+  position: relative;
+  min-width: 0;
+}
+
+.research-curve__plot svg {
+  display: block;
+  width: 100%;
+  height: 190px;
+  touch-action: pan-y;
+}
+
+.research-curve__plot svg:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.research-curve__axis-title,
+.research-curve__tick text {
+  fill: var(--label-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.research-curve__axis-title { font-weight: 600; }
+.research-curve__grid { stroke: var(--separator-faint); }
+.research-curve__axes { fill: none; stroke: var(--separator); }
+.research-curve__band { fill: var(--tint); fill-opacity: 0.18; }
+.research-curve__single-band { stroke: var(--tint); stroke-width: 4; stroke-opacity: 0.35; }
+.research-curve__line { fill: none; stroke: var(--tint); stroke-width: 2; stroke-linejoin: round; }
+.research-curve__line--comparison { stroke: var(--label-secondary); stroke-dasharray: 5 4; }
+.research-curve__point { fill: var(--tint); }
+
+.research-curve__cursor { pointer-events: none; }
+.research-curve__cursor path { fill: none; stroke: var(--label-tertiary); stroke-dasharray: 3 3; }
+.research-curve__cursor circle { fill: var(--tint); stroke: var(--bg-card); stroke-width: 1.5; }
+.research-curve__comparison-point,
+.research-curve__cursor .research-curve__comparison-point { fill: var(--label-secondary); }
+
+.research-curve__tooltip {
+  position: absolute;
+  z-index: 1;
+  top: var(--space-1);
+  inset-inline-end: var(--space-2);
+  box-sizing: border-box;
+  width: min(228px, calc(100% - var(--space-2) - var(--space-2)));
+  padding: var(--space-2);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-2);
+  color: var(--label);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.research-curve__tooltip[data-side="start"] {
+  inset-inline-start: var(--space-2);
+  inset-inline-end: auto;
+}
+
+.research-curve__plot[data-comparison] .research-curve__tooltip {
+  width: min(300px, calc(100% - var(--space-2) - var(--space-2)));
+}
+
+.research-curve__tooltip dl { margin: var(--space-1) 0 0; }
+.research-curve__tooltip dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+}
+.research-curve__tooltip dt {
+  min-width: 0;
+  color: var(--label-secondary);
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.research-curve__tooltip dd {
+  min-width: 0;
+  margin: 0;
+  margin-inline-start: auto;
+  font-size: inherit;
+  font-weight: 400;
+  text-align: right;
+}
+
+.research-curve__tooltip dl > .research-curve__interval { display: block; }
+.research-curve__tooltip .research-curve__interval dd { margin-inline-start: 0; text-align: start; }
+.research-curve__interval dd span { display: inline-block; max-width: 100%; }
+
+.research-curve__plot[data-compact] .research-curve__tooltip,
+.research-curve__plot[data-comparison][data-compact] .research-curve__tooltip {
+  position: static;
+  width: 100%;
+  margin-top: var(--space-1);
+}
+
+.research-curve__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

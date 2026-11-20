@@ -1,0 +1,52 @@
+{
+  "schema_version": "workbench.workflow.p7-pack/v1",
+  "source": {
+    "run_id": "20261018_035324_925213_81d490b3",
+    "node_ref": "stage:cleaned",
+    "artifact_id": "cleaned_dataset",
+    "sha256": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+    "workflow_id": "workflow_oprec_605239aede388eca7d356e12",
+    "workflow_step_id": "s_weak",
+    "workflow_step_fingerprint": "sha256:b96fc6cae21762a16b25a0bd1d88d156d8cafd26abd628ffeb3ae8e04602426b",
+    "operation_id": "iv.weak_instruments",
+    "pack_family": "iv_gmm"
+  },
+  "result": {
+    "contract": "iv_gmm.result",
+    "contract_version": "1.0",
+    "operation_id": "iv.weak_instruments",
+    "status": "completed",
+    "reason_code": "IV_GMM_COMPLETED",
+    "n_observations": 1500,
+    "parameter_names": [
+      "education"
+    ],
+    "result": {
+      "exog_names": [
+        "experience"
+      ],
+      "endogenous_names": [
+        "education"
+      ],
+      "excluded_instrument_names": [
+        "near_college",
+        "mother_educ"
+      ],
+      "diagnostic_policy": "descriptive_no_automatic_threshold_decision",
+      "method": "per_endogenous_partial_f_and_robust_excluded_wald_f",
+      "by_endogenous": {
+        "education": {
+          "partial_f": 6376.259298578642,
+          "partial_r2": 0.8949438193442798,
+          "robust_excluded_wald_f": 6591.586107841729,
+          "robust_excluded_wald_status": "completed",
+          "excluded_instrument_count": 2,
+          "residual_degrees_of_freedom": 1497
+        }
+      },
+      "minimum_partial_f": 6376.259298578642,
+      "minimum_robust_excluded_wald_f": 6591.586107841729
+    },
+    "evidence_digest": "3eae4cfa8b31c17f7ccd52724a1f59f099db6e442d0aca5c0213e98ec3ca86b8"
+  }
+}

@@ -725,11 +725,12 @@ export function parseRecommendationDecision(value: unknown): RecommendationDecis
 }
 
 /* ------------------------------------------------------------------ */
-/* OptionMaterialization@1.0                                           */
+/* OptionMaterialization@1.0 and capability-bound @1.1                  */
 /* ------------------------------------------------------------------ */
 
 export interface OptionMaterialization {
-  contract_version: "1.0";
+  contract_version: "1.0" | "1.1";
+  capability_resolution_binding_ref?: string;
   materialization_id: string;
   option_id: string;
   option_revision: number;
@@ -762,6 +763,7 @@ const SOURCE_PIN_FIELDS = [
 export function parseOptionMaterialization(value: unknown): OptionMaterialization {
   const raw = asRecord(value, "option_materialization");
   const path = "option_materialization";
+  const version = requireChoice(raw, "contract_version", ["1.0", "1.1"], path);
   requireExactKeys(
     raw,
     [
@@ -779,10 +781,14 @@ export function parseOptionMaterialization(value: unknown): OptionMaterializatio
       ...SOURCE_PIN_FIELDS,
       "dataset_upload_sha256",
       "run_family_id",
+      ...(version === "1.1" ? ["capability_resolution_binding_ref"] : []),
     ],
     path,
   );
-  requireVersion(raw, OPTION_MATERIALIZATION_CONTRACT_VERSION, "OptionMaterialization");
+  const binding = version === "1.1" ? requireString(raw, "capability_resolution_binding_ref", path) : undefined;
+  if (binding !== undefined && !/^[a-f0-9]{64}$/.test(binding)) {
+    throw new NotebookContractError(`${path}.capability_resolution_binding_ref must be a SHA-256 digest`);
+  }
   const draftExecutionMode = requireChoice(raw, "draft_execution_mode", ["rerun_child", "genesis"], path);
   const pins = Object.fromEntries(
     SOURCE_PIN_FIELDS.map((field) => [field, optionalNonEmptyString(raw, field, path)]),
@@ -796,7 +802,8 @@ export function parseOptionMaterialization(value: unknown): OptionMaterializatio
     throw new NotebookContractError(`${path}.genesis requires an upload hash and no source pins`);
   }
   return {
-    contract_version: OPTION_MATERIALIZATION_CONTRACT_VERSION,
+    contract_version: version,
+    ...(binding ? { capability_resolution_binding_ref: binding } : {}),
     materialization_id: requireString(raw, "materialization_id", path),
     option_id: requireString(raw, "option_id", path),
     option_revision: requirePositiveInt(raw, "option_revision", path),
@@ -1056,7 +1063,7 @@ export interface NotebookExecutionResult {
   run_id: string | null;
   execution_status: "pending" | "running" | "succeeded" | "failed";
   committed: boolean;
-  artifact_validation: {
+  artifact_validation?: {
     contract_profile: string;
     validation_status: "passed" | "passed_with_warnings" | "failed";
     checked_dimensions: string[];
@@ -1068,6 +1075,20 @@ export interface NotebookExecutionResult {
   artifact_validation_scope?: NotebookArtifactValidationScope;
   /** Server-produced receipt for a multi-branch workflow, never an inferred head. */
   workflow_execution?: WorkflowExecutionReceipt;
+  /** CF4 projects durable references, not the artifact validation aggregate. */
+  capability_execution?: CapabilityExecutionReceipt;
+}
+
+export interface CapabilityExecutionReceipt {
+  dispatch_status: "dispatch_reserved" | "running" | "completed" | "failed" | "unsupported" | "dispatch_unknown";
+  attempt_id: string | null;
+  receipt_ref: string | null;
+  completion_ref: string | null;
+  artifact_validation_ref: string | null;
+  object_graph_ref: string | null;
+  assessment_ref: string | null;
+  output_bundle_ref: string | null;
+  attestation_ref: string | null;
 }
 
 export interface WorkflowExecutionBranchRun {
@@ -1180,6 +1201,23 @@ function parseArtifactValidationScope(
 export function parseNotebookExecutionResult(value: unknown): NotebookExecutionResult {
   const raw = asRecord(value, "notebook_execution_result");
   const path = "notebook_execution_result";
+  if ("capability_execution" in raw) {
+    requireExactKeys(raw, ["option_id", "option_revision", "run_id", "execution_status", "committed", "capability_execution"], path);
+    const receiptPath = `${path}.capability_execution`;
+    const receipt = asRecord(raw.capability_execution, receiptPath);
+    const refKeys = ["attempt_id", "receipt_ref", "completion_ref", "artifact_validation_ref", "object_graph_ref", "assessment_ref", "output_bundle_ref", "attestation_ref"] as const;
+    requireExactKeys(receipt, ["dispatch_status", ...refKeys], receiptPath);
+    const refs = Object.fromEntries(refKeys.map((key) => [key, optionalNonEmptyString(receipt, key, receiptPath)])) as Omit<CapabilityExecutionReceipt, "dispatch_status">;
+    return {
+      option_id: requireString(raw, "option_id", path),
+      option_revision: requirePositiveInt(raw, "option_revision", path),
+      run_id: optionalNonEmptyString(raw, "run_id", path),
+      execution_status: requireChoice(raw, "execution_status", ["pending", "running", "succeeded", "failed"], path),
+      committed: requireBoolean(raw, "committed", path),
+      capability_execution: { ...refs, dispatch_status: requireChoice(receipt, "dispatch_status",
+        ["dispatch_reserved", "running", "completed", "failed", "unsupported", "dispatch_unknown"], receiptPath) },
+    };
+  }
   requireKnownKeys(
     raw,
     [

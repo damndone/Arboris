@@ -15,12 +15,20 @@ so golden 0-drift on the visualization pipeline is unaffected.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from .artifacts import read_json, sha256_file
 
 MAX_SOURCE_PREVIEW_CHARS = 6_000
+# A time-trend source is a summary of every row (aggregate) plus a row sample
+# (rows); the egress checkpoint classifies each by its protocol, so a remote
+# provider gets the rows only where the project allows rows.
+SUMMARY_PROTOCOL = "figure-series-summary/v1"
+ROWS_PROTOCOL = "figure-rows/v1"
+MAX_SUMMARY_BINS = 50
+_TREND_PREVIEW_ROWS = 400
 
 # figure artifact_id (matched by exact id or longest prefix) → chart semantics.
 # ``reads`` names the kind of numeric source that backs the chart; the concrete
@@ -95,11 +103,98 @@ def _resolve_source_artifact(records: list[dict[str, Any]], reads: str) -> dict[
     return None
 
 
+def _dumps(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _limited(value: Any, limit: int) -> Any:
+    if isinstance(value, list):
+        return [_limited(item, limit) for item in value[:limit]]
+    if isinstance(value, dict):
+        return {key: _limited(item, limit) for key, item in list(value.items())[:limit]}
+    return value
+
+
 def _bounded_preview(payload: Any) -> tuple[str, bool]:
-    text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    """The payload as JSON within the bound, cut as structure so it stays parseable.
+
+    Cut text was invalid JSON, which the egress checkpoint could not look inside.
+    """
+
+    text = _dumps(payload)
     if len(text) <= MAX_SOURCE_PREVIEW_CHARS:
         return text, False
-    return text[:MAX_SOURCE_PREVIEW_CHARS], True
+    for limit in (256, 128, 64, 32, 16, 8, 4, 2, 1):
+        text = _dumps(_limited(payload, limit))
+        if len(text) <= MAX_SOURCE_PREVIEW_CHARS:
+            return text, True
+    return _dumps({"preview_omitted": "the numeric source exceeds the context bound"}), True
+
+
+def _json_scalar(value: Any) -> Any:
+    import pandas as pd
+
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        value = value.item()
+    return None if isinstance(value, float) and math.isnan(value) else value
+
+
+def series_summary(frame: Any, time_column: str, columns: list[str], *,
+                   max_bins: int = MAX_SUMMARY_BINS) -> dict[str, Any]:
+    """Every series of a time trend over every row: statistics, a trend and time-ordered bin means.
+
+    Bins group consecutive distinct time values (one bin per value when there are at
+    most ``max_bins``), so a panel's several rows per period share a bin. The trend is
+    the least-squares slope on the time value, on days for dates, else on the time
+    position. A bin carries its count and mean only, and the series no first or last
+    observation: those are single rows, not summaries.
+    """
+
+    import numpy as np
+    import pandas as pd
+
+    ordered = frame.sort_values(time_column, kind="mergesort")
+    time = ordered[time_column]
+    distinct = pd.Series(pd.unique(time.dropna()))
+    if pd.api.types.is_datetime64_any_dtype(time):
+        axis, per = (time - time.min()) / pd.Timedelta(days=1), "day"
+    elif pd.api.types.is_numeric_dtype(time) and not pd.api.types.is_bool_dtype(time):
+        axis, per = time.astype(float), time_column
+    else:
+        axis, per = time.map({value: position for position, value in enumerate(distinct)}).astype(float), "time position"
+    groups = np.array_split(np.arange(len(distinct)), min(max_bins, len(distinct))) if max_bins and len(distinct) else []
+    bin_of = {distinct.iloc[index]: number for number, members in enumerate(groups) for index in members}
+    series: dict[str, Any] = {}
+    for column in columns:
+        values = pd.to_numeric(ordered[column], errors="coerce")
+        valid = values.notna() & time.notna()
+        kept, kept_axis, kept_time = values[valid], axis[valid], time[valid]
+        entry: dict[str, Any] = {"n": int(valid.sum()), "missing": int((~valid).sum())}
+        if len(kept):
+            entry.update({
+                "min": _json_scalar(kept.min()), "max": _json_scalar(kept.max()), "mean": _json_scalar(kept.mean()),
+                "std": _json_scalar(kept.std()) if len(kept) > 1 else None,
+            })
+            if kept_axis.nunique() > 1:
+                entry["trend"] = {"slope": float(np.polyfit(kept_axis.to_numpy(float), kept.to_numpy(float), 1)[0]),
+                                  "per": per}
+        if groups:
+            numbers = kept_time.map(bin_of)
+            entry["bins"] = [
+                {"time_start": _json_scalar(distinct.iloc[members[0]]), "time_end": _json_scalar(distinct.iloc[members[-1]]),
+                 "n": int(len(part)), "mean": _json_scalar(part.mean()) if len(part) else None}
+                for number, members in enumerate(groups) for part in [kept[numbers == number]]
+            ]
+            means = [entry_bin["mean"] for entry_bin in entry["bins"] if entry_bin["mean"] is not None]
+            if len(means) > 1:
+                entry["change_in_bin_mean"] = means[-1] - means[0]
+        series[column] = entry
+    return {"time_column": time_column, "rows_summarized": int(len(frame)), "series": series,
+            "bins": "consecutive distinct time values, at most %d bins" % max_bins if groups else "none"}
 
 
 def _event_study_payload(payload: Any) -> Any:
@@ -155,17 +250,34 @@ def _time_trend_payload(run_root: Path, source_record: dict[str, Any]) -> Any | 
         ]
         if not columns:
             return None
-        # Bound rows before serialising; preserve the same sorted order as the
-        # plotting function and let the common preview bound handle large payloads.
-        preview_frame = frame[[time_column, *columns]].sort_values(time_column).head(400)
+        preview_frame = frame[[time_column, *columns]].sort_values(time_column).head(_TREND_PREVIEW_ROWS)
         rows = json.loads(preview_frame.to_json(orient="records", date_format="iso"))
-        return {
-            "time_column": time_column,
-            "series": columns,
-            "rows": rows,
-            "row_count_preview": len(rows),
-            "row_count_total": int(len(frame)),
-        }
+
+        def payload(summary: dict[str, Any], sample: list[dict[str, Any]]) -> dict[str, Any]:
+            return {
+                "time_column": time_column, "series": columns, "row_count_total": int(len(frame)),
+                "summary": {"protocol_version": SUMMARY_PROTOCOL, "observations": summary},
+                "rows": {"protocol_version": ROWS_PROTOCOL, "observations": {
+                    "rows": sample, "row_count_sample": len(sample), "selection": "first rows in time order"}},
+            }
+
+        # The summary covers every row and keeps as many bins as fit; the row sample
+        # takes the space left.
+        for bins in (MAX_SUMMARY_BINS, 25, 12, 6, 3, 1, 0):
+            summary = series_summary(frame, time_column, columns, max_bins=bins)
+            if len(_dumps(payload(summary, []))) <= MAX_SOURCE_PREVIEW_CHARS:
+                break
+        low, high = 0, len(rows)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if len(_dumps(payload(summary, rows[:middle]))) <= MAX_SOURCE_PREVIEW_CHARS:
+                low = middle
+            else:
+                high = middle - 1
+        result = payload(summary, rows[:low])
+        if bins < min(MAX_SUMMARY_BINS, len(frame[time_column].dropna().unique())) or low < len(rows):
+            result["_preview_cut"] = True
+        return result
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
 
@@ -216,7 +328,9 @@ def resolve_figure_ai_context(
         elif source_path.is_file() and source_path.suffix.lower() == ".json":
             source_payload = read_json(source_path)
         if source_payload is not None:
+            cut = isinstance(source_payload, dict) and bool(source_payload.pop("_preview_cut", False))
             preview, truncated = _bounded_preview(source_payload)
+            truncated = truncated or cut
             source = {
                 "artifact_id": source_record.get("artifact_id"),
                 "path": source_record.get("path"),

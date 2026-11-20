@@ -147,7 +147,7 @@ def test_sandbox_kills_the_process_group_on_wall_timeout(
         sandbox_module.run_python_sandboxed(
             script,
             writable_dirs=[out],
-            limits=sandbox_module.SandboxLimits(wall_seconds=2.0),
+            limits=sandbox_module.SandboxLimits(wall_seconds=0.0),
         )
 
     assert killed == [(FakePopen.pid, signal.SIGKILL)]
@@ -220,6 +220,24 @@ def test_sandbox_kills_runaway_cpu(tmp_path: Path) -> None:
 
     # SIGXCPU (or a non-zero exit) — the point is it does not run forever
     assert not result.ok
+
+
+def test_sandbox_stops_code_that_exceeds_its_memory_limit(tmp_path: Path) -> None:
+    """macOS refuses RLIMIT_AS, so the limit is watched from outside the process."""
+    script = tmp_path / "grow.py"
+    script.write_text(
+        "held = []\n"
+        "for _ in range(150):\n"
+        "    held.append(bytearray(b'x') * (10 * 1024 * 1024))\n"
+        "print('allocated everything')\n"
+    )
+    result = run_python_sandboxed(
+        script, writable_dirs=[tmp_path],
+        limits=SandboxLimits(memory_bytes=200 * 1024 * 1024),
+    )
+    assert not result.ok
+    assert "allocated everything" not in result.stdout
+    assert "memory limit" in result.stderr
 
 
 def test_sandbox_enforces_wall_clock(tmp_path: Path) -> None:

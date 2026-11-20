@@ -137,6 +137,18 @@ def test_more_than_fifty_groups_are_refused() -> None:
         plan_groups(frame, "g")
 
 
+def test_excess_groups_are_rejected_before_materializing_python_values(monkeypatch) -> None:
+    class UniqueValues(np.ndarray):
+        def tolist(self):
+            pytest.fail("The limit should be checked before materializing Python values.")
+
+    unique = pd.Series.unique
+    monkeypatch.setattr(pd.Series, "unique", lambda column: unique(column).view(UniqueValues))
+    frame = pd.DataFrame({"g": np.r_[np.arange(10_000), np.nan]})
+    with pytest.raises(ByGroupRefusal, match="10001 groups, more than the 50"):
+        plan_groups(frame, "g")
+
+
 def test_holm_and_benjamini_hochberg_match_r_p_adjust() -> None:
     # R: p.adjust(c(0.01, 0.04, 0.03, 0.2), "holm") and "BH"
     p = [0.01, 0.04, 0.03, 0.2]

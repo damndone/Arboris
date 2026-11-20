@@ -109,6 +109,10 @@
      确需入库的大文件写进 `scripts/repo_evidence_allowlist.json`(理由 + 上限),审查时可见。
      放行清单里的文件改名或删除时预算检查会报错。现有条目:生成的前端 API 类型
      `frontend/src/generated/api-schema.ts`(不是证据,随接口数增长;上限 1 MiB,用户 2026-10-08 批准)。
+   - **正式开发线事件归档**使用 `PYTHONPATH=backend .venv/bin/python scripts/devline_control.py archive-events --line <line_id>`。
+     CLI 先校验完整事件链，再无损压缩已记录的事件。压缩前缀 `events.jsonl.gz` 随仓库保留，
+     `events.jsonl` 接收后续事件，原尾锚校验两者合成的完整历史。命令输出归档前后的字节数、SHA-256、
+     事件数和尾事件哈希。用同一 CLI 的 `read-events --line <line_id>` 读取校验后的完整 JSONL。
    - **推送护栏入库**:`scripts/git_hooks/pre-push`,新机器或新 clone 运行 `python3 scripts/install_git_hooks.py`
      (只写 `.git/hooks/pre-push`;已有不同内容的钩子不覆盖,除非 `--force`)。
 

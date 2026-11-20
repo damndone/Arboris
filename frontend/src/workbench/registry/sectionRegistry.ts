@@ -47,6 +47,7 @@ import { StatisticalExplorationSection } from "../../lineage/detail/sections/Sta
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
 import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
 import { ArmaGarchResultSection } from "../../lineage/detail/sections/ArmaGarchResultSection";
+import { isNativeResearchResult, NativeResearchResultSection } from "../../lineage/detail/sections/NativeResearchResultSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
 
@@ -90,6 +91,7 @@ export const sectionRegistry: SectionEntry[] = [
     shouldRender: () => isAskAIEnabled(),
     Component: AskAISection,
   },
+  { id: "nativeResearchResult", order: 23, shouldRender: isNativeResearchResult, Component: NativeResearchResultSection },
   {
     // v1.8 slice C — a stored comparison node reads its own packet; the
     // sections below are about running a model and do not describe it.

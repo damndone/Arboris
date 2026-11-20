@@ -1,3 +1,5 @@
+import { type RunProgressEvent } from "./apiGraph";
+import { connectRunEvents } from "./apiGraph";
 import type { ResponseOf, Schema } from "./apiTypes";
 import type { GraphResponse } from "./lineage/types";
 import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
@@ -561,81 +563,41 @@ export function isStatisticalFile(name: string): boolean {
   return STATISTICAL_FILE_PATTERN.test(name);
 }
 
-type StatisticalUploadPreview = ResponseOf<"/uploads/preview", "post">;
+type UploadPreview = ResponseOf<"/uploads/preview", "post">;
 
-async function readStatisticalRows(
+async function readUploadPreview(
   projectRoot: string,
   file: File,
-): Promise<StatisticalUploadPreview> {
+  sheetName?: string,
+  transpose?: boolean,
+): Promise<UploadPreview> {
   const form = new FormData();
   form.append("project_root", projectRoot);
   form.append("file", file);
+  if (sheetName) form.append("sheet_name", sheetName);
+  if (transpose) form.append("transpose", "true");
   const response = await fetch(apiUrl("/uploads/preview"), { method: "POST", body: form });
-  return readResponse<StatisticalUploadPreview>(response);
+  return readResponse<UploadPreview>(response);
 }
 
+/** The server reads the file with the reader the run imports it with, and
+ * transposes it the same way; the browser parses nothing. */
 export async function previewFile(
   file: File,
   sheetName?: string,
   transpose?: boolean,
   projectRoot?: string,
 ): Promise<FilePreview> {
-  let rows: Record<string, unknown>[];
-  let sheetNames: string[] = [];
-  let selectedSheet = "";
-  let headerNames: string[];
-  let totalRows: number | null = null;
-  let declaredMissing: unknown = null;
-  if (isStatisticalFile(file.name)) {
-    if (!projectRoot) {
-      throw new Error("Previewing an SPSS or Stata file needs an open project.");
-    }
-    const statistical = await readStatisticalRows(projectRoot, file);
-    rows = statistical.rows;
-    headerNames = statistical.columns;
-    totalRows = statistical.total_rows;
-    declaredMissing = statistical.labels.user_missing_values;
-  } else {
-    const buffer =
-      typeof file.arrayBuffer === "function"
-        ? await file.arrayBuffer()
-        : await new Promise<ArrayBuffer>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as ArrayBuffer);
-            reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
-            reader.readAsArrayBuffer(file);
-          });
-    // Loaded on first use: the spreadsheet reader is the largest dependency
-    // in the app and only this preview needs it. Destructured so the bundler
-    // can drop the parts of the library this never calls (the writers).
-    const { read, utils } = await import("xlsx");
-    const workbook = read(buffer, { type: "array", cellDates: true });
-    sheetNames = workbook.SheetNames;
-    selectedSheet = sheetName ?? workbook.SheetNames[0];
-    const sheet = workbook.Sheets[selectedSheet];
-    rows = utils.sheet_to_json<Record<string, unknown>>(sheet, {
-      defval: null,
-      raw: true,
-    });
-    headerNames = (utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
+  if (!projectRoot) {
+    throw new Error("Previewing a data file needs an open project.");
   }
-  if (transpose && rows.length > 0) {
-    const originalKeys = Object.keys(rows[0]);
-    const firstKey = originalKeys[0];
-    // Use first column values as new column headers
-    const newHeaders = rows.map(row => String(row[firstKey] ?? ""));
-    const transposed: Record<string, unknown>[] = [];
-    for (const key of originalKeys) {
-      const row: Record<string, unknown> = {};
-      // Original column header becomes the first cell value (unnamed column)
-      row[""] = key;
-      for (let i = 0; i < rows.length; i++) {
-        row[newHeaders[i]] = rows[i][key];
-      }
-      transposed.push(row);
-    }
-    rows = transposed;
-  }
+  const server = await readUploadPreview(projectRoot, file, sheetName, transpose);
+  const rows: Record<string, unknown>[] = server.rows;
+  const headerNames = server.columns;
+  const sheetNames = server.sheet_names ?? [];
+  const selectedSheet = server.selected_sheet ?? "";
+  const totalRows = server.total_rows;
+  const declaredMissing: unknown = server.labels.user_missing_values;
   const columnNames = rows.length > 0 ? Object.keys(rows[0]) : headerNames;
   const statisticsRows = withoutDeclaredMissing(rows, declaredMissing);
   const columns = columnNames.map((name) => columnStats(String(name), statisticsRows));
@@ -962,10 +924,20 @@ export async function waitForRunTerminal(
   }
 }
 
+/** Runs draw their figures when first read; GET routes stay read-only, so this asks first. */
+export async function drawRunFigures(projectRoot: string, runId: string): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/runs/${encodeURIComponent(runId)}/figures?project_root=${encodeURIComponent(projectRoot)}`),
+    { method: "POST" },
+  );
+  await readResponse(response);
+}
+
 export async function fetchRunArtifacts(
   projectRoot: string,
   runId: string,
 ): Promise<ArtifactsResponse> {
+  await drawRunFigures(projectRoot, runId);
   const url = apiUrl(
     `/runs/${encodeURIComponent(runId)}/artifacts?project_root=${encodeURIComponent(projectRoot)}`,
   );
@@ -1029,7 +1001,7 @@ export type PipelineDraftPatchRequest = Schema<"PipelineDraftPatchRequest">;
 
 export type PipelineDraftExecuteRequest = Schema<"PipelineDraftExecuteRequest">;
 
-function draftUrl(projectRoot: string, path: string): string {
+export function draftUrl(projectRoot: string, path: string): string {
   return apiUrl(`${path}?project_root=${encodeURIComponent(projectRoot)}`);
 }
 
@@ -1124,333 +1096,5 @@ export async function deletePipelineDraft(
   await readResponse<{ ok: boolean }>(response);
 }
 
-// ── v1.6.8 — graph-native genesis (uploads / genesis draft / node patch / project forest) ──
-
-export type UploadResult = Schema<"UploadStored">;
-
-/** Upload a dataset file standalone (POST /uploads, multipart form).
- *  Content-addressable: the server stores by sha256 so genesis draft chains
- *  fully rehydrate after reload. */
-export async function uploadDataset(
-  projectRoot: string,
-  file: File,
-): Promise<UploadResult> {
-  const form = new FormData();
-  form.append("project_root", projectRoot);
-  form.append("file", file);
-  const response = await fetch(apiUrl("/uploads"), {
-    method: "POST",
-    body: form,
-  });
-  return readResponse<UploadResult>(response);
-}
-
-export type PipelineDraftGenesisRequest = Schema<"PipelineDraftGenesisRequest">;
-
-/** Create a parentless genesis draft chain (source → table → model). */
-export async function createGenesisDraft(
-  projectRoot: string,
-  body: PipelineDraftGenesisRequest,
-): Promise<PipelineDraftResponse> {
-  const response = await fetch(draftUrl(projectRoot, "/pipeline-drafts/genesis"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return readResponse<PipelineDraftResponse>(response);
-}
-
-export type DraftNodePatchRequest = Schema<"DraftNodePatchRequest">;
-
-/** Configure one genesis draft node in place (PATCH .../nodes/{nodeId}).
- *  `columns` applies to table nodes only. */
-export async function patchDraftNode(
-  projectRoot: string,
-  draftId: string,
-  nodeId: string,
-  body: DraftNodePatchRequest,
-): Promise<PipelineDraftResponse> {
-  const response = await fetch(
-    draftUrl(
-      projectRoot,
-      `/pipeline-drafts/${encodeURIComponent(draftId)}/nodes/${encodeURIComponent(nodeId)}`,
-    ),
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
-  return readResponse<PipelineDraftResponse>(response);
-}
-
-/** Fetch the project-level forest (GET /graph — union of all family
- *  head-sets; empty forest for zero-run projects). Body shape is parity with
- *  the per-run headset view, so it feeds the same adaptHeadSet. */
-export async function fetchProjectForest(
-  projectRoot: string,
-): Promise<HeadSetResponse> {
-  const response = await fetch(
-    apiUrl(`/graph?project_root=${encodeURIComponent(projectRoot)}`),
-  );
-  return readResponse<HeadSetResponse>(response);
-}
-
-// ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──
-
-/** Fetch the family head-set (union DAG across the rerun forest). */
-export async function getRunGraphHeadSet(
-  projectRoot: string,
-  runId: string,
-): Promise<HeadSetResponse> {
-  const url = apiUrl(
-    `/runs/${encodeURIComponent(runId)}/graph?project_root=${encodeURIComponent(
-      projectRoot,
-    )}&view=headset`,
-  );
-  const response = await fetch(url);
-  return readResponse<HeadSetResponse>(response);
-}
-
-export interface NodeWriteOperationRequestV1 {
-  request_id: string;
-  operation: "rerun";
-  context_version: "node-operation-context/v1";
-  context_fingerprint: string;
-  owner_run_id: string;
-  op_node_id: string;
-  node_hash: string;
-  forest_node_key: string;
-  owner_resolution: string;
-  active_head_run_id: string | null;
-  op_overrides: Record<string, unknown>;
-  manual_patch?: ManualRerunPatch;
-  rerun_reason?: string;
-}
-
-export type RerunResponseV1 = Schema<"RerunSubmitted">;
-
-export interface LegacyRerunFromNodeArgs {
-  fromNode: string;
-  opOverrides: Record<string, unknown>;
-  rerunReason?: string;
-}
-
-function isNodeWriteOperationRequestV1(
-  args: LegacyRerunFromNodeArgs | NodeWriteOperationRequestV1,
-): args is NodeWriteOperationRequestV1 {
-  return (
-    "operation" in args &&
-    args.operation === "rerun" &&
-    "context_version" in args &&
-    args.context_version === "node-operation-context/v1"
-  );
-}
-
-/** Create a child run by editing one node's operation (POST /runs/{id}/rerun).
- *  Legacy callers may still pass `fromNode`; context-driven callers submit the
- *  validated NodeOperationContext write target. */
-export async function rerunFromNode(
-  projectRoot: string,
-  runId: string,
-  args: LegacyRerunFromNodeArgs | NodeWriteOperationRequestV1,
-): Promise<RerunResponseV1> {
-  const url = apiUrl(
-    `/runs/${encodeURIComponent(runId)}/rerun?project_root=${encodeURIComponent(projectRoot)}`,
-  );
-  const body = isNodeWriteOperationRequestV1(args)
-    ? {
-        ...args,
-        from_node: args.op_node_id,
-        rerun_reason: args.rerun_reason ?? "manual_override",
-      }
-    : {
-        from_node: args.fromNode,
-        op_overrides: args.opOverrides,
-        rerun_reason: args.rerunReason ?? "manual_override",
-      };
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return readResponse<RerunResponseV1>(response);
-}
-
-export type RunProgressEvent = {
-  event: "step_start" | "step_complete" | "step_blocked"
-       | "workflow_completed" | "workflow_blocked"
-       | "workflow_failed" | "workflow_interrupted";
-  run_id: string;
-  sequence: number;
-  timestamp: string;
-  step: string | null;
-  message: string;
-  status: string | null;
-};
-
-export type RunProgressCallbacks = {
-  onStepStart?: (step: string, msg: string) => void;
-  onStepComplete?: (step: string, msg: string) => void;
-  onStepBlocked?: (step: string, msg: string) => void;
-  onTerminal?: (status: string, msg: string) => void;
-  onError?: (err: Error) => void;
-};
-
-export function connectRunEvents(
-  projectRoot: string,
-  runId: string,
-  callbacks: RunProgressCallbacks,
-): () => void {
-  const url = apiUrl(
-    `/runs/${encodeURIComponent(runId)}/events?project_root=${encodeURIComponent(projectRoot)}`,
-  );
-  const source = new EventSource(url);
-
-  source.addEventListener("step_start", (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as RunProgressEvent;
-    callbacks.onStepStart?.(data.step ?? "", data.message);
-  });
-  source.addEventListener("step_complete", (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as RunProgressEvent;
-    callbacks.onStepComplete?.(data.step ?? "", data.message);
-  });
-  source.addEventListener("step_blocked", (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as RunProgressEvent;
-    callbacks.onStepBlocked?.(data.step ?? "", data.message);
-  });
-
-  const handleTerminal = (e: MessageEvent) => {
-    const data = JSON.parse(e.data) as RunProgressEvent;
-    callbacks.onTerminal?.(data.status ?? "unknown", data.message);
-    source.close();
-  };
-  source.addEventListener("workflow_completed", handleTerminal);
-  source.addEventListener("workflow_blocked", handleTerminal);
-  source.addEventListener("workflow_failed", handleTerminal);
-  source.addEventListener("workflow_interrupted", handleTerminal);
-
-  source.onerror = () => callbacks.onError?.(new Error("SSE connection error"));
-  return () => source.close();
-}
-
-// ── v1.8 slice C: durable comparison nodes ──
-// A comparison is stored server-side and projected into the forest as a node
-// joining its two endpoints, so a conclusion survives a reload.
-
-export type CompareNodeEndpoint = Schema<"CompareEndpoint">;
-
-export type CompareNodeRecord = Schema<"CompareNodeView">;
-
-export async function createCompareNode(
-  projectRoot: string,
-  left: { runId: string; nodeId: string },
-  right: { runId: string; nodeId: string },
-): Promise<CompareNodeRecord> {
-  const response = await fetch(
-    apiUrl(`/compare-nodes?project_root=${encodeURIComponent(projectRoot)}`),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        left: { run_id: left.runId, node_id: left.nodeId },
-        right: { run_id: right.runId, node_id: right.nodeId },
-      }),
-    },
-  );
-  return readResponse<CompareNodeRecord>(response);
-}
-
-export async function deleteCompareNode(
-  projectRoot: string,
-  compareId: string,
-): Promise<ResponseOf<"/compare-nodes/{compare_id}", "delete">> {
-  const response = await fetch(
-    apiUrl(
-      `/compare-nodes/${encodeURIComponent(compareId)}?project_root=${encodeURIComponent(projectRoot)}`,
-    ),
-    { method: "DELETE" },
-  );
-  return readResponse<ResponseOf<"/compare-nodes/{compare_id}", "delete">>(response);
-}
-
-// v1.8.9 step 5 — SPSS/Stata dataset export with a loss report.
-
-export type DatasetExportFormat = Schema<"DatasetExportReport">["format"];
-
-export type DatasetExportNote = Schema<"DatasetExportNote">;
-
-export type DatasetExportResult = Schema<"DatasetExportResult">;
-
-export type DatasetExportFilter = { column: string; op: string; value?: unknown };
-
-/** What to export and how, like Stata's export/save options. */
-export type DatasetExportOptions = {
-  format: DatasetExportFormat;
-  columns?: string[] | null;
-  filters?: DatasetExportFilter[];
-  dta_version?: 13 | 14 | 15;
-  value_labels?: "labels" | "strings" | "none";
-  missing_codes?: "as_missing" | "keep_codes";
-  filename?: string | null;
-};
-
-export type DatasetExportPreview = Schema<"DatasetExportPreview">;
-
-function exportBody(nodeId: string, options: DatasetExportFormat | DatasetExportOptions): string {
-  const chosen = typeof options === "string" ? { format: options } : options;
-  const body: Record<string, unknown> = { node_id: nodeId, ...chosen };
-  for (const key of Object.keys(body)) {
-    if (body[key] === null || body[key] === undefined || body[key] === "") delete body[key];
-  }
-  return JSON.stringify(body);
-}
-
-export async function exportDataset(
-  projectRoot: string,
-  runId: string,
-  nodeId: string,
-  options: DatasetExportFormat | DatasetExportOptions,
-): Promise<DatasetExportResult> {
-  const response = await fetch(
-    apiUrl(
-      `/runs/${encodeURIComponent(runId)}/datasets/export?project_root=${encodeURIComponent(projectRoot)}`,
-    ),
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
-  );
-  return readResponse<DatasetExportResult>(response);
-}
-
-export type AnalysisScriptExportResult = Schema<"ScriptExportResult">;
-
-export type ScriptExportTargets = Schema<"ScriptExportTargets">;
-
-export async function listScriptExportTargets(projectRoot: string, runId: string, modelTarget: string): Promise<ScriptExportTargets> {
-  const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}/script-export/targets?project_root=${encodeURIComponent(projectRoot)}&model_target=${encodeURIComponent(modelTarget)}`));
-  return readResponse<ScriptExportTargets>(response);
-}
-
-export async function exportAnalysisScript(projectRoot: string, runId: string, target: string,
-  language: 'stata' | 'r' | 'python', requireNative: boolean): Promise<AnalysisScriptExportResult> {
-  const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}/script-export?project_root=${encodeURIComponent(projectRoot)}`), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target, language, require_native: requireNative }),
-  });
-  return readResponse<AnalysisScriptExportResult>(response);
-}
-
-/** Exactly what the file will contain, without writing it. */
-export async function previewDatasetExport(
-  projectRoot: string,
-  runId: string,
-  nodeId: string,
-  options: DatasetExportOptions,
-): Promise<DatasetExportPreview> {
-  const response = await fetch(
-    apiUrl(
-      `/runs/${encodeURIComponent(runId)}/datasets/export/preview?project_root=${encodeURIComponent(projectRoot)}`,
-    ),
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
-  );
-  return readResponse<DatasetExportPreview>(response);
-}
+export * from "./apiGraph";
+export * from "./apiExports";

@@ -245,7 +245,7 @@ def _isolate_origin_state(monkeypatch, tmp_path, probe_open=True):
 
     monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
     monkeypatch.setattr(cli_module, "_CACHE_PATH", tmp_path / "ui_origin_cache.json")
-    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: probe_open)
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda host=None, port=None, timeout=None: probe_open)
 
 
 def test_cli_lineage_url_default_origin(tmp_path, monkeypatch):
@@ -300,7 +300,7 @@ def test_resolve_ui_origin_env_var_skips_probe(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_UI_ORIGIN", "https://tunnel.example/")
     monkeypatch.setattr(cli_module, "_CACHE_PATH", tmp_path / "cache.json")
 
-    def _boom():
+    def _boom(host=None, port=None, timeout=None):
         raise AssertionError("probe must not run when env var is set")
 
     monkeypatch.setattr(cli_module, "_probe_dev_server", _boom)
@@ -314,7 +314,7 @@ def test_resolve_ui_origin_probe_open_returns_dev_server(tmp_path, monkeypatch):
     cache_path = tmp_path / "cache.json"
     monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
     monkeypatch.setattr(cli_module, "_CACHE_PATH", cache_path)
-    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: True)
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda host=None, port=None, timeout=None: True)
 
     assert cli_module._resolve_ui_origin() == "http://localhost:5173"
     # Probe result is persisted so subsequent CLI invocations skip the probe.
@@ -333,7 +333,7 @@ def test_resolve_ui_origin_probe_closed_falls_back_to_backend(
     cache_path = tmp_path / "cache.json"
     monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
     monkeypatch.setattr(cli_module, "_CACHE_PATH", cache_path)
-    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: False)
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda host=None, port=None, timeout=None: False)
 
     assert cli_module._resolve_ui_origin() == "http://localhost:8000"
     cached = json.loads(cache_path.read_text(encoding="utf-8"))

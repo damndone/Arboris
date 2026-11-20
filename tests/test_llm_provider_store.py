@@ -31,6 +31,60 @@ def _provider_dict(**overrides):
     return provider
 
 
+@pytest.mark.parametrize("location", ["local", "remote"])
+def test_data_location_round_trip_and_config(tmp_path, monkeypatch, location):
+    from workbench.llm.config import load_llm_config
+    target = tmp_path / "providers.json"
+    monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(target))
+    target.write_text(json.dumps({"active_provider_id": "deepseek", "providers": [
+        _provider_dict(base_url="http://127.0.0.1:3425/v1", data_location=location)]}))
+    store = provider_store.load_provider_store_strict(target)
+    assert store.providers[0].data_location == location
+    save_provider_store(store, target)
+    assert load_llm_config().data_location == location
+    assert provider_public_dict(store.providers[0])["data_location"] == location
+    assert "secret-key" not in json.dumps(provider_public_dict(store.providers[0]))
+
+
+def test_legacy_loopback_config_defaults_to_remote(tmp_path):
+    target = tmp_path / "providers.json"
+    target.write_text(json.dumps({"providers": [_provider_dict(base_url="http://localhost:3425/v1")]}))
+    assert provider_store.load_provider_store_strict(target).providers[0].data_location == "remote"
+
+
+def test_invalid_default_location_cannot_fall_back_to_environment(tmp_path, monkeypatch):
+    from workbench.llm.config import load_llm_config
+    monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+    target = tmp_path / "providers.json"
+    target.write_text(json.dumps({"providers": [_provider_dict(data_location="auto")]}))
+    monkeypatch.setattr(provider_store, "config_path", lambda: target)
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://paid.example/v1")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "paid-key")
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "paid-model")
+    config = load_llm_config()
+    assert not config.is_configured()
+    assert "invalid" in config.configuration_error_message().lower()
+
+
+def test_explicit_local_environment_config(monkeypatch):
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "unused")
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "local")
+    monkeypatch.setenv("WORKBENCH_LLM_DATA_LOCATION", "local")
+    assert environment_provider_from_env().data_location == "local"
+    monkeypatch.setenv("WORKBENCH_LLM_DATA_LOCATION", "auto")
+    with pytest.raises(ValueError, match="data_location"):
+        environment_provider_from_env()
+
+
+@pytest.mark.parametrize("value", [None, "auto", "LOCAL", True, 0, []])
+def test_invalid_data_location_rejected_by_strict_store(tmp_path, value):
+    target = tmp_path / "providers.json"
+    target.write_text(json.dumps({"providers": [_provider_dict(data_location=value)]}))
+    with pytest.raises(provider_store.ProviderStoreInvalidError):
+        provider_store.load_provider_store_strict(target)
+
+
 def test_store_round_trips_active_provider_and_keeps_key_internal(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "llm-providers.json"))
     provider = ProviderRecord(

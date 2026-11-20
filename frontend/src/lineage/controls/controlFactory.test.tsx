@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { EditableControl } from "../api/graphViewTypes";
 import {
   renderControl,
@@ -41,18 +41,19 @@ describe("controlFactory", () => {
     expect(onChange).toHaveBeenCalledWith("x", ["age", "income"]);
   });
 
-  it("renders a compact scrollable checkbox grid", () => {
+  it("keeps the final option in a long, named checkbox group selectable", () => {
+    const onChange = vi.fn();
+    const last = "long_instrument_identifier_without_spaces_at_the_end_of_the_list";
     const control: EditableControl = {
-      kind: "columns", key: "x", label: "Covariates",
-      options: ["age", "income", "region", "sales"], value: ["age"],
+      kind: "columns", key: "iv_instruments", label: "Instruments",
+      options: [...Array.from({ length: 30 }, (_, i) => `instrument_${i}`), last],
+      value: ["instrument_0"],
     };
-    render(<>{renderControl(control, vi.fn())}</>);
-    const list = screen.getByTestId("control-columns");
-    expect(list).toHaveStyle("display: grid; max-height: 180px; overflow-y: auto;");
-    expect(list.style.gridTemplateColumns).toContain("repeat(2");
-    expect(screen.getByLabelText("income")).toHaveStyle(
-      "width: 14px; height: 14px; min-height: 0;",
-    );
+    render(<>{renderControl(control, onChange)}</>);
+    const list = within(screen.getByRole("group", { name: "Instruments" }));
+    expect(list.getAllByRole("checkbox")).toHaveLength(31);
+    fireEvent.click(list.getByRole("checkbox", { name: last }));
+    expect(onChange).toHaveBeenCalledWith("iv_instruments", ["instrument_0", last]);
   });
 
   it("renders every kind with an identifiable control element", () => {

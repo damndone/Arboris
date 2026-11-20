@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from ..canonical import sha256_canonical
 from ..events import get_event_manager
 from ..graph_store import GraphStore
 from ..lineage.op_contract import (
@@ -23,7 +25,7 @@ from ..lineage.node_write_validation import (
     validate_rerun_operation_target,
 )
 from ..lineage.run_inputs import read_run_inputs
-from ..lineage.upload_store import verify_upload
+from ..lineage.upload_store import UploadHashMismatch, resolve_upload, sha256_bytes
 from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_run_root
 from .run_service import (
@@ -80,6 +82,7 @@ class RerunSubmissionRequest:
     # True only for an explicit variable-metadata edit, which may declare
     # columns outside the model (see reject_invalid_rerun_declarations).
     metadata_edit: bool = False
+    rerun_input_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,32 @@ _CANONICAL_CONTEXT_FIELDS = (
     "owner_resolution",
     "active_head_run_id",
 )
+
+
+def rerun_input_fingerprint(inputs: dict[str, Any]) -> str:
+    """Hash the saved values used to reconstruct a model run."""
+    upload = inputs.get("upload") if isinstance(inputs, dict) else None
+    if not isinstance(upload, dict) or not isinstance(inputs.get("form"), dict):
+        raise ValueError("Saved rerun inputs need a form and upload identity.")
+    sha, filename = upload.get("sha256"), upload.get("filename")
+    if (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
+            or (filename is not None and not isinstance(filename, str))):
+        raise ValueError("Saved rerun upload identity is invalid.")
+    return sha256_canonical({"form": inputs["form"], "upload": {"sha256": sha, "filename": filename}})
+
+
+def saved_rerun_input_fingerprint(project_root: Path, run_id: str) -> str:
+    """Fingerprint the registered inputs needed for a rerun of an existing run."""
+    return rerun_input_fingerprint(read_run_inputs(_resolve_run_root(str(project_root), run_id)))
+
+
+def read_verified_rerun_upload(project_root: Path, sha: str) -> bytes:
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ValueError("Saved rerun upload SHA-256 is invalid.")
+    data = resolve_upload(project_root, sha).read_bytes()
+    if sha256_bytes(data) != sha:
+        raise UploadHashMismatch("Saved rerun upload differs from its registered SHA-256.")
+    return data
 
 
 def _validate_workbench_context(
@@ -228,6 +257,13 @@ class RerunService:
                 "missing_run_inputs",
                 "Parent run has no run_inputs.json (not rerunnable).",
             ) from exc
+        if request.rerun_input_fingerprint is not None:
+            try:
+                current_fingerprint = rerun_input_fingerprint(inputs)
+            except (TypeError, ValueError) as exc:
+                raise RerunServiceError("stale_rerun_inputs", "The saved rerun inputs became invalid.") from exc
+            if current_fingerprint != request.rerun_input_fingerprint:
+                raise RerunServiceError("stale_rerun_inputs", "The saved rerun form or upload changed after proposal admission.")
         parent_sha = (inputs.get("upload") or {}).get("sha256")
         if not parent_sha:
             raise RerunServiceError(
@@ -235,7 +271,7 @@ class RerunService:
                 "Parent run_inputs.json has no upload sha256.",
             )
         try:
-            upload_bytes = verify_upload(self.project_root, parent_sha).read_bytes()
+            upload_bytes = read_verified_rerun_upload(self.project_root, parent_sha)
         except (OSError, ValueError) as exc:
             raise RerunServiceError("unusable_parent_upload", str(exc)) from exc
 

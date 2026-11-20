@@ -67,6 +67,24 @@
   font-weight: 600;
 }
 
+.ln-control-option-label { min-width: 0; overflow-wrap: anywhere; }
+
+.ln-basic-info-value {
+  margin: 0;
+  color: var(--label);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ln-report-preview-controls {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
 /* ─── Node card (T8.3) ──────────────────────────────────────────────
  * Editorial card: 8px left colour bar (per stage) + body container with
  * row1 (kind label uppercase mono + optional trust badge) → title
@@ -117,6 +135,14 @@
   line-height: 1.2;
   margin-bottom: 3px;
   letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ln-graph-node__preview-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ln-graph-node__meta {
   font-family: var(--font-sans);
@@ -788,8 +814,14 @@
   background: var(--bg-card-2);
   overflow: hidden;
 }
+.ln-var-group-panel__content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 .ln-var-container__header {
   display: block;
+  flex-shrink: 0;
   width: 100%;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -808,13 +840,27 @@
   background: var(--bg-card);
   outline: none;
 }
+.ln-var-group-panel__browse {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 4px 10px 0;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
 .ln-var-group-panel__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 8px;
+  min-height: 0;
   max-height: 408px;
   overflow: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.ln-var-group-panel__grid:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: -2px;
 }
 .ln-var-chip {
   min-width: 0;

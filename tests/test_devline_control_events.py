@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import threading
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from workbench.development_control import events
 from workbench.development_control.events import (
     EventValidationError,
     append_event,
@@ -155,6 +157,84 @@ def test_append_serializes_two_writers_without_interleaving(tmp_path: Path) -> N
     rows = (root / line_id / "events.jsonl").read_bytes().splitlines()
     assert len(rows) == 2
     assert all(json.loads(row) for row in rows)
+
+
+def test_append_recovers_archive_published_before_interrupted_truncate(tmp_path: Path, monkeypatch) -> None:
+    root, line_id = _line(tmp_path)
+    append_event(root, line_id, _event())
+    events.archive_event_log(root, line_id)
+    previous = append_event(root, line_id, _event())
+    anchor = verify_log(root, line_id)
+    archive = root / line_id / "events.jsonl.gz"
+    live = root / line_id / "events.jsonl"
+    original = gzip.decompress(archive.read_bytes()) + live.read_bytes()
+
+    def interrupt_truncate(*_args):
+        raise OSError("interrupted after archive publication")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(events.os, "ftruncate", interrupt_truncate)
+        with pytest.raises(OSError, match="interrupted"):
+            events.archive_event_log(root, line_id)
+    assert gzip.decompress(archive.read_bytes()) == original
+    assert live.read_bytes()
+    assert verify_log(root, line_id) == anchor
+
+    appended = append_event(root, line_id, _event())
+    assert appended["prev_event_sha256"] == previous["event_sha256"]
+    assert live.read_bytes() == canonical_event_bytes(appended) + b"\n"
+    assert verify_log(root, line_id)["event_count"] == 3
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "missing", "valid_gzip_with_truncated_history"])
+def test_verification_and_append_reject_a_damaged_archive(tmp_path: Path, damage: str) -> None:
+    root, line_id = _line(tmp_path)
+    append_event(root, line_id, _event())
+    append_event(root, line_id, _event())
+    events.archive_event_log(root, line_id)
+    archive = root / line_id / "events.jsonl.gz"
+    if damage == "corrupt":
+        archive.write_bytes(b"not gzip")
+    elif damage == "missing":
+        archive.unlink()
+    else:
+        archive.write_bytes(gzip.compress(gzip.decompress(archive.read_bytes()).splitlines()[0] + b"\n"))
+    with pytest.raises(EventValidationError):
+        verify_log(root, line_id)
+    with pytest.raises(EventValidationError):
+        append_event(root, line_id, _event())
+    assert (root / line_id / "events.jsonl").read_bytes() == b""
+
+
+def test_archive_serializes_with_append_and_verified_read(tmp_path: Path) -> None:
+    root, line_id = _line(tmp_path)
+    append_event(root, line_id, _event())
+    errors: list[Exception] = []
+    ready = threading.Barrier(3)
+
+    def worker(action) -> None:
+        try:
+            ready.wait(timeout=5)
+            for _ in range(5):
+                action()
+        except Exception as error:
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=worker, args=(action,))
+        for action in (
+            lambda: events.archive_event_log(root, line_id),
+            lambda: append_event(root, line_id, _event()),
+            lambda: verify_log(root, line_id),
+        )
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert verify_log(root, line_id)["event_count"] == 6
 
 
 def test_schema_is_versioned_and_matches_required_contract() -> None:

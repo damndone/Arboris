@@ -14,7 +14,6 @@ import { ThemeProvider, ThemeToggle } from "./theme";
 import { LauncherRoute } from "./launcher/LauncherRoute";
 import { ViewLoading } from "./workbench/lazyViews";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
-import { useWorkspaceMode } from "./workspace/workspaceMode";
 import "./theme/tokens.css";
 import "./styles.css";
 
@@ -139,7 +138,6 @@ function AppShell() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const workspaceMode = useWorkspaceMode();
 
   const [projectRoot, setProjectRootState] = useState<string>(() => {
     const fromUrl = searchParams.get("project_root");
@@ -160,7 +158,7 @@ function AppShell() {
     if (fromUrl && fromUrl !== projectRoot) {
       setProjectRootState(fromUrl);
     }
-  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]); // deliberately partial dependency list
 
   // v1.6.8: on /p/:slug/graph the slug IS the project identity — sync it
   // into shell state (and localStorage) so the topbar and other consumers
@@ -181,7 +179,7 @@ function AppShell() {
     } catch {
       // malformed slug — ProjectGraphRoute redirects to the launcher
     }
-  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [location.pathname]); // deliberately partial dependency list
 
   // An error about the project just left (e.g. "Project not found") does
   // not belong on the launcher, which is where the user goes to fix it.
@@ -237,7 +235,7 @@ function AppShell() {
   const isLineageDarkScope = isProjectGraphRoute;
   // v1.9.0: the new workspace brings its own top bar (home, settings) and its
   // own main landmark (the stage), so the outer navigation row steps aside.
-  const workspaceActive = workspaceMode === "new" && (isProjectGraphRoute || isLauncherActive);
+  const workspaceActive = (isProjectGraphRoute || isLauncherActive);
   const Root = workspaceActive ? "div" : "main";
 
   return (

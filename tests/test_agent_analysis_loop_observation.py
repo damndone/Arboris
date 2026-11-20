@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from workbench.analysis_loop.compare import ComparePacket
 from workbench.analysis_loop.observation import build_and_store_analysis_loop_packets
@@ -11,6 +12,7 @@ from workbench.analysis_loop.plan import build_plan_diff
 from workbench.analysis_loop.resolver import (
     resolve_analysis_loop_inputs,
     resolve_analysis_loop_run,
+    resolve_analysis_loop_source,
 )
 from workbench.analysis_loop.storage import (
     ComparePacketStore,
@@ -23,6 +25,7 @@ from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import JsonlSessionRepository
 from workbench.econometrics.runner import run_ols
 from workbench.lineage.run_inputs import update_run_inputs_metadata, write_run_inputs
+from workbench.services import results_service
 
 
 def _write_run(
@@ -123,12 +126,12 @@ def test_terminal_observation_builds_validation_and_compare_packets_once(tmp_pat
         },
     )
 
-    resolved = resolve_analysis_loop_inputs(
+    resolved, source_run = resolve_analysis_loop_source(
         project_root,
         run_id="run-source",
         cluster_variable="company_id",
     )
-    source_run = resolve_analysis_loop_run(
+    assert source_run == resolve_analysis_loop_run(
         project_root,
         run_id="run-source",
         require_result=True,
@@ -290,7 +293,9 @@ def test_failed_child_without_result_still_materializes_failed_validation_and_no
     assert "PRIMARY_TARGET_MISSING" in observation.compare.integrity_findings
 
 
-def test_orchestrator_terminal_observer_reuses_packets_after_reconcile(tmp_path: Path) -> None:
+def test_orchestrator_terminal_observer_reuses_packets_after_reconcile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
     frame = pd.DataFrame(
@@ -390,6 +395,15 @@ def test_orchestrator_terminal_observer_reuses_packets_after_reconcile(tmp_path:
         updated_at="2026-07-17T00:00:00Z",
     )
 
+    model_reads: list[str] = []
+    read_json = results_service.read_json
+
+    def count_model_read(path: Path):
+        if path.name == "ols_1.json":
+            model_reads.append(path.parent.parent.name)
+        return read_json(path)
+
+    monkeypatch.setattr(results_service, "read_json", count_model_read)
     first = orchestrator.observe_analysis_loop_terminal(
         record,
         project_root=project_root,
@@ -407,3 +421,4 @@ def test_orchestrator_terminal_observer_reuses_packets_after_reconcile(tmp_path:
     }
     assert len(ValidationPacketStore(project_root / "workbench").list_terminal_packets()) == 1
     assert len(ComparePacketStore(project_root / "workbench").list_terminal_packets()) == 1
+    assert model_reads == ["run-source", "run-child"] * 2

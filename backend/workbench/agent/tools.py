@@ -3,19 +3,70 @@
 from __future__ import annotations
 
 import inspect
+import asyncio
+import contextvars
+import hashlib
 import json
+import logging
+import re
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any, Awaitable, Callable, Protocol
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
+
+from ..analysis_loop.lifecycle import AnalysisLoopSelectionError
 
 # Bounds for the validation feedback handed back to the model. Messages embed
 # the offending value, which is the model's own argument — echoing it back is
 # not a leak, but an unbounded blob would be.
 MAX_VALIDATION_ERRORS = 5
 MAX_VALIDATION_MESSAGE_CHARS = 240
+MAX_VALIDATION_DETAIL_CHARS = 1200
+
+# Schema admission is expensive and registries are rebuilt on each user turn.
+# Cache only successful checks of immutable content keys, never mutable schema
+# objects or their identities. Argument validation still runs on every call.
+_SCHEMA_CHECK_CACHE: OrderedDict[tuple, None] = OrderedDict()
+_SCHEMA_CHECK_LOCK = RLock()
+_UNCACHEABLE_SCHEMA = object()
+
+
+def _schema_check_key(value):
+    kind = type(value)
+    if kind in {str, int, float, bool, type(None)}:
+        return kind, value
+    if kind is dict and all(type(key) is str for key in value):
+        items = tuple((key, _schema_check_key(item)) for key, item in sorted(value.items()))
+        return _UNCACHEABLE_SCHEMA if any(item is _UNCACHEABLE_SCHEMA for _, item in items) else (dict, items)
+    if kind is list:
+        items = tuple(_schema_check_key(item) for item in value)
+        return _UNCACHEABLE_SCHEMA if any(item is _UNCACHEABLE_SCHEMA for item in items) else (list, items)
+    return _UNCACHEABLE_SCHEMA
+
+
+def _check_tool_schema(schema):
+    try:
+        key = _schema_check_key(schema)
+    except RecursionError:
+        key = _UNCACHEABLE_SCHEMA
+    if key is not _UNCACHEABLE_SCHEMA:
+        with _SCHEMA_CHECK_LOCK:
+            if key in _SCHEMA_CHECK_CACHE:
+                _SCHEMA_CHECK_CACHE.move_to_end(key)
+                return
+    # Keep the original validator and exception path; invalid checks never
+    # enter the cache. A schema changed during checking is also not cached.
+    Draft202012Validator.check_schema(schema)
+    if key is not _UNCACHEABLE_SCHEMA and _schema_check_key(schema) == key:
+        with _SCHEMA_CHECK_LOCK:
+            _SCHEMA_CHECK_CACHE[key] = None
+            _SCHEMA_CHECK_CACHE.move_to_end(key)
+            if len(_SCHEMA_CHECK_CACHE) > 128:
+                _SCHEMA_CHECK_CACHE.popitem(last=False)
 
 
 def _json_size(value: Any) -> int:
@@ -201,15 +252,108 @@ class ToolContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _format_validation_error(error) -> dict[str, str]:
+#: An unexpected field's error lists the allowed ones when there are this few.
+MAX_ALLOWED_PROPERTIES = 24
+
+
+def _format_validation_error(error, *, prefix=()) -> dict[str, Any]:
+    path = ".".join(str(part) for part in (*prefix, *error.absolute_path)) or "<root>"
     message = error.message
+    type_details = {}
+    if error.validator == "type":
+        expected = error.validator_value
+        actual = {"dict": "object", "list": "array", "str": "string", "NoneType": "null",
+                  "bool": "boolean", "int": "integer", "float": "number"}.get(
+                      type(error.instance).__name__, type(error.instance).__name__)
+        type_details = {"expected_type": expected, "actual_type": actual}
+        expected_text = " or ".join(expected) if isinstance(expected, list) else str(expected)
+        # jsonschema puts the instance first and the type last. A long value
+        # must not truncate away the only information needed to fix its shape.
+        message = f"{path}: expected {expected_text}, got {actual}. {message}"
     if len(message) > MAX_VALIDATION_MESSAGE_CHARS:
-        message = message[:MAX_VALIDATION_MESSAGE_CHARS] + "… [truncated]"
-    return {
-        "path": ".".join(str(part) for part in error.absolute_path) or "<root>",
+        message = message[:MAX_VALIDATION_MESSAGE_CHARS - len(_STRING_MARKER)] + _STRING_MARKER
+    formatted: dict[str, Any] = {
+        "path": path,
         "message": message,
         "constraint": str(error.validator),
+        **type_details,
     }
+    if error.validator == "additionalProperties":
+        formatted.update(_unexpected_field_help(error))
+    if error.validator == "required" and isinstance(error.instance, dict):
+        required = error.validator_value
+        if isinstance(required, list) and len(required) <= MAX_ALLOWED_PROPERTIES:
+            missing = [key for key in required if key not in error.instance]
+            formatted.update(required_fields=required, missing_fields=missing,
+                required_paths=[".".join(map(str, ("arguments", *prefix, *error.absolute_path, key)))
+                                for key in missing])
+            # QRData 033 (3f281a47 round) wrote the whole proposal inside `changes`.
+            nested = error.instance.get("changes")
+            if isinstance(nested, dict) and missing and all(key in nested for key in missing):
+                formatted["hint"] = (f"{', '.join(missing)} are inside changes; they belong at the top level "
+                                     "of the arguments, beside changes.")
+    if (error.validator == "additionalProperties" and path.split(".")[-1] == "changes"
+            and isinstance(error.instance, dict)):
+        hint = _misplaced_changes_field_hint(error)
+        if hint:
+            formatted["hint"] = hint
+    return formatted
+
+
+def _misplaced_changes_field_hint(error) -> str | None:
+    """Say where a field written on ``changes`` belongs.
+
+    QRData 368 and 381 (3f281a47 round) put a step's source, or an earlier
+    node, on changes; 349, 352 and 397 (6af0a0da round) put the per-step
+    ``expected_artifacts`` there, and 381 listed an earlier proposal's steps
+    under ``steps_existing``.
+    """
+
+    schema = error.schema if isinstance(error.schema, dict) else {}
+    allowed = schema.get("properties") or {}
+    steps = allowed.get("steps") if isinstance(allowed.get("steps"), dict) else {}
+    items = steps.get("items") if isinstance(steps.get("items"), dict) else {}
+    step_fields = set(items.get("properties") or ())
+    unexpected = [key for key in error.instance if key not in allowed]
+    if not unexpected:
+        return None
+    parts = []
+    if "source" in unexpected:
+        parts.append("source belongs to one step: changes.steps[i].spec.source = {\"from_step\": ..., "
+                     "\"output\": \"produced_dataset\"}.")
+    per_step = [key for key in unexpected if key != "source" and key in step_fields]
+    if per_step:
+        parts.append(f"{', '.join(per_step)} belong{'s' if len(per_step) == 1 else ''} to one step: "
+                     f"set changes.steps[i].{per_step[0]} on each step that needs it.")
+    unknown = any(key != "source" and key not in step_fields for key in unexpected)
+    if unknown:
+        parts.append(f"changes holds only {', '.join(sorted(allowed))}; steps of an earlier operation are "
+                     "not listed again.")
+    if "source" in unexpected or unknown:
+        parts.append("To read the dataset of an earlier operation's node, set target.node_ref to that node.")
+    return " ".join(parts)
+
+
+def _unexpected_field_help(error) -> dict[str, Any]:
+    """Name the allowed fields and the likely intended one for each unexpected field.
+
+    In the v1.9.1 smoke the model wrote ``dependencies`` and ``required_steps``
+    for ``depends_on`` and had to guess again; the allowed names end the guess.
+    """
+
+    import difflib
+
+    allowed = sorted((error.schema.get("properties") or {}) if isinstance(error.schema, dict) else ())
+    instance = error.instance if isinstance(error.instance, dict) else {}
+    unexpected = [key for key in instance if key not in allowed]
+    if not allowed or len(allowed) > MAX_ALLOWED_PROPERTIES:
+        return {}
+    help_: dict[str, Any] = {"allowed_fields": allowed}
+    guesses = {key: match[0] for key in unexpected
+               if (match := difflib.get_close_matches(str(key), allowed, n=1, cutoff=0.6))}
+    if guesses:
+        help_["did_you_mean"] = guesses
+    return help_
 
 
 def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, Any] | None:
@@ -235,10 +379,199 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
         }
         if consts and all(instance.get(key) == value for key, value in consts.items()):
             return branch
+    # Identity selects the error branch even when another constraint (such as
+    # operation_version) is invalid. Requiring every const first sent callers
+    # to an unrelated target schema and made them add then remove fields.
+    constants = [(branch, {key: spec['const'] for key, spec in (branch.get('properties') or {}).items()
+                          if isinstance(spec, dict) and 'const' in spec})
+                 for branch in branches if isinstance(branch, dict)]
+    identities = {key for _, values in constants for key in values
+                  if len({json.dumps(values[key], sort_keys=True) for _, values in constants if key in values}) > 1}
+    matches = [branch for branch, values in constants
+               if any(key in instance and instance[key] == values[key] for key in identities & values.keys())
+               and all(key not in instance or instance[key] == values[key] for key in identities & values.keys())]
+    if len(matches) == 1:
+        return matches[0]
+    # Some compatibility unions have no const discriminator. Prefer the one
+    # branch that recognizes the most supplied keys; never infer a different
+    # operation when a const discriminator exists but does not match.
+    has_consts = any("const" in spec for branch in branches if isinstance(branch, dict)
+        for spec in (branch.get("properties") or {}).values() if isinstance(spec, dict))
+    if not has_consts:
+        scored = [(len(set(instance) & set(branch.get("properties") or {})), branch)
+                  for branch in branches if isinstance(branch, dict)]
+        best = max((score for score,_ in scored), default=0)
+        matches = [branch for score,branch in scored if score == best and score > 0]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
-def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str, str]]:
+def _bracket_scan(text: str) -> tuple[list[str], int | None]:
+    """The brackets still open at the end of JSON text, and where a closing bracket first fails to match."""
+    closing = {"{": "}", "[": "]"}
+    open_brackets: list[str] = []
+    in_string = escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in closing:
+            open_brackets.append(char)
+        elif char in "}]":
+            if not open_brackets or closing[open_brackets[-1]] != char:
+                return open_brackets, index
+            open_brackets.pop()
+    return (["unterminated string"] if in_string else open_brackets), None
+
+
+def _close_open_brackets(text: str) -> str | None:
+    """Text complete but for closing brackets has one way to close; anything else has no repair.
+
+    Ending on an opening bracket or a separator means the text was cut, and closing it would invent
+    an empty plan. It must end on a finished value.
+    """
+    stripped = text.rstrip()
+    open_brackets, mismatch = _bracket_scan(stripped)
+    if mismatch is not None or not open_brackets or open_brackets == ["unterminated string"] or stripped[-1] in "{[,:":
+        return None
+    return stripped + "".join("}" if bracket == "{" else "]" for bracket in reversed(open_brackets))
+
+
+def _json_text_problem(text: str) -> dict[str, Any]:
+    """Where JSON text breaks, so a model can correct it instead of resending it blind."""
+    open_brackets, mismatch = _bracket_scan(text)
+    position = mismatch
+    if position is None:
+        try:
+            json.loads(text)
+            return {}
+        except ValueError as exc:
+            position = getattr(exc, "pos", 0)
+    problem = {"text_breaks_at": position, "text_before_break": text[max(0, position - 40):position + 1]}
+    if mismatch is not None and open_brackets:
+        problem["text_expected_close"] = "}" if open_brackets[-1] == "{" else "]"
+        problem["text_found"] = text[mismatch]
+    return problem
+
+
+def _strict_json(text: str) -> Any:
+    """JSON with one meaning: no duplicate keys, no NaN or Infinity, no overflow to infinity."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError("non-JSON constant")
+
+    decoded = json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
+    json.dumps(decoded, ensure_ascii=False, allow_nan=False)
+    return decoded
+
+
+def _operation_change_example(schema, arguments):
+    """Suggest shape only: preserve source/intent and leave opaque options alone."""
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), (dict, str)):
+        return None
+    try:
+        encoded = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+        if len(encoded) > 4000:
+            return None
+        example = json.loads(encoded)
+    except (TypeError, ValueError):
+        return None
+    branch = _discriminated_branch(schema, arguments) or schema
+    contract = (branch.get("properties") or {}).get("changes")
+    if not isinstance(contract, dict):
+        return None
+    if isinstance(example["changes"], str):
+        try:
+            decoded = _strict_json(example["changes"])
+        except (ValueError, RecursionError):
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        example["changes"] = decoded
+    def reshape(value, declared):
+        selected = _discriminated_branch(declared, value) if isinstance(value, dict) else None
+        declared = selected or declared
+        if (declared.get("type") == "string" and isinstance(value,dict)
+                and set(value) == {"old","new"} and isinstance(value["new"],str)):
+            return value["new"]
+        if isinstance(value,dict):
+            fields = declared.get("properties") or {}
+            return {key:reshape(item,fields[key]) if key in fields else item for key,item in value.items()}
+        return value
+    example["changes"] = reshape(example["changes"],contract)
+    if example == arguments or not Draft202012Validator(schema).is_valid(example):
+        return None
+    return example
+
+
+def _operation_envelope_example(schema, arguments):
+    """Suggest moving supplied envelope fields out of changes, never new values.
+
+    Keep this separate from normalization: the original call remains refused.
+    A compact JSON Patch can explain the correction even when the whole
+    request exceeds the feedback budget. Conflicting copies and unknown
+    operation inputs cannot be removed to manufacture a valid request.
+    """
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), dict):
+        return None
+    branch = _discriminated_branch(schema, arguments) or schema
+    properties = branch.get("properties") or {}
+    contract = properties.get("changes") or {}
+    if not isinstance(contract, dict) or contract.get("additionalProperties") is not False:
+        return None
+    misplaced = sorted(set(arguments["changes"]) - set(contract.get("properties") or {}))
+    required = set(branch.get("required") or ())
+    if not misplaced or any(key not in required or key not in properties or key == "changes" for key in misplaced):
+        return None
+    example = {**arguments, "changes": dict(arguments["changes"])}
+    patch = []
+    try:
+        for key in misplaced:
+            value = example["changes"].pop(key)
+            # No missing evidence is inferred, including an empty default.
+            if key == "evidence_refs" and not value:
+                return None
+            pointer = key.replace("~", "~0").replace("/", "~1")
+            if key in example:
+                if json.dumps(example[key], sort_keys=True, allow_nan=False) != json.dumps(value, sort_keys=True, allow_nan=False):
+                    return None
+                patch.append({"op": "remove", "path": f"/changes/{pointer}"})
+            else:
+                example[key] = value
+                patch.append({"op": "move", "from": f"/changes/{pointer}", "path": f"/{pointer}"})
+        json.dumps(example, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if not Draft202012Validator(schema).is_valid(example):
+        return None
+    return example, patch
+
+
+def _specific_validation_errors(schema, arguments, prefix=()):
+    selected = _discriminated_branch(schema, arguments) or schema
+    for error in Draft202012Validator(selected).iter_errors(arguments):
+        nested = _discriminated_branch(error.schema, error.instance) if error.context else None
+        if nested is not None:
+            yield from _specific_validation_errors(nested,error.instance,prefix+tuple(error.absolute_path))
+        else:
+            yield best_match(error.context) if error.context else error, prefix
+
+
+def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str, Any]]:
     """Explain why arguments failed a tool's schema, in terms the model can act on.
 
     Without this a rejection is just `invalid_tool_arguments`, and the model can
@@ -255,18 +588,22 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     """
 
     effective = _discriminated_branch(schema, arguments) or schema
-    details: list[dict[str, str]] = []
+    details: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    errors = sorted(
-        Draft202012Validator(effective).iter_errors(arguments),
-        key=lambda item: list(item.absolute_path),
-    )
-    for error in errors:
-        if error.context:
-            deepest = best_match(error.context)
-            if deepest is not None:
-                error = deepest
-        formatted = _format_validation_error(error)
+    errors = sorted(_specific_validation_errors(schema,arguments),
+                    key=lambda pair:[str(p) for p in (*pair[1],*pair[0].absolute_path)])
+    if errors and isinstance(arguments, dict):
+        from .contract_help import workflow_step_hint
+
+        operation_id = arguments.get("operation_id")
+        hint = workflow_step_hint(operation_id)
+        if hint is not None and (allowed := _root_operation_ids(schema)) and operation_id not in allowed:
+            return [{"path": "operation_id", "constraint": "enum",
+                "message": f"{operation_id} is a workflow step. Read inspect_operation_contract with "
+                           f"operation_id=operation.multi_step and step_operation_ids={json.dumps([operation_id])}.",
+                "retry_hint": hint}]
+    for error, prefix in errors:
+        formatted = _format_validation_error(error, prefix=prefix)
         key = (formatted["path"], formatted["message"])
         if key in seen:
             continue
@@ -275,6 +612,20 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
         if len(details) >= MAX_VALIDATION_ERRORS:
             break
     return details
+
+
+def _root_operation_ids(schema: dict[str, Any]) -> set[str]:
+    if not isinstance(schema, dict):
+        return set()
+    declaration = (schema.get("properties") or {}).get("operation_id") or {}
+    if not isinstance(declaration, dict):
+        declaration = {}
+    values = {value for value in declaration.get("enum", ()) if isinstance(value, str)}
+    if isinstance(declaration.get("const"), str):
+        values.add(declaration["const"])
+    for branch in [*schema.get("oneOf", []), *schema.get("anyOf", [])]:
+        values.update(_root_operation_ids(branch))
+    return values
 
 
 def _is_agent_input_fault(exc: BaseException) -> bool:
@@ -287,16 +638,42 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
 
     from .context_tools import OperationContractUnavailableError
     from ..contracts.common.errors import OperationValidationError
+    from ..analysis_loop.plan import PlanValidationError
     from ..analysis_loop.resolver import AnalysisLoopSourceResolutionError
+    from .operation_definitions import UnknownOperationError
 
+    # PlanValidationError rejects the Agent's own Analysis Loop intent with a code
+    # and a message; shown as its class name only, the Agent retried blind twice
+    # (free-route round, panel_fe.specific).
     return isinstance(
         exc,
         (
             OperationValidationError,
             OperationContractUnavailableError,
             AnalysisLoopSourceResolutionError,
+            PlanValidationError,
+            UnknownOperationError,
         ),
     )
+
+
+def _with_help(message: str) -> str:
+    from .contract_help import help_for
+
+    help_ = help_for(message)
+    if not help_:
+        return message
+    # A long offending value must not consume the actionable contract guidance.
+    return message[:MAX_VALIDATION_MESSAGE_CHARS] + help_[:MAX_VALIDATION_DETAIL_CHARS - MAX_VALIDATION_MESSAGE_CHARS]
+
+
+def _input_fault_detail(message: str) -> dict[str, Any]:
+    from .contract_help import retry_hint_for
+
+    detail: dict[str, Any] = {"message": _with_help(message)}
+    if (hint := retry_hint_for(message)) is not None:
+        detail["retry_hint"] = hint
+    return detail
 
 
 class ToolVisibleError(ValueError):
@@ -320,7 +697,8 @@ class ToolResult:
     ok: bool
     output: Any = None
     error: str | None = None
-    error_details: list[dict[str, str]] | None = None
+    error_details: list[dict[str, Any]] | None = None
+    error_id: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -332,6 +710,8 @@ class ToolResult:
         # successful calls keep their existing shape.
         if self.error_details:
             payload["error_details"] = self.error_details
+        if self.error_id is not None:
+            payload["error_id"] = self.error_id
         return payload
 
 
@@ -346,6 +726,148 @@ class ToolRuntime(Protocol):
         """Execute one already-normalized tool call."""
 
 
+#: Corrections the Workbench made to one tool call (e.g. an ignored identity
+#: field), handed back with the result so the model learns the right call.
+_TOOL_NOTES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar("workbench_tool_notes", default=None)
+#: Node identity arguments a read tool that does not take them can ignore.
+_READ_IDENTITY_FIELDS = frozenset({"active_head_run_id", "op_node_id", "owner_run_id"})
+
+
+def tool_note(text: str) -> None:
+    """Record a correction the Workbench made to the current tool call."""
+    notes = _TOOL_NOTES.get()
+    if notes is not None and text not in notes:
+        notes.append(text)
+
+
+def _wrap_single_strings(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A string given where the schema wants a list of strings means that one-item list.
+
+    A weaker model sent playbooks 'iv' for ['iv'] and lost a turn to the refusal (free-route
+    no-thinking round, iv_weak). Only top-level and nested object fields are wrapped, never
+    inside a oneOf/anyOf branch, and only when the list's items are strings.
+    """
+    from copy import deepcopy
+
+    wrapped, paths = None, []
+    for error in Draft202012Validator(definition.input_schema).iter_errors(arguments):
+        items = error.schema.get("items") if isinstance(error.schema, dict) else None
+        if (error.validator == "type" and error.validator_value == "array" and isinstance(error.instance, str)
+                and isinstance(items, dict) and items.get("type") == "string"
+                and not any(part in {"oneOf", "anyOf"} for part in error.schema_path)):
+            wrapped = wrapped if wrapped is not None else deepcopy(arguments)
+            target = wrapped
+            path = list(error.absolute_path)
+            for key in path[:-1]:
+                target = target[key]
+            if path:
+                target[path[-1]] = [error.instance]
+                paths.append(".".join(map(str, path)))
+    if wrapped is None:
+        return arguments
+    tool_note(f"{', '.join(paths)} takes a list; the single value was used as a one-item list.")
+    return wrapped
+
+
+_MARKER = re.compile(r"</?(?:tool_sep|arg_key|arg_value)(?::[^>]*)?>")
+_LEAKED_VALUE = re.compile(r"<arg_value(?::[^>]*)?>(.*?)</arg_value(?::[^>]*)?>", re.S)
+
+
+def _split_leaked_markers(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Arguments a model wrote in its own tool-call markup, split back into fields.
+
+    Hy3 (free-route Auto iv_weak, 2026-10-23) sent update_plan one key
+    ``completion<tool_sep:ID><arg_value:ID>{...}</arg_value:ID><arg_key:ID>completion_evidence``
+    holding the completion_evidence value, and lost the step to the refusal. A key
+    is split only when it parses completely into as many names as values and no
+    name is already present; anything else is left for validation to refuse.
+    """
+
+    def decoded(text: Any) -> Any:
+        if not isinstance(text, str):
+            return text
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return text.strip()
+        return value if isinstance(value, (dict, list)) else text.strip()
+
+    repaired, split = dict(arguments), []
+    for key, last in arguments.items():
+        if not isinstance(key, str) or not _MARKER.search(key):
+            continue
+        values = _LEAKED_VALUE.findall(key)
+        names = [part.strip() for part in _MARKER.split(_LEAKED_VALUE.sub("", key)) if part.strip()]
+        if (len(names) != len(values) + 1 or not all(name.isidentifier() for name in names)
+                or len(set(names)) != len(names) or any(name in repaired for name in names)):
+            continue
+        del repaired[key]
+        repaired.update({name: decoded(value) for name, value in zip(names, [*values, last])})
+        split.extend(names)
+    if split:
+        tool_note("arguments " + ", ".join(split) + " arrived inside tool-call markup in one field name; split into "
+                  "separate fields. Send each argument as its own JSON field.")
+    return repaired
+
+
+def _decode_encoded_fields(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A whole object or list sent as its JSON text means that object or list.
+
+    29 of 206 refusals in the NVIDIA rounds (2026-10-28..31) were `changes` or `completion`
+    sent this way, and the correction cost a full model call. Only a field the schema declares
+    as object or array, never as string, and only text with one meaning (see _strict_json); the
+    decoded value then passes the same validation and permissions as any other.
+    """
+    schema = definition.input_schema
+    declared: dict[str, list[dict[str, Any]]] = {}
+    for branch in [schema, *(schema.get("oneOf") or ()), *(schema.get("anyOf") or ())]:
+        for name, field_schema in (branch.get("properties") or {}).items():
+            declared.setdefault(name, []).append(field_schema)
+    decoded = dict(arguments)
+    for name, value in arguments.items():
+        schemas = declared.get(name)
+        if not schemas or not isinstance(value, str) or value[:1] not in {"{", "["}:
+            continue
+        kinds = {item.get("type") for item in schemas if isinstance(item, dict)}
+        if "string" in kinds or not kinds & {"object", "array"}:
+            continue
+        try:
+            parsed = _strict_json(value)
+        except (ValueError, RecursionError):
+            # 19 of 46 such refusals in the fb0a6b53 round were complete but for closing brackets.
+            closed = _close_open_brackets(value)
+            try:
+                parsed = _strict_json(closed) if closed else None
+            except (ValueError, RecursionError):
+                parsed = None
+            if parsed is None:
+                continue
+        if (isinstance(parsed, dict) and "object" in kinds) or (isinstance(parsed, list) and "array" in kinds):
+            decoded[name] = parsed
+            tool_note(f"{name} arrived as JSON text; read as the {type(parsed).__name__} it encodes. "
+                      "Send it as a JSON value, not a string.")
+    return decoded
+
+
+def _drop_unused_read_identity(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    schema = definition.input_schema
+    if definition.side_effect != "none" or schema.get("additionalProperties") is not False:
+        return arguments
+    properties = set(schema.get("properties") or {})
+    unused = sorted(set(arguments) & _READ_IDENTITY_FIELDS - properties)
+    if not unused:
+        return arguments
+    owner = arguments.get("owner_run_id")
+    if ("run_id" in (schema.get("required") or ()) and "run_id" not in arguments and "owner_run_id" in unused
+            and isinstance(owner, str) and owner):
+        # The run that owns the node is what run_id names here. In the 172d65cd round 6 calls of
+        # show_dataset_rows sent owner_run_id from the other read tools and were refused for run_id.
+        tool_note(f"{definition.tool_id} reads run_id; used owner_run_id {owner}.")
+        arguments = {**arguments, "run_id": owner}
+    tool_note(f"{definition.tool_id} takes no {', '.join(unused)}; ignored.")
+    return {key: value for key, value in arguments.items() if key not in unused}
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     tool_id: str
@@ -356,12 +878,18 @@ class ToolDefinition:
     scope_requirements: tuple[str, ...] = ()
     max_output_budget: int | None = None
     description: str = ""
+    #: Optional deterministic correction of the arguments before validation;
+    #: it reports what it changed through tool_note.
+    normalize: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    #: The declaration sent to the model when it is shorter than the validated one. Arguments are
+    #: always validated against ``input_schema``; this only decides what rides in every request.
+    model_schema: dict[str, Any] | None = None
 
     def descriptor(self) -> dict[str, Any]:
         descriptor: dict[str, Any] = {
             "tool_id": self.tool_id,
             "version": self.version,
-            "input_schema": self.input_schema,
+            "input_schema": self.model_schema if self.model_schema is not None else self.input_schema,
             "side_effect": self.side_effect,
             "scope_requirements": list(self.scope_requirements),
             "max_output_budget": self.max_output_budget,
@@ -382,7 +910,9 @@ class ToolRegistry:
     def register(self, definition: ToolDefinition) -> None:
         if definition.tool_id in self._definitions:
             raise ValueError(f"tool already registered: {definition.tool_id}")
-        Draft202012Validator.check_schema(definition.input_schema)
+        _check_tool_schema(definition.input_schema)
+        if definition.model_schema is not None:
+            _check_tool_schema(definition.model_schema)
         self._definitions[definition.tool_id] = definition
 
     def descriptors(self) -> list[dict[str, Any]]:
@@ -390,6 +920,16 @@ class ToolRegistry:
             self._definitions[tool_id].descriptor()
             for tool_id in sorted(self._definitions)
         ]
+
+    def is_read_only(self, tool_id: str) -> bool:
+        definition = self._definitions.get(tool_id)
+        return definition is not None and definition.side_effect == "none"
+
+    def parallel_read_batch(self, calls):
+        names = [str(call.get("tool_id", "")) for call in calls]
+        # The same read tool twice (two datasets' schemas, two contracts) overlaps too: each
+        # call has its own id, intent and receipt, published in request order.
+        return len(names) > 1 and all(self.is_read_only(name) for name in names)
 
     async def execute(
         self,
@@ -425,9 +965,91 @@ class ToolRegistry:
                     }
                 ],
             )
+        notes: list[str] = []
+        notes_token = _TOOL_NOTES.set(notes)
+        try:
+            return self._with_notes(await self._execute_defined(definition, tool_call, session_id=session_id,
+                                                                  metadata=metadata), notes)
+        finally:
+            _TOOL_NOTES.reset(notes_token)
+
+    @staticmethod
+    def _with_notes(result: "ToolResult", notes: list[str]) -> "ToolResult":
+        if not notes or not result.ok or not isinstance(result.output, dict):
+            return result
+        return ToolResult(tool_call_id=result.tool_call_id, tool_id=result.tool_id, ok=True,
+                          output={**result.output, "workbench_notes": list(notes)})
+
+    async def _execute_defined(self, definition, tool_call, *, session_id, metadata):
+        tool_id = str(tool_call.get("tool_id", ""))
+        call_id = str(tool_call.get("tool_call_id", ""))
         arguments = tool_call.get("arguments") or {}
+        caller_supplied_changes_string = (tool_id == "run_operation" and isinstance(arguments, dict)
+                                          and isinstance(arguments.get("changes"), str))
+        if isinstance(arguments, dict):
+            arguments = _decode_encoded_fields(definition, _split_leaked_markers(arguments))
+        arguments = _drop_unused_read_identity(definition, arguments)
+        if definition.normalize is not None and isinstance(arguments, dict):
+            arguments = definition.normalize(arguments)
+        if isinstance(arguments, dict):
+            arguments = _wrap_single_strings(definition, arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
+            if tool_id == "update_plan":
+                for detail in details:
+                    if (detail.get("constraint") == "additionalProperties"
+                            and re.fullmatch(r"steps\.\d+", detail.get("path", ""))
+                            and (allowed := detail.get("allowed_fields"))):
+                        hint = {
+                            "tool_id": "update_plan", "allowed_step_fields": allowed,
+                            "message": "Returned Plan steps include server-owned audit metadata. Explicitly resubmit "
+                                       "only allowed_step_fields; this change was not saved. Keep statistical labels "
+                                       "and execution receipts server-owned.",
+                        }
+                        if len(json.dumps({**detail, "retry_hint": hint}, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                            detail["retry_hint"] = hint
+            if caller_supplied_changes_string:
+                for detail in details:
+                    if (detail.get("path") == "changes" and detail.get("expected_type") == "object"
+                            and detail.get("actual_type") == "string"):
+                        detail["message"] = (
+                            "changes: expected object, got string. The caller supplied the string; the operation was not executed. "
+                            "The server did not convert an object to string. Put a JSON object at arguments.changes; "
+                            "inspect_operation_contract lists fields."
+                        )
+                        if isinstance(arguments.get("changes"), str):
+                            problem = _json_text_problem(arguments["changes"])
+                            detail.update(problem)
+                            if problem:
+                                # A string that parses is decoded above, so this one is broken JSON; say where
+                                # first (all 7 such refusals in the 2026-11-02 rounds were broken text).
+                                rest = ("The caller supplied the string; the operation was not executed; the server did "
+                                        "not convert an object to string. Use an object at arguments.changes; see "
+                                        "inspect_operation_contract.")
+                                where = f"changes: broken JSON at char {problem['text_breaks_at']}"
+                                if "text_expected_close" in problem:
+                                    unclosed = "object" if problem["text_expected_close"] == "}" else "array"
+                                    where += (f": {problem['text_found']!r} comes before the {unclosed} opened last "
+                                              f"is closed; write {problem['text_expected_close']!r} first")
+                                short_rest = "Use an object at arguments.changes; the operation was not executed."
+                                candidates = (f"{where} near {problem['text_before_break'][-12:]!r}. {rest}",
+                                              f"{where}. {rest}", f"{where}. {short_rest}")
+                                detail["message"] = next((text for text in candidates
+                                                          if len(text) <= MAX_VALIDATION_MESSAGE_CHARS), candidates[-1])
+            envelope = _operation_envelope_example(definition.input_schema, arguments)
+            if envelope is not None:
+                example, patch = envelope
+                illustrated = {**details[0], "example_arguments_patch": patch,
+                    "example_scope": "Schema-only format suggestion; not executed. Correct the arguments and resubmit. Normal source, method preflight and approval still apply."}
+                if len(json.dumps(illustrated, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                    details[0] = illustrated
+            else:
+                example = _operation_change_example(definition.input_schema, arguments)
+            if example is not None:
+                illustrated = {**details[0], "example_arguments": example,
+                    "example_scope": "Schema-only format suggestion; not executed. Correct the arguments and resubmit. Normal source, method preflight and approval still apply."}
+                if len(json.dumps(illustrated, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                    details[0] = illustrated
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
@@ -436,10 +1058,11 @@ class ToolRegistry:
                 error_details=details,
             )
         try:
-            output = definition.handler(
-                arguments,
-                ToolContext(session_id=session_id, metadata=dict(metadata or {})),
-            )
+            context = ToolContext(session_id=session_id, metadata=dict(metadata or {}))
+            if definition.side_effect == "none" and not inspect.iscoroutinefunction(definition.handler):
+                output = await asyncio.to_thread(definition.handler, arguments, context)
+            else:
+                output = definition.handler(arguments, context)
             if inspect.isawaitable(output):
                 output = await output
             if definition.max_output_budget is not None:
@@ -460,25 +1083,47 @@ class ToolRegistry:
                             ],
                         )
             return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=True, output=output)
+        except AnalysisLoopSelectionError as exc:
+            # Recovery contains source identities and a read-only next call, never
+            # an authorized substitute. It has the same bound as other tool data.
+            budget = 8000 if definition.max_output_budget is None else min(8000, definition.max_output_budget)
+            output = _bounded_tool_output({"status": "needs_target_decision", "executed": False,
+                "code": exc.code, "recovery": exc.details["recovery"]}, budget)
+            return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=False, output=output,
+                error=exc.code, error_details=[{"message": str(exc)[:MAX_VALIDATION_MESSAGE_CHARS]}])
         except ToolVisibleError as exc:
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
-                error_details=[{"message": str(exc)}],
+                error_details=[_input_fault_detail(str(exc))],
             )
         except Exception as exc:
             # A refusal of the AGENT'S OWN submission is useless without its
             # reason: surfacing only the class name leaves the model nothing to
             # correct, so it re-submits the same broken payload until the step
             # budget is gone. That exact loop was observed on a live turn.
+            input_fault = _is_agent_input_fault(exc)
+            error_id = None
+            if not input_fault:
+                # Replaying a recorded call must reproduce its model-visible
+                # payload. Correlate identity only, never raw inputs/errors.
+                error_id = hashlib.sha256(json.dumps([
+                    "workbench.agent.tool-error.v1", session_id, call_id, tool_id,
+                ], separators=(",", ":")).encode()).hexdigest()
+                logging.getLogger(__name__).exception(
+                    "Unexpected tool failure; error_id=%s", error_id,
+                    extra={"error_id": error_id, "tool_id": tool_id,
+                           "tool_call_id": call_id, "session_id": session_id},
+                )
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
                 error_details=(
-                    [{"message": str(exc)}] if _is_agent_input_fault(exc) else None
+                    [_input_fault_detail(str(exc))] if input_fault else None
                 ),
+                error_id=error_id,
             )

@@ -376,7 +376,7 @@ def _execution_authorization_for(revision, binding, *, notebook_id: str):
     )
 
 
-def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
+def test_option_credential_without_common_approval_cannot_authorize_execution(tmp_path):
     from test_notebook_capability_binding import _server_decision, _service_with_catalog
     from workbench.capability_factory.execution_authorization import (
         OptionExecutionAuthorizationStore,
@@ -415,23 +415,14 @@ def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
         notebook_id=notebook.notebook_id,
     )
 
-    persisted = service.authorize_option_execution(
-        notebook.notebook_id,
-        revision.option_id,
-        context=context,
-        authorization=authorization,
-    )
-
-    assert persisted == authorization
-    view = service.option_view(notebook.notebook_id, revision.option_id)
-    assert view.lifecycle_status == "selected"
-    assert view.executions == ()
-    assert OptionExecutionAuthorizationStore(project).read(
-        authorization.authorization_id
-    ) == authorization
+    from workbench.agent.notebook.errors import OptionRevisionStale
+    with pytest.raises(OptionRevisionStale, match="persisted"):
+        service.authorize_option_execution(notebook.notebook_id, revision.option_id,
+            context=context, authorization=authorization)
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "selected"
 
 
-def test_confirm_and_execute_retries_after_gateway_failure_from_materialized_state(
+def test_unproven_gateway_failure_does_not_dispatch_again(
     tmp_path, monkeypatch
 ):
     from test_notebook_capability_binding import _server_decision, _service_with_catalog
@@ -557,23 +548,9 @@ def test_confirm_and_execute_retries_after_gateway_failure_from_materialized_sta
         "materialized"
     )
 
-    dispatch = service.confirm_and_execute(
-        notebook.notebook_id,
-        revision.option_id,
-        context=context,
-    )
-
-    assert dispatch.status == "dispatch_reserved"
-    assert gateway.calls == 2
-
-    replay = service.confirm_and_execute(
-        notebook.notebook_id,
-        revision.option_id,
-        context=context,
-    )
-
-    assert replay == dispatch
-    assert gateway.calls == 3
+    with pytest.raises(OptionExecutionGatewayUnavailable, match="original dispatch receipt"):
+        service.confirm_and_execute(notebook.notebook_id, revision.option_id, context=context)
+    assert gateway.calls == 1
 
 
 def test_confirmation_rejects_receipt_with_stale_binding(tmp_path):

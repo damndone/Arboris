@@ -86,8 +86,11 @@ def test_evaluation_identity_ignores_opaque_split_ref_but_tracks_embargo() -> No
     assert first.evaluation_hash != embargoed.evaluation_hash
 
 
+_SPEC = {"target": "y", "features": ["x"], "estimator": {"source": "v186_builtin", "model_type": "prediction_ridge"}}
+
+
 def test_prediction_identity_and_existing_cache_seam_separate_transform_and_split(tmp_path: Path) -> None:
-    first = build_prediction_identity(_sample(), model_type="prediction_ridge", model_id="ridge-1")
+    first = build_prediction_identity(_sample(), model_type="prediction_ridge", model_id="ridge-1", specification=_SPEC)
     changed_split = build_prediction_identity(
         _sample(
             split_parameters={
@@ -100,11 +103,13 @@ def test_prediction_identity_and_existing_cache_seam_separate_transform_and_spli
         ),
         model_type="prediction_ridge",
         model_id="ridge-1",
+        specification=_SPEC,
     )
     unrelated_ref = build_prediction_identity(
         _sample(split_plan_ref="reference-only-change"),
         model_type="prediction_ridge",
         model_id="ridge-1",
+        specification=_SPEC,
     )
     cache = PredictionIdentityCache(tmp_path)
 

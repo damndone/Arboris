@@ -19,9 +19,11 @@ better and be false.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from ...contracts.common.errors import OperationValidationError
 from ...contracts.model.family import MODEL_FAMILY_CONTRACTS
 from ..recipe_contracts import RECIPE_CONTRACTS
 
@@ -106,6 +108,41 @@ def capability_artifact_types(capability_id: str) -> MappingProxyType:
     return CAPABILITY_ARTIFACT_TYPES.get(capability_id, MappingProxyType({}))
 
 
+def workflow_primary_artifacts(
+    steps: Any,
+    publish: Callable[[str], Mapping[str, str]] = capability_artifact_types,
+) -> tuple[dict[str, str], dict[str, int], frozenset[str]]:
+    """Derive model result types and counts from the workflow's actual model steps."""
+
+    artifact_types: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    families: set[str] = set()
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, Mapping) or step.get("operation_id") != "model.genesis":
+            continue
+        spec = step.get("spec")
+        if not isinstance(spec, Mapping):
+            continue
+        family = spec.get("model_family")
+        if not isinstance(family, str) or not family:
+            raise OperationValidationError("model.genesis workflow step requires a registered model_family")
+        branches = spec.get("branches")
+        branch_count = len(branches) if isinstance(branches, list) else 0
+        published = publish(family)
+        if branch_count and not published:
+            raise OperationValidationError(
+                "model.genesis model_family has no published primary artifact: " + family
+            )
+        families.add(family)
+        for artifact_id, artifact_type in published.items():
+            if artifact_types.setdefault(artifact_id, artifact_type) != artifact_type:
+                raise OperationValidationError(
+                    "model family artifact vocabulary assigns conflicting types to: " + artifact_id
+                )
+            counts[artifact_id] = counts.get(artifact_id, 0) + branch_count
+    return artifact_types, counts, frozenset(families)
+
+
 #: What a model run estimated by group publishes instead of its single primary
 #: result: the collection listing one result per group.
 BY_GROUP_ARTIFACT_TYPES = MappingProxyType({"by_group_collection": "metadata"})
@@ -137,4 +174,5 @@ __all__ = [
     "capability_artifact_types",
     "declared_type",
     "is_declared",
+    "workflow_primary_artifacts",
 ]

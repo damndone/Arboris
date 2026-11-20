@@ -1,0 +1,22 @@
+[package]
+name = "arboris-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone statistical engine: no Python, no third-party crates."
+
+[lib]
+name = "arboris_engine"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "arboris-engine"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

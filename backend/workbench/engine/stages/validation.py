@@ -30,15 +30,11 @@ def _user_missing_notices(applied: object) -> list:
     return notices
 
 
-def _duplicate_row_notices(frame: object) -> list:
+def _duplicate_row_notices(count: int) -> list:
     """Say that identical rows exist and were kept, so the user can decide."""
 
     from ...domain import GuardrailIssue, Severity
 
-    duplicated = getattr(frame, "duplicated", None)
-    if duplicated is None:
-        return []
-    count = int(duplicated().sum())
     if not count:
         return []
     return [
@@ -86,7 +82,13 @@ class ValidationStage:
         env.step("validation", "start", "Validating profile...")
         issues = validate_profile(profile, config)
         issues.extend(_user_missing_notices(ctx.artifacts.get("_user_missing_applied")))
-        issues.extend(_duplicate_row_notices(ctx.data.frame))
+        # Cleaning counts duplicates on the frame that profiling only reads.
+        duplicates = next(
+            (action["rows"] for action in ctx.artifacts["_actions"]
+             if action["action"] == "duplicate_rows_found"),
+            0,
+        )
+        issues.extend(_duplicate_row_notices(duplicates))
         issue_dicts = [issue.to_dict() for issue in issues]
         write_json(run_root / "errors.json", {"issues": issue_dicts})
 

@@ -32,6 +32,7 @@ from workbench.qa.witness import (
     WITNESS_CHALLENGE_TTL_SECONDS,
     verify_witness_attestation,
 )
+from ..jsonl_store import jsonl_lines
 
 
 _ID = re.compile(r"[A-Za-z0-9_.:-]+")
@@ -362,7 +363,7 @@ def _parse_jsonl(path: Path, label: str) -> tuple[Mapping[str, Any], ...]:
             f"{label} must be a non-empty newline-terminated journal"
         )
     records: list[Mapping[str, Any]] = []
-    for line_no, line in enumerate(raw.splitlines(), start=1):
+    for line_no, line in enumerate(jsonl_lines(raw), start=1):
         if not line:
             raise NotebookAcceptanceEvidenceError(
                 f"{label} contains a blank record at line {line_no}"

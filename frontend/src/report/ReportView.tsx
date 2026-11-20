@@ -28,14 +28,12 @@ import {
 } from "./ReportWorkspaceContext";
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
+import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import "./report.css";
-import { ReportReviewPanel } from "./ReportReviewPanel";
 import { ReportSources } from "./ReportSources";
 import { ManualReportPanel } from "../manual/ManualReportPanel";
-import { useWorkspaceMode } from "../workspace/workspaceMode";
 
 export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string; focusRequest?: number }) {
-  const mode = useWorkspaceMode();
   const wb = useWorkbenchOptional();
   const setAgentFocus = wb?.dispatch.setAgentFocus;
   const forest = useForest();
@@ -46,9 +44,7 @@ export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: st
     return () => setAgentFocus(null);
   }, [focusRun, setAgentFocus]);
   const [writer, setWriter] = useState<"manual" | "ai">("manual");
-  // The classic shell has only the AI-assisted report; the workspace offers
-  // writing by hand first, since it works without a language model.
-  if (mode !== "new") return <AIReportView projectRoot={projectRoot} focusRequest={focusRequest} />;
+  useEffect(() => { if (focusRequest > 0) setWriter("ai"); }, [focusRequest]);
   return (
     <>
       <div className="report-writer" role="group" aria-label="Report writing mode">
@@ -58,6 +54,9 @@ export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: st
         <button type="button" aria-pressed={writer === "ai"} title="Draft with the Agent from the same evidence" onClick={() => setWriter("ai")}>
           With AI
         </button>
+        {wb && !wb.state.tabs?.some((tab) => tab.kind === "report-review") && (
+          <button type="button" className="report-writer__review" onClick={wb.dispatch.openReportReview}>Review</button>
+        )}
       </div>
       {writer === "ai" ? (
         <AIReportView projectRoot={projectRoot} focusRequest={focusRequest} />
@@ -82,7 +81,7 @@ function AIReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string;
 
 /** Center-column report writing surface. Review prose is rendered by ReportReviewPanel. */
 export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number } = {}) {
-  const mode = useWorkspaceMode();
+  const agent = useAgentSurfaceOptional();
   const forest = useForest();
   const wb = useWorkbenchOptional();
   const workspace = useReportWorkspace();
@@ -113,9 +112,16 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   const promptChange = hasCurrentReport
     ? workspace.onRevisionInstructionChange
     : workspace.onInstructionChange;
-  const promptSubmit = hasCurrentReport
+  // With the Agent beside the report, the request is the Agent's: same tools, model,
+  // attachments and record as everywhere else. Left-out evidence goes along with it.
+  const agentSubmit = agent ? () => {
+    const omitted = workspace.excludedFactIds.length ? ` Leave out these facts: ${workspace.excludedFactIds.join(", ")}.` : "";
+    void agent.sendPrompt(`${promptValue.trim() || "Write this run's report from its evidence."}${omitted}`);
+    promptChange("");
+  } : null;
+  const promptSubmit = agentSubmit ?? (hasCurrentReport
     ? () => void workspace.reviseReport()
-    : () => void workspace.generateReport();
+    : () => void workspace.generateReport());
 
   return (
     <div
@@ -181,9 +187,32 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         submitDisabled={workspace.postEstimationLoadError !== null}
       />
 
+      {workspace.error && (
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
+          {workspace.error}
+        </div>
+      )}
+
+      {workspace.figureInventoryError && (
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
+          {workspace.figureInventoryError}
+        </div>
+      )}
+
+      {workspace.postEstimationLoadError && (
+        <div
+          data-testid="report-post-estimation-load-error"
+          role="alert"
+          style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}
+        >
+          {workspace.postEstimationLoadError}
+        </div>
+      )}
+
+
       <ReportActionBar />
 
-      {mode === "new" && <ReportReviewPanel/>}</div><ReportSources defaultOpen={mode !== "new"}><section data-testid="report-scope-summary" className="report-scope-summary">
+      </div><ReportSources defaultOpen={false}><section data-testid="report-scope-summary" className="report-scope-summary">
         <div className="report-scope-summary__heading">
           <div>
             <strong>Scope</strong>
@@ -253,28 +282,6 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
           style={{ fontSize: 12, color: "var(--diff-removed)", marginBottom: 12 }}
         >
           This revision needs attention before formal export: {workspace.current.report_quality?.violations?.map((item) => typeof item === "string" ? item : item.message).join("; ") || workspace.currentQualityStatus}.
-        </div>
-      )}
-
-      {workspace.error && (
-        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
-          {workspace.error}
-        </div>
-      )}
-
-      {workspace.figureInventoryError && (
-        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
-          {workspace.figureInventoryError}
-        </div>
-      )}
-
-      {workspace.postEstimationLoadError && (
-        <div
-          data-testid="report-post-estimation-load-error"
-          role="alert"
-          style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}
-        >
-          {workspace.postEstimationLoadError}
         </div>
       )}
 

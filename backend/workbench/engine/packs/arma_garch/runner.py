@@ -305,6 +305,7 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         checkpoint=lambda: env.checkpoint("Full-sample production refit"),
     )
     next_payload = next_forecast.to_dict()
+    from .completion import production_evidence
     production_child = {
         "result_id": f"{MODEL_ID}:production-final",
         "result_role": "production_final_child",
@@ -312,6 +313,7 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         "does_not_overwrite_parent": True,
         "fit_scope": "all_available_observations",
         "validation_metrics_recomputed": False,
+        "analysis_evidence": production_evidence(prepared, next_payload),
         "refit_summary": next_payload["refit_summary"],
         "next_forecast": next_payload,
     }

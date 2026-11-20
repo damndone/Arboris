@@ -21,6 +21,7 @@ from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.navigation import AgentNavigationProjector
 from ..agent.orchestrator import WorkbenchOrchestrator
+from ..agent.operation_requests import OperationRequest
 from ..agent.session import JsonlSessionRepository
 from ..artifacts import read_json, write_json
 from ..events import get_event_manager
@@ -230,31 +231,33 @@ def seed_agent_navigation_fixture(
         )
         orchestrator.register_chain(source_chain_id, source_session_id, agent)
 
-        proposal = orchestrator.create_proposal(
+        proposal = orchestrator.admit_operation_request(
+            OperationRequest(
+                operation_id="model.rerun",
+                target={
+                    "run_id": source_run_id,
+                    "node_ref": source_node_ref,
+                    "node_hash": context.node_hash,
+                    # Production operation records use the canonical hash.  The
+                    # browser selector below is the separate hash::node_ref key.
+                    "forest_node_key": context.forest_node_key,
+                },
+                preconditions={
+                    "context_version": context.context_version,
+                    "context_fingerprint": context.context_fingerprint,
+                    "active_head_run_id": context.active_head_run_id,
+                    "owner_resolution": context.owner_resolution,
+                    "run_family_id": f"legacy-family:{source_run_id}",
+                },
+                changes={"covariance": {"old": "robust", "new": "unadjusted"}},
+                evidence_refs=["diagnostic:heteroskedasticity:smoke-fixture"],
+                expected_effect=["standard errors may change"],
+                risks=["inference assumptions change"],
+            ),
             chain_id=source_chain_id,
-            operation_id="model.rerun",
-            target={
-                "run_id": source_run_id,
-                "node_ref": source_node_ref,
-                "node_hash": context.node_hash,
-                # Production operation records use the canonical hash.  The
-                # browser selector below is the separate hash::node_ref key.
-                "forest_node_key": context.forest_node_key,
-            },
-            preconditions={
-                "context_version": context.context_version,
-                "context_fingerprint": context.context_fingerprint,
-                "active_head_run_id": context.active_head_run_id,
-                "owner_resolution": context.owner_resolution,
-                "run_family_id": f"legacy-family:{source_run_id}",
-            },
-            changes={"covariance": {"old": "robust", "new": "unadjusted"}},
-            evidence_refs=["diagnostic:heteroskedasticity:smoke-fixture"],
-            expected_effect=["standard errors may change"],
-            risks=["inference assumptions change"],
             command_id="command_navigation_smoke",
             proposal_id="proposal_navigation_smoke",
-        )
+        ).proposal
         operation = orchestrator.confirm_proposal(
             proposal.proposal_id,
             revision=proposal.revision,
@@ -264,23 +267,29 @@ def seed_agent_navigation_fixture(
             current_active_head_run_id=source_run_id,
         )
         operation = asyncio.run(
-            orchestrator.execute_confirmed_proposal(
+            orchestrator.execute_confirmed_operation(
                 operation.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint=context.context_fingerprint,
                 current_active_head_run_id=source_run_id,
-                executor=orchestrator.model_rerun_executor(root),
+                rerun_executor=orchestrator.model_rerun_executor(root),
             )
         )
         child_run_id = str(operation.outputs.get("target_run_id") or "")
         if not child_run_id:
             raise RuntimeError("fixture rerun did not persist a child run id")
         _wait_for_terminal_run(root, child_run_id, timeout_s=timeout_s)
-        operation = asyncio.run(
-            orchestrator.reconcile_confirmed_proposal(
-                operation.record_id,
-                project_root=root,
+        if operation.status not in {"completed", "failed", "stale", "cancelled"}:
+            operation = asyncio.run(
+                orchestrator.execute_confirmed_operation(
+                    operation.record_id,
+                    current_context_fingerprint=operation.preconditions.get("context_fingerprint"),
+                    current_active_head_run_id=operation.preconditions.get("active_head_run_id"),
+                    allow_recovery=True,
+                    project_root=root,
+                )
             )
-        )
         if operation.status != "completed":
             raise RuntimeError(
                 f"fixture operation did not reconcile: {operation.status} "
@@ -398,28 +407,30 @@ def seed_agent_rerun_smoke_fixture(
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(chain_id, session_id, agent)
-        proposal = orchestrator.create_proposal(
+        proposal = orchestrator.admit_operation_request(
+            OperationRequest(
+                operation_id="model.rerun",
+                target={
+                    "run_id": source_run_id,
+                    "node_ref": source_node_ref,
+                    "node_hash": context.node_hash,
+                    "forest_node_key": context.forest_node_key,
+                },
+                preconditions={
+                    "context_version": context.context_version,
+                    "context_fingerprint": context.context_fingerprint,
+                    "active_head_run_id": source_run_id,
+                    "owner_resolution": context.owner_resolution,
+                    "run_family_id": f"legacy-family:{source_run_id}",
+                },
+                changes={"covariance": {"old": "robust", "new": "unadjusted"}},
+                evidence_refs=["fixture:pending-rerun"],
+                expected_effect=["create exactly one child run with updated covariance"],
+                risks=["inference assumptions change"],
+            ),
             chain_id=chain_id,
-            operation_id="model.rerun",
-            target={
-                "run_id": source_run_id,
-                "node_ref": source_node_ref,
-                "node_hash": context.node_hash,
-                "forest_node_key": context.forest_node_key,
-            },
-            preconditions={
-                "context_version": context.context_version,
-                "context_fingerprint": context.context_fingerprint,
-                "active_head_run_id": source_run_id,
-                "owner_resolution": context.owner_resolution,
-                "run_family_id": f"legacy-family:{source_run_id}",
-            },
-            changes={"covariance": {"old": "robust", "new": "unadjusted"}},
-            evidence_refs=["fixture:pending-rerun"],
-            expected_effect=["create exactly one child run with updated covariance"],
-            risks=["inference assumptions change"],
             proposal_id="proposal_rerun_smoke",
-        )
+        ).proposal
         fixture = AgentRerunSmokeFixture(
             project_root=root,
             source_run_id=source_run_id,

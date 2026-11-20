@@ -16,9 +16,14 @@ import re
 from collections import defaultdict
 from typing import Any, Iterable, Mapping
 
+from ..agent import numeric_grounding
 from .operation_presentation import operation_title
 
 VALUE_MARKER = re.compile(r"\[\[v:([A-Za-z0-9._-]+)\]\]")
+CITATION_MARKER = re.compile(r"\[\[c:([^\]]+)\]\]")
+MODEL_ID_FIELD = "model/id"
+MODEL_SAMPLE_SIZE_FIELD = "model/nobs"
+MODEL_SAMPLE_SIZE_BASIS_FIELD = "inference/nobs_basis"
 _MISSING = "—"
 
 
@@ -109,6 +114,81 @@ def resolved_ids(text: str, facts: Mapping[str, Mapping[str, Any]]) -> tuple[lis
     return list(dict.fromkeys(shown)), unknown
 
 
+def _model_owner(fact: Mapping[str, Any], run_id: str) -> str | None:
+    source = fact.get("source")
+    if not isinstance(source, Mapping):
+        return None
+    node_key = source.get("node_key")
+    if (source.get("run_id") == run_id and isinstance(node_key, str) and node_key.startswith("model:")
+            and source.get("result_ref") == f"model_results:{node_key.removeprefix('model:')}"):
+        return node_key
+    return None
+
+
+def _count_basis(value: Any) -> str:
+    return value if value in ("rows", "units") else "unknown"
+
+
+def model_sample_size_bases(facts: Iterable[Mapping[str, Any]], run_id: str, *, default_basis: str = "rows") -> dict[str, str]:
+    """Project model owners and count bases from admitted report facts."""
+    models, bases = set(), {}
+    for fact in facts:
+        field = fact.get("field")
+        if field not in {MODEL_ID_FIELD, MODEL_SAMPLE_SIZE_FIELD, MODEL_SAMPLE_SIZE_BASIS_FIELD}:
+            continue
+        model = _model_owner(fact, run_id)
+        if model is None:
+            continue
+        if field == MODEL_SAMPLE_SIZE_BASIS_FIELD:
+            bases[model] = _count_basis(fact.get("value"))
+        else:
+            models.add(model)
+    return {model: bases.get(model, default_basis) for model in sorted(models)}
+
+
+def agent_sample_size_error(title: str, text: str, facts: Mapping[str, Mapping[str, Any]], run_id: str,
+                            bases: Mapping[str, str], *, require_model_id: bool) -> str | None:
+    """Validate explicit counts against selected facts and the full saved model scope."""
+    if (numeric_grounding.has_report_sample_size_literal(title)
+            or any(numeric_grounding.report_sample_size_labels(title, *match.span()) for match in VALUE_MARKER.finditer(title))):
+        return "Put the sample size in the report body using a model/nobs value marker from read_reports."
+    prose = CITATION_MARKER.sub(" ", text)
+    if numeric_grounding.has_report_sample_size_literal(VALUE_MARKER.sub(" ", prose)):
+        return "Show the sample size using a model/nobs value marker [[v:<fact id>]] from read_reports."
+    owners = {fact_id: _model_owner(fact, run_id) for fact_id, fact in facts.items()
+              if fact.get("field") in {MODEL_ID_FIELD, MODEL_SAMPLE_SIZE_FIELD}}
+    offset = 0
+    for line in prose.splitlines(keepends=True):
+        named_models: set[str] = set()
+        counted_models: set[str] = set()
+        for marker in VALUE_MARKER.finditer(line):
+            fact_id = resolve(marker.group(1), facts) or ""
+            fact = facts.get(fact_id, {})
+            field, value = fact.get("field"), fact.get("value")
+            owner = owners.get(fact_id)
+            if field == MODEL_ID_FIELD and owner is not None and value == owner.removeprefix("model:"):
+                named_models.add(owner)
+            sample_size = field == MODEL_SAMPLE_SIZE_FIELD
+            labels = numeric_grounding.report_sample_size_labels(prose, offset + marker.start(), offset + marker.end(),
+                                                                  bound=sample_size)
+            if sample_size or labels:
+                if not sample_size or type(value) is not int or value < 0 or owner is None or owner not in bases:
+                    return "The sample size marker must select the fitted model's registered model/nobs fact from this run."
+                basis = bases[owner]
+                if labels - {"sample", basis} or (basis == "units" and "units" not in labels):
+                    if basis == "units":
+                        return "This model reports its sample size in units. Use the model/nobs marker with the label units."
+                    if basis == "rows":
+                        return "This model reports its sample size in rows. Use the model/nobs marker with rows or observations."
+                    return "The sample size basis is unavailable. Use the label Sample size with the model/nobs marker."
+                counted_models.add(owner)
+        if require_model_id and counted_models and (len(counted_models) != 1 or named_models != counted_models):
+            return ("Put each sample size and the same model's model/id value marker on one line. "
+                    "If that fact is outside this revision's evidence selection, omit the sample size or use a new draft.")
+        offset += len(line)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Draft
 
@@ -184,22 +264,27 @@ def _coefficient_lines(model: Mapping[str, Mapping[str, Any]]) -> list[str]:
 
 
 _FIT = (
-    ("metric/n_observations", "model/nobs", "Observations"),
     ("metric/r_squared", "model/r_squared", "R²"),
     ("metric/adjusted_r_squared", "model/adjusted_r_squared", "Adjusted R²"),
     ("metric/aic", None, "AIC"),
     ("metric/bic", None, "BIC"),
     ("metric/llf", None, "Log-likelihood"),
 )
+_SAMPLE_SIZE_LABEL = {"rows": "Observations", "units": "Units", "unknown": "Sample size"}
 
 
-def _fit_line(graph: Mapping[str, Mapping[str, Any]], model: Mapping[str, Mapping[str, Any]]) -> str | None:
+def _fit_line(graph: Mapping[str, Mapping[str, Any]], model: Mapping[str, Mapping[str, Any]],
+              model_marker: str | None, basis: str) -> str | None:
     parts = []
+    nobs = model.get(MODEL_SAMPLE_SIZE_FIELD)
+    if nobs is not None and nobs.get("value") is not None:
+        parts.append(f"{_SAMPLE_SIZE_LABEL[basis]} {_v(nobs)}")
     for graph_field, model_field, label in _FIT:
         fact = graph.get(graph_field) or (model.get(model_field) if model_field else None)
         if fact is not None and fact.get("value") is not None:
             parts.append(f"{label} {_v(fact)}")
-    return "Fit: " + " · ".join(parts) + "." if parts else None
+    heading = f"Fit for {model_marker}" if model_marker else "Fit"
+    return f"{heading}: " + " · ".join(parts) + "." if parts else None
 
 
 def _test_line(fields: Mapping[str, Mapping[str, Any]]) -> str | None:
@@ -258,15 +343,22 @@ def draft_text(facts: list[Mapping[str, Any]], limitations: list[str]) -> str:
         if outcome:
             predictors = f"; predictors {_join([f'**{name}**' for name in regressors])}" if regressors else ""
             sentences.append(f"Outcome **{outcome}**{predictors}.")
-        nobs = graph.get("metric/n_observations") or model.get("model/nobs")
+        nobs = model.get(MODEL_SAMPLE_SIZE_FIELD)
+        declared_basis = model.get(MODEL_SAMPLE_SIZE_BASIS_FIELD)
+        basis = _count_basis(declared_basis["value"]) if declared_basis else "rows"
+        model_marker = _v(model.get(MODEL_ID_FIELD)) if len(models) > 1 else None
         covariance = inference.get("inference/covariance_estimator")
         estimated = []
-        if nobs is not None:
-            estimated.append(f"on {_v(nobs)} observations")
+        if nobs is not None and nobs.get("value") is not None:
+            if basis == "unknown":
+                estimated.append(f"on a sample of {_v(nobs)}")
+            else:
+                estimated.append(f"on {_v(nobs)} {_SAMPLE_SIZE_LABEL[basis].lower()}")
         if covariance is not None:
             estimated.append(f"with {_v(covariance)} standard errors")
         if estimated:
-            sentences.append("Estimated " + " ".join(estimated) + ".")
+            lead = f"{model_marker} was estimated" if model_marker else "Estimated"
+            sentences.append(f"{lead} " + " ".join(estimated) + ".")
         sentence = " ".join(sentences)[:-1]
         lines += [sentence + ".", ""]
 
@@ -274,7 +366,7 @@ def draft_text(facts: list[Mapping[str, Any]], limitations: list[str]) -> str:
         if coefficients:
             level = model.get("inference/confidence_level")
             lines += [f"### Estimates{f' (CI at {_v(level)})' if level else ''}", "", *coefficients, ""]
-        fit = _fit_line(graph, model)
+        fit = _fit_line(graph, model, model_marker, basis)
         if fit:
             lines += [fit, ""]
         if tests.get(model_id):

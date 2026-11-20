@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from tests.operation_approval_fixtures import with_operation_approval
 
 from workbench.capability_factory.execution_authorization import (
     ExecutionAuthorizationInvalidated,
@@ -177,6 +178,7 @@ def test_claim_is_atomic_idempotent_and_binds_freshness(tmp_path: Path) -> None:
     first_store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     second_store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     first_store.issue(authorization)
 
     claimed = first_store.claim(
@@ -236,6 +238,7 @@ def test_claim_rejects_stale_binding_without_claiming(
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
 
     with pytest.raises(ExecutionAuthorizationRejected, match=expected):
@@ -260,6 +263,7 @@ def test_expiry_is_rejected_and_never_creates_a_claim(tmp_path: Path) -> None:
     current_time = [issued_at]
     store = OptionExecutionAuthorizationStore(tmp_path, clock=lambda: current_time[0])
     authorization = _authorization(now=issued_at)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
     current_time[0] = now
 
@@ -282,6 +286,7 @@ def test_claim_records_a_receipt_digest_and_post_claim_transitions_are_idempoten
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
     claimed = store.claim(
         authorization.authorization_id,
@@ -337,6 +342,7 @@ def test_transition_binds_prior_receipt_lease_and_transition_payload(
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
     claimed = store.claim(
         authorization.authorization_id,
@@ -393,6 +399,7 @@ def test_transition_rejects_replay_with_changed_metadata_and_terminal_reuse(
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
     claimed = store.claim(
         authorization.authorization_id,
@@ -448,6 +455,7 @@ def test_running_may_be_consumed_once_and_unknown_is_terminal_for_this_slice(
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
     authorization = _authorization(now=now)
+    authorization = with_operation_approval(tmp_path, authorization)
     store.issue(authorization)
     claimed = store.claim(
         authorization.authorization_id,

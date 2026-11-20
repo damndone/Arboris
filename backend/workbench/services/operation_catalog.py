@@ -13,6 +13,8 @@ from typing import Any, Mapping, Sequence
 from ..agent.capability_contract import capability_inventory
 from ..agent.operations import OperationRegistry
 from ..agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+from ..native_build import NativeBuildError, default_output, verify_build
+from ..native_research import NATIVE_RESEARCH_OPERATIONS
 from .operation_presentation import present
 
 
@@ -72,7 +74,7 @@ def _selected_target(project_root: str | None, target: Mapping[str, Any]):
     except (OSError, ValueError, KeyError, CommandError, RuntimeError) as exc:
         return {"status": "unavailable", "reason_code": "TARGET_INVALID", "message": str(exc)}, None
     return {"status": "needs_parameters", "reason_code": "SPEC_VALIDATION_REQUIRED",
-            "message": "Target ownership is verified; preview validates parameters and execution conditions."}, kernel
+            "message": "Target ownership is verified. Preview validates the request. Some data and engine checks occur during execution."}, kernel
 
 
 def _model_availability(operation_id: str, contract: Any, state: dict, kernel: Any) -> dict:
@@ -115,6 +117,7 @@ def operation_catalog(
         target_state, kernel = _selected_target(project_root, target)
     dedicated = {item["id"]: item for item in dedicated_operations}
     entries = {}
+    native_availability: dict[str, dict[str, str]] = {}
     for operation_id in registry.operation_ids():
         definition = registry.require(operation_id)
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
@@ -122,6 +125,20 @@ def operation_catalog(
         execution: dict[str, Any] = {"kind": "workflow", "method": "POST", "path": "/operations/run"}
         availability = (_model_availability(operation_id, contract, target_state, kernel)
                         if contract is not None and target_state["status"] != "needs_target" else dict(target_state))
+        native = NATIVE_RESEARCH_OPERATIONS.get(operation_id)
+        if native is not None and availability["status"] == "needs_parameters":
+            if native.module not in native_availability:
+                module_path = Path(__file__).resolve().parents[3] / "native" / native.module
+                try:
+                    verify_build(module_path, default_output(module_path))
+                except NativeBuildError:
+                    native_availability[native.module] = {
+                        "status": "unavailable", "reason_code": "NATIVE_BUILD_REQUIRED",
+                        "message": f"Build and verify this module with native/{native.module}/build.py, then restart Workbench.",
+                    }
+                else:
+                    native_availability[native.module] = availability
+            availability = native_availability[native.module]
         if operation_id in dedicated:
             binding = dedicated[operation_id]
             execution = deepcopy(binding["execution"])
@@ -154,6 +171,10 @@ def operation_catalog(
             "column_resolver": contract.column_extractor_key if contract is not None else None,
             "execution": execution, "availability": availability,
         }
+        if operation_id == "prediction.native_forest_apply":
+            from .native_prediction_apply import saved_forest_choices
+
+            entries[operation_id]["saved_models"] = saved_forest_choices(project_root) if project_root else []
     for operation_id, binding in dedicated.items():
         if operation_id in entries:
             continue

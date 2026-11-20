@@ -16,7 +16,7 @@ export const WORKSPACE_VIEWS: ReadonlyArray<{ id: ViewMode; label: string }> = [
   { id: "graph", label: "Analysis" },
   { id: "table", label: "Tables" },
   { id: "report", label: "Report" },
-  { id: "notebook", label: "Plans" },
+  { id: "plans", label: "Compare" },
 ];
 
 export interface WorkspaceTopbarProps {
@@ -59,7 +59,7 @@ export function WorkspaceTopbar({
       <div className="ws-topbar__start">
         <span className="ws-topbar__brand ws-topbar__brand--static">
           <BrandIcon />
-          <span>Arboris</span>
+          <span className="ws-topbar__brand-name">Arboris</span>
         </span>
         <span className="ws-topbar__rule" aria-hidden="true" />
         <ProjectSwitcher projectRoot={projectRoot} />
@@ -135,7 +135,7 @@ export function WorkspaceTopbar({
             onClick={onNewAnalysis}
           >
             <PlusIcon />
-            {newAnalysisLabel}
+            <span className="ws-topbar__new-label">{newAnalysisLabel}</span>
           </button>
         )}
         {actions}

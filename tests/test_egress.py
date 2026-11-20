@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -31,7 +32,7 @@ from workbench.llm.config import LLMConfig
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend" / "workbench"
 REMOTE = LLMConfig(base_url="https://api.deepseek.com", api_key="k", model="deepseek-chat", provider_id="deepseek")
-LOCAL = LLMConfig(base_url="http://127.0.0.1:11434/v1", api_key="k", model="qwen", provider_id="ollama")
+LOCAL = LLMConfig(base_url="http://127.0.0.1:11434/v1", api_key="k", model="qwen", provider_id="ollama", data_location="local")
 
 ROWS_RESULT = {
     "tool_call_id": "call-rows",
@@ -91,7 +92,9 @@ def _declared_tool_ids() -> set[str]:
     for path in BACKEND.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ToolDefinition":
+            # Context tools keep their static fields in tool_specs.py as dict(tool_id=...).
+            constructor = getattr(node.func, "id", None) if isinstance(node, ast.Call) else None
+            if constructor == "ToolDefinition" or (constructor == "dict" and path.name == "tool_specs.py"):
                 for keyword in node.keywords:
                     if keyword.arg == "tool_id" and isinstance(keyword.value, ast.Constant):
                         ids.add(keyword.value.value)
@@ -99,6 +102,16 @@ def _declared_tool_ids() -> set[str]:
 
     ids.update(tool["tool_id"] for tool in NOTEBOOK_TOOLS)
     return ids
+
+
+@pytest.mark.parametrize("tool_id", ["propose_operation", "propose_analysis_loop"])
+def test_retired_tool_results_keep_their_original_content_class(monkeypatch, tmp_path: Path, tool_id) -> None:
+    assert tool_id not in _declared_tool_ids()
+    historical = {"ok": True, "output": {"requires_confirmation": True}}
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, _conversation(tool_id, historical), REMOTE)
+    assert _tool_content(body) == historical
+    assert read_audit(tmp_path)[0]["decisions"][0]["content_class"] == "workbench_state"
 
 
 def test_every_tool_declares_what_it_can_send() -> None:
@@ -139,6 +152,45 @@ def test_a_local_provider_receives_rows(monkeypatch, tmp_path: Path) -> None:
         body = _send(monkeypatch, _conversation("show_dataset_rows", ROWS_RESULT), LOCAL)
     assert _tool_content(body)["output"]["rows"][0]["wage"] == 18.731
     assert read_audit(tmp_path)[0]["provider_locality"] == "local"
+
+
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:3425/v1", "http://localhost:3425/v1", "http://[::1]:3425/v1"])
+@pytest.mark.parametrize("tool_id,result", [
+    ("show_dataset_rows", ROWS_RESULT),
+    ("brand_new_tool", {"ok": True, "output": {"secret": "unclassified-value"}}),
+    ("inspect_project_model_coefficients", {"ok": True, "output": {"estimate": 1.234}}),
+])
+def test_unknown_loopback_gateway_has_remote_wire_policy(monkeypatch, tmp_path, base_url, tool_id, result):
+    gateway = replace(REMOTE, base_url=base_url, provider_id="magpie-workbuddy-ai",
+                      model="workbuddy-ai/deepseek-v4.1-flash")
+    with egress_project(tmp_path):
+        remote_body = _send(monkeypatch, _conversation(tool_id, result), REMOTE)
+        gateway_body = _send(monkeypatch, _conversation(tool_id, result), gateway)
+    assert gateway_body["messages"] == remote_body["messages"]
+    assert gateway_body["model"] == "workbuddy-ai/deepseek-v4.1-flash"
+    assert read_audit(tmp_path)[-1]["provider_locality"] == "remote"
+
+
+def test_gateway_column_protection_and_policy_view_match_wire(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from workbench.api import app
+    from workbench.http import egress_routes
+
+    gateway = replace(REMOTE, base_url="http://127.0.0.1:3425/v1", provider_id="magpie-workbuddy-ai")
+    save_policy(tmp_path, EgressPolicy(columns={"age": "restricted"},
+        providers={gateway.provider_id: frozenset(egress.CONTENT_CLASSES)}))
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, _conversation("inspect_data_schema", SCHEMA_RESULT), gateway)
+    output = _tool_content(body)["output"]
+    assert output["value_labels"] == {"phone": egress.WITHHELD, "age": egress.WITHHELD}
+    assert output["frequencies"]["name"] == egress.WITHHELD
+    record = read_audit(tmp_path)[-1]
+    assert record["provider_host"] == "127.0.0.1"
+    assert record["provider_locality"] == "remote"
+    monkeypatch.setattr(egress_routes, "load_llm_config", lambda: gateway)
+    view = TestClient(app).get("/projects/egress", params={"project_root": str(tmp_path)})
+    assert view.status_code == 200, view.text
+    assert view.json()["active_provider"]["locality"] == record["provider_locality"]
 
 
 def test_aggregates_and_model_results_reach_a_remote_provider(monkeypatch, tmp_path: Path) -> None:
@@ -288,6 +340,42 @@ def test_notebook_sample_rows_are_withheld_from_the_planning_prompt(monkeypatch,
     assert decision["withheld_protocols"] == ["sample/v1"]
 
 
+@pytest.mark.parametrize("allow_metadata", [True, False])
+def test_initial_plan_facts_respect_metadata_and_protected_columns(monkeypatch, tmp_path, allow_metadata):
+    classes = {"workbench_state", "schema", "aggregate"}
+    if allow_metadata:
+        classes.add("metadata")
+    save_policy(tmp_path, EgressPolicy(providers={REMOTE.provider_id: frozenset(classes)},
+                                       columns={"site_code": "restricted"}))
+    guidance = "Draft a research plan using the available evidence."
+    facts = {"source": {"run_id": "private-run"}, "dataset": {"columns": [
+        {"name": "site_code", "dtype": "string", "unique_count": 47, "missing_rate": 0.375},
+        {"name": "age", "dtype": "float64", "unique_count": 31, "missing_rate": 0.25},
+    ]}}
+    content = {"guidance": guidance, "context": {
+        "protocol_version": "initial-plan-facts/v1", "observations": facts,
+    }}
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, [{"role": "system", "content": json.dumps(content)}], REMOTE)
+
+    sent = json.loads(body["messages"][0]["content"])
+    assert sent["guidance"] == guidance
+    observations = sent["context"]["observations"]
+    [decision] = read_audit(tmp_path)[0]["decisions"]
+    if allow_metadata:
+        assert observations.get("egress_withheld") is not True
+        assert observations["source"] == facts["source"]
+        protected, ordinary = observations["dataset"]["columns"]
+        assert protected == {"name": "site_code", "dtype": "string", "values_withheld": True}
+        assert ordinary == facts["dataset"]["columns"][1]
+        assert decision["redacted_columns"] == ["site_code"]
+    else:
+        assert observations["egress_withheld"] is True
+        assert observations["content_class"] == "metadata"
+        assert set(observations) == {"egress_withheld", "content_class", "reason"}
+        assert decision["withheld_protocols"] == ["initial-plan-facts/v1"]
+
+
 def test_plain_conversation_is_sent_unchanged() -> None:
     messages = [{"role": "user", "content": "educ 的系数是多少？"}, {"role": "assistant", "content": "1.23"}]
     assert guard_outgoing_messages(messages, base_url=REMOTE.base_url) == messages
@@ -417,3 +505,16 @@ def test_the_policy_api_edits_column_levels_and_shows_the_audit(project_run, mon
         _send(monkeypatch, _conversation("show_dataset_rows", ROWS_RESULT), REMOTE)
     records = client.get("/projects/egress/audit", params=params).json()["records"]
     assert records[0]["withheld_count"] == 1
+
+
+def test_research_review_packet_obeys_model_result_sharing_at_the_wire_boundary(monkeypatch, tmp_path):
+    save_policy(tmp_path, EgressPolicy(providers={'remote': frozenset({'workbench_state', 'aggregate'})}))
+    packet = {'protocol_version': 'research-review/v1', 'observations': {
+        'candidate': 'PRIVATE MODEL CANDIDATE', 'models': [{'estimate': 18.731}],
+        'diagnostics': [{'p_value': .0041}]}}
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, [{'role': 'user', 'content': json.dumps(packet)}], REMOTE)
+    sent = json.loads(body['messages'][0]['content'])
+    assert sent['observations']['egress_withheld'] is True
+    assert 'PRIVATE MODEL CANDIDATE' not in json.dumps(body)
+    assert '18.731' not in json.dumps(body)

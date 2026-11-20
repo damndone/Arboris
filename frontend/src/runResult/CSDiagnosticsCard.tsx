@@ -85,9 +85,7 @@ export interface CSDiagnostics {
   };
   diagnostics: {
     overlap: { ps_min: number | null; ps_max: number | null };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     omitted_cells: any[];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     sample_spec: Record<string, any>;
   };
   honest_did?: HonestDidBlock;

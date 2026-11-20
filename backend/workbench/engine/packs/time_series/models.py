@@ -169,6 +169,10 @@ def fit_arima(
             },
             "retained_positions": list(prepared.retained_positions),
         }
+        from .completion import arima_evidence
+
+        result['analysis_evidence'] = arima_evidence(fitted, prepared, frame,
+            order=normalized_order, seasonal_order=normalized_seasonal_order, trend=trend)
     except TimeSeriesPackError:
         raise
     except (ValueError, np.linalg.LinAlgError, RuntimeError) as exc:

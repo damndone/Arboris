@@ -1,15 +1,24 @@
+import { AgentUsagePanel } from "./AgentUsagePanel";
+import { AgentPlanPanel } from "./AgentPlanPanel";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { buildTurns, duration, messageTime } from "./transcript/turns";
 import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
+import { AgentAttachmentLink, AgentAuditLink } from "./AgentFileViewer";
 import { AgentComposer } from "./AgentComposer";
-import type { AgentMessage } from "./agentTypes";
+import { agentTurnActive } from "./AgentRunControls";
+import type { AgentMessage, AgentNavigationRef } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
+import { AgentChart, shownChart } from "./AgentChart";
+import { AgentTargetRecovery } from "./AgentTargetRecovery";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 import { formatPValue } from "../../format/numbers";
-import { ProposalFields } from "./ProposalFields";
+import { AgentApprovalBar } from "./AgentApprovalBar";
+import { AgentProposalReceipt, receiptsByTurn } from "./AgentProposalReceipt";
+import { activeToolActivityLabel, observableActivity, toolStep } from "./toolActivity";
+import { ActivityLog, ToolStepRow } from "./transcript/ActivityLog";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -43,15 +52,44 @@ function formatAgentResultValue(value: unknown): string {
   return String(value);
 }
 
-function observableActivity(eventType: string | null): string {
-  if (!eventType) return "Preparing the bounded context";
-  const normalized = eventType.toLowerCase();
-  if (normalized === "provider_retry") return "The provider connection dropped; retrying";
-  if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
-  if (normalized.includes("tool")) return "Checking evidence";
-  if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
-  if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
-  return "Processing the current request";
+const INTERNAL_RESULT_FIELD = /(^|_)(id|ref|schema|version|parent)$|^producer$/;
+
+function isScalar(value: unknown): boolean {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** One readable line for a record's fields; identity and provenance stay in the record. */
+function resultFacts(record: Record<string, unknown>): string {
+  const facts: string[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    const label = key.replace(/_/g, " ");
+    if (INTERNAL_RESULT_FIELD.test(key) || holdsRecords(value)) continue;
+    if (/p_value(_corrected)?$/.test(key) && typeof value === "number") facts.push(`${label}: ${formatPValue(value)}`);
+    else if (isScalar(value)) facts.push(`${label}: ${formatAgentResultValue(value)}`);
+    else if (Array.isArray(value) && value.length && value.every(isScalar)) facts.push(`${label}: ${formatAgentResultValue(value)}`);
+    else if (isRecord(value)) {
+      const inner = Object.values(value).filter(isScalar).map(formatAgentResultValue).join(" ");
+      if (inner) facts.push(`${label}: ${inner}`);
+    }
+  }
+  return facts.join(" · ");
+}
+
+function holdsRecords(value: unknown): boolean {
+  return Array.isArray(value) ? value.some(isRecord) : isRecord(value) && Object.values(value).some(holdsRecords);
+}
+
+/** A result's own fields, then one line per record it holds, never its raw JSON. */
+export function resultLines(result: Record<string, unknown>): string[] {
+  const nested = Object.values(result).flatMap((value): string[] => {
+    if (Array.isArray(value)) return value.filter(isRecord).flatMap(resultLines);
+    return isRecord(value) && holdsRecords(value) ? resultLines(value) : [];
+  });
+  return [resultFacts(result), ...nested].filter(Boolean);
 }
 
 function terminalFailureMessage(
@@ -59,25 +97,61 @@ function terminalFailureMessage(
   transportError: string | null,
   hasPendingProposal: boolean,
 ): string | null {
-  // Only the latest reply decides: a turn that failed earlier and was then
-  // asked again and answered is over.
+  // A current UI action failure takes precedence over the latest saved reply.
   const latest = [...messages].reverse().find((message) => message.role === "assistant");
   const terminal = latest?.stop_reason === "error" ? latest : undefined;
-  const error = terminal?.error ?? transportError;
+  const error = transportError ?? terminal?.error;
   if (!error) return null;
   if (error === "max_steps_exceeded" && hasPendingProposal) {
     return "The Agent reached its step limit after creating a proposal that is still awaiting your review. The proposal will not execute automatically; confirm, revise, or decline it below.";
   }
+  const retained = "Completed operations and results remain recorded. Review the steps and resolve unfinished work before continuing.";
+  if (error === "provider_output_limit") {
+    return "The model reached its response limit before finishing. The reply is incomplete. Completed operations and results remain recorded. Review the recorded work, then request the remaining report in smaller steps.";
+  }
+  if (error === "agent_timeout") {
+    return `The time limit was reached before the request finished. ${retained}`;
+  }
+  if (error === "provider_request_budget") {
+    return `The next model request was not sent because the remaining turn time is shorter than a request is expected to need. ${retained}`;
+  }
+  if (error === "analysis_recovery_limit") {
+    return "The Agent stopped after reaching its recovery limit. Completed operations and results remain recorded. Inspect the failed step and resolve its recorded cause before continuing.";
+  }
   if (error === "LLMUpstreamError" || error.startsWith("LLMUpstreamError:")) {
-    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. Nothing in your data or models was changed.";
+    return `The configured provider did not return a usable response. Check the selected model in Settings. ${retained}`;
   }
   if (error === "tool_runtime_error") {
-    return "The Agent tool runtime stopped unexpectedly. Retry the request; nothing in your data or models was changed.";
+    return `The Agent tool runtime stopped unexpectedly. ${retained}`;
   }
-  return `The Agent stopped before completing the request (${error}). Nothing in your data or models was changed.`;
+  return `The Agent stopped before completing the request (${error}). ${retained}`;
 }
 
-function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number {
+/** A viewing shortcut must be bound by this turn's receipt, not session history. */
+function stoppedOperation(receipts: AgentMessage[]): { ref: AgentNavigationRef | null; unreadable: boolean } {
+  let ref: AgentNavigationRef | null = null;
+  let unreadable = false;
+  for (const receipt of receipts) {
+    let result: { output?: { operation?: { record_id?: unknown } } };
+    try {
+      result = JSON.parse(receipt.content);
+    } catch {
+      unreadable = true;
+      continue;
+    }
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      unreadable = true;
+      continue;
+    }
+    const recordId = result.output?.operation?.record_id;
+    if (typeof recordId !== "string" || !recordId) continue;
+    const available = receipt.navigation.find(link => link.kind === "operation" && link.available && link.id === recordId && link.href.operation_record_id === recordId);
+    if (available) ref = available;
+  }
+  return { ref, unreadable };
+}
+
+function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active || startedAt == null) return undefined;
@@ -85,7 +159,7 @@ function useElapsedSeconds(startedAt: number | null | undefined, active: boolean
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [active, startedAt]);
-  return active && startedAt != null ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : 0;
+  return active && startedAt != null ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : null;
 }
 
 function transcriptIsAtBottom(element: HTMLElement): boolean {
@@ -113,7 +187,16 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
     tool_id?: unknown;
     ok?: unknown;
     error?: unknown;
+    error_details?: Array<{ message?: unknown }>;
     output?: {
+      saved?: unknown;
+      error?: unknown;
+      available?: unknown;
+      reason?: unknown;
+      reason_code?: unknown;
+      time_series_summary?: { available?: unknown; reason?: unknown; reason_code?: unknown };
+      artifact_evidence?: { available?: unknown; reason?: unknown; reason_code?: unknown };
+      prepared?: unknown;
       requires_confirmation?: unknown;
       proposal?: { proposal_id?: unknown };
       confirmation_reason?: unknown;
@@ -130,7 +213,23 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
         : "tool";
   if (record.ok === false) {
     const error = typeof record.error === "string" ? record.error : "failed";
-    return `${toolId} ✗ ${error}`;
+    const message = Array.isArray(record.error_details)
+      ? record.error_details.map(detail => detail?.message).find((message): message is string => typeof message === "string" && Boolean(message.trim()))
+      : undefined;
+    const detail = message?.replace(/\s+/g, " ").trim().slice(0, 240);
+    return `${toolId} ✗ ${error}${detail ? ` — ${detail}` : ""}`;
+  }
+  if (record.output?.saved === false) {
+    const error = typeof record.output.error === "string" ? record.output.error.replace(/\s+/g, " ").trim().slice(0, 240) : "";
+    return `${toolId} ✗ not saved${error ? ` — ${error}` : ""}`;
+  }
+  const unavailable = record.output?.available === false ? record.output
+    : record.output?.time_series_summary?.available === false ? record.output.time_series_summary
+    : record.output?.artifact_evidence?.available === false ? record.output.artifact_evidence : null;
+  if (unavailable) {
+    const reason = [unavailable.reason, unavailable.reason_code].find((value): value is string => typeof value === "string" && Boolean(value.trim()));
+    const detail = reason?.replace(/\s+/g, " ").trim().slice(0, 240);
+    return `${toolId} ✗ result unavailable${detail ? ` — ${detail}` : ""}`;
   }
   const calculations = (record.output as { results?: unknown } | undefined)?.results;
   if (toolId === "calculate" && Array.isArray(calculations)) {
@@ -153,6 +252,9 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
     return status === "completed"
       ? `${toolId} ✓ read-only analysis ran without confirmation (recorded)${count}`
       : `${toolId} ✗ read-only analysis ${typeof status === "string" ? status : "failed"}`;
+  }
+  if (toolId === "run_operation" && record.output?.prepared === true) {
+    return `${toolId} ✓ proposal prepared`;
   }
   if (record.output?.executed === false) {
     return `${toolId} ✗ read-only analysis could not run`;
@@ -193,8 +295,8 @@ function CompactionMarker({ message }: { message: AgentMessage }) {
 
 export function workSummary(steps: number, drafts: number): string {
   const parts = [];
-  if (steps > 0) parts.push(`Worked through ${steps} ${steps === 1 ? "step" : "steps"}`);
-  if (drafts > 0) parts.push(`${steps > 0 ? "rewrote" : "Rewrote"} the answer ${drafts === 1 ? "once" : `${drafts} times`} after checking its numbers`);
+  if (steps > 0) parts.push(`${steps} ${steps === 1 ? "step" : "steps"}`);
+  if (drafts > 0) parts.push(`${drafts} ${drafts === 1 ? "draft" : "drafts"} rewritten`);
   return parts.join(" · ");
 }
 
@@ -203,39 +305,6 @@ function withdrawnNumbers(message: AgentMessage): string {
   const unverified = check && "unverified" in check ? check.unverified : [];
   const numbers = unverified.map((item) => item.text).filter(Boolean);
   return numbers.length > 0 ? numbers.join(", ") : "some numbers";
-}
-
-/** One cast entry as the user typed it, e.g. `wage → string`. */
-function castLine(entry: unknown): string | null {
-  if (!entry || typeof entry !== "object") return null;
-  const cast = entry as { column?: unknown; target_dtype?: unknown };
-  if (typeof cast.column !== "string" || typeof cast.target_dtype !== "string") return null;
-  return `${cast.column} → ${cast.target_dtype}`;
-}
-
-function changeSummary(changes: Record<string, unknown>): string {
-  return Object.entries(changes).map(([key, value]) => {
-    if (
-      key !== "model_options"
-      && value
-      && typeof value === "object"
-      && "old" in value
-      && "new" in value
-    ) {
-      const pair = value as { old?: unknown; new?: unknown };
-      return `${key}: ${String(pair.old)} → ${String(pair.new)}`;
-    }
-    // A data cast's `casts` array reads as human intent, not raw JSON: the batch
-    // NL path (data.columns.cast) surfaces here, and a dumped array is unreadable.
-    if (key === "casts" && Array.isArray(value)) {
-      const lines = value.map(castLine).filter((line): line is string => line !== null);
-      if (lines.length === value.length && lines.length > 0) {
-        return `Cast ${lines.join(", ")}`;
-      }
-    }
-    if (typeof value === "string") return `${key}: ${value}`;
-    return `${key}: ${JSON.stringify(value)}`;
-  }).join(" · ");
 }
 
 function navigationButtonLabel(ref: {
@@ -270,16 +339,15 @@ export function AgentPanel({
   compactHeader?: boolean;
 }) {
   const agent = useAgentSurface();
-  const [revisionIssues, setRevisionIssues] = useState<string[]>([]);
-  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
-  const [revisionDraft, setRevisionDraft] = useState<Record<string, unknown>>({});
-  const [revisionError, setRevisionError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const stoppedWorkRef = useRef<HTMLDetailsElement | null>(null);
+  const stoppedReplyRef = useRef<HTMLDivElement | null>(null);
+  const [reviewProblem, setReviewProblem] = useState<string | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
   const hasMeasuredTranscriptRef = useRef(false);
-  const turnActive = agent.isSubmitting || agent.sessionStatus.toLowerCase() === "running";
+  const turnActive = agentTurnActive(agent);
   const elapsedSeconds = useElapsedSeconds(agent.activeTurnStartedAt, turnActive);
-  const terminalFailure = agent.isSubmitting
+  const terminalFailure = turnActive
     ? null
     : terminalFailureMessage(
       agent.messages,
@@ -289,14 +357,18 @@ export function AgentPanel({
   const auditSessionId = agent.navigationLinks.find(
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
-  const recentToolSteps = agent.messages
-    .filter((message) => message.role === "tool")
-    .slice(-3)
-    .map((message) => toolStatusLine(message.content, message.name));
   const turns = buildTurns(agent.messages);
+  const currentTurn = turns[turns.length - 1];
+  const stoppedReply = currentTurn ? [...currentTurn.responses].reverse().find(message => message.stop_reason === "error") : undefined;
+  const inspectCurrentTurn = Boolean(terminalFailure && (stoppedReply || agent.error));
+  const stoppedReceipts = inspectCurrentTurn ? currentTurn?.steps.filter(message => message.role === "tool") ?? [] : [];
+  const stoppedResult = stoppedOperation(stoppedReceipts);
+  const lastActivityTurn = [...turns].reverse().find(turn => turn.steps.length > 0 || turn.drafts.length > 0);
   const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
   const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
+  const receipts = receiptsByTurn(turns, settledProposals);
   const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
+  useEffect(() => { setReviewProblem(null); }, [agent.sessionId, currentTurn?.id, terminalFailure]);
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -308,10 +380,61 @@ export function AgentPanel({
     if (shouldFollowTranscriptRef.current) {
       transcript.scrollTop = transcript.scrollHeight;
     }
-  }, [agent.liveResponseText, agent.messages]);
+  }, [agent.activeToolCalls, agent.liveResponseText, agent.messages]);
+  const reviewStoppedContent = (kind: "steps" | "reply") => {
+    const target = kind === "steps" ? stoppedWorkRef.current : stoppedReplyRef.current;
+    if (!target) {
+      setReviewProblem("The recorded content could not be opened in this view. Reopen the saved conversation to inspect it.");
+      return;
+    }
+    setReviewProblem(null);
+    if (kind === "steps") {
+      stoppedWorkRef.current!.open = true;
+      stoppedWorkRef.current!.querySelector("summary")?.focus();
+    } else {
+      target.focus();
+    }
+    target.scrollIntoView({ block: "nearest" });
+  };
   const renderTranscriptMessage = (message: AgentMessage) => {
     const sourceRef = message.navigation?.find(
       (link) => link.kind === "graph_node" && link.available,
+    ) ?? message.navigation?.find((link) => link.kind === "graph_node");
+    const references = message.navigation?.map((link) => (
+      <button
+        key={`${link.kind}:${link.id}:${link.relation}`}
+        type="button"
+        className="wb-agent-message-link"
+        aria-label={navigationButtonLabel(link)}
+        disabled={!link.available || !agent.openNavigation}
+        title={!link.available ? link.reason ?? "Unavailable" : !agent.openNavigation ? "Navigation is unavailable in this view" : link.label}
+        onClick={() => { if (link.available) agent.openNavigation?.(link); }}
+      >
+        ↗ {link.label}
+      </button>
+    ));
+    const denseReferences = message.role !== "tool" && (references?.length ?? 0) > 3;
+    const messageNavigation = message.navigation && message.navigation.length > 0 && (
+      <div className="wb-agent-message-links" aria-label="Message navigation links">
+        {denseReferences ? references?.slice(0, 2) : references}
+        {denseReferences && <details className="wb-agent-message-references">
+          <summary>{references!.length - 2} more references</summary>
+          <div className="wb-agent-message-links">{references?.slice(2)}</div>
+        </details>}
+      </div>
+    );
+    const messageActions = (sourceRef || (message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls")) && (
+      <MessageActions
+        message={message}
+        pinned={pinned.has(message.entry_id)}
+        busy={turnActive}
+        onRewind={agent.rewindTo}
+        onFork={agent.forkConversation}
+        onForkContext={sourceRef ? (entryId) => { void agent.forkFromMessage?.(entryId, sourceRef); } : undefined}
+        forkContextDisabledReason={sourceRef ? !sourceRef.available ? sourceRef.reason ?? "The source node is unavailable" : !agent.forkFromMessage ? "Forking is unavailable in this view" : !sourceRef.href.run_id || !sourceRef.href.node_ref ? "The source node reference is incomplete" : undefined : undefined}
+        onPin={agent.pinChapter}
+        onUnpin={agent.unpinChapter}
+      />
     );
     return (
       <div
@@ -319,17 +442,26 @@ export function AgentPanel({
         data-testid={`agent-message-${message.role}`}
         data-role={message.role}
         data-entry-id={message.entry_id}
-        className="wb-agent-terminal-line"
+        ref={inspectCurrentTurn && message.entry_id === stoppedReply?.entry_id ? stoppedReplyRef : undefined}
+        tabIndex={inspectCurrentTurn && message.entry_id === stoppedReply?.entry_id ? -1 : undefined}
+        className={`wb-agent-terminal-line${message.role === "tool" ? " wb-agent-tool-receipt" : ""}`}
       >
         <span className="wb-agent-terminal-marker" title={roleLabel(message.role)}>
           {roleMarker(message.role)}
         </span>
         {message.role === "tool" ? (
-          <span className="wb-agent-terminal-content">
-            {toolStatusLine(message.content, message.name)}
-          </span>
+          <ToolStepRow step={toolStep(toolStatusLine(message.content, message.name), message.activity)} content={message.content}>
+            {messageNavigation}
+            {messageActions}
+          </ToolStepRow>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
+            {message.reasoning?.trim() && (
+              <details className="wb-agent-thinking" data-testid="agent-thinking">
+                <summary>Thought</summary>
+                <div className="wb-agent-thinking__text">{message.reasoning}</div>
+              </details>
+            )}
             {message.stop_reason === "revised" && (
               <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
                 Earlier draft, withdrawn by the number check: {withdrawnNumbers(message)} matched no result, so the Agent rewrote the answer below.
@@ -339,50 +471,17 @@ export function AgentPanel({
           </div>
         ) : (
           <span className="wb-agent-terminal-content wb-agent-terminal-plain">
+            {message.attachments?.length ? (
+              <span className="wb-agent-attachments" data-testid="agent-message-attachments">
+                {message.attachments.map((item) => (
+                  <AgentAttachmentLink key={item.attachment_id} attachment={item} url={agent.attachmentUrl?.(item.attachment_id)} />
+                ))}
+              </span>
+            ) : null}
             {message.content}
           </span>
         )}
-        {message.navigation && message.navigation.length > 0 && (
-          <span className="wb-agent-message-links" aria-label="Message navigation links">
-            {message.navigation.map((link) => (
-              <button
-                key={`${link.kind}:${link.id}:${link.relation}`}
-                type="button"
-                className="wb-agent-message-link"
-                aria-label={navigationButtonLabel(link)}
-                disabled={!link.available || !agent.openNavigation}
-                title={link.available ? link.label : link.reason ?? "Unavailable"}
-                onClick={() => {
-                  if (link.available) agent.openNavigation?.(link);
-                }}
-              >
-                ↗ {link.label}
-              </button>
-            ))}
-          </span>
-        )}
-        {message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls" && (
-          <MessageActions
-            message={message}
-            pinned={pinned.has(message.entry_id)}
-            busy={turnActive}
-            onRewind={agent.rewindTo}
-            onFork={agent.forkConversation}
-            onPin={agent.pinChapter}
-            onUnpin={agent.unpinChapter}
-          />
-        )}
-        {sourceRef && (
-          <button
-            type="button"
-            className="wb-agent-message-link"
-            aria-label={`Fork from Agent message ${message.entry_id}`}
-            disabled={!agent.forkFromMessage}
-            onClick={() => void agent.forkFromMessage(message.entry_id, sourceRef)}
-          >
-            ↳ Fork Agent context
-          </button>
-        )}
+        {message.role !== "tool" && message.stop_reason !== "tool_calls" && <>{messageNavigation}{messageActions}</>}
       </div>
     );
   };
@@ -393,21 +492,20 @@ export function AgentPanel({
       aria-label="Agent panel"
       className="wb-agent-panel"
     >
-      {(!compactHeader || auditSessionId) && <header
-        className={compactHeader ? "wb-agent-panel__header wb-agent-panel__header--compact" : "wb-agent-panel__header"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 11,
-          fontFamily: "var(--font-mono, ui-monospace, monospace)",
-        }}
-      >
-        {!compactHeader && <strong style={{ color: "var(--label)" }}>agent</strong>}
+      {compactHeader && (agent.providerSteps?.length || auditSessionId) ? (
+        <div className="wb-agent-meta">
+          <AgentUsagePanel events={agent.providerSteps ?? []} compact />
+          {auditSessionId && (
+            <AgentAuditLink url={agentAuditExportUrl(projectRoot, auditSessionId)} title="Agent audit">Audit</AgentAuditLink>
+          )}
+        </div>
+      ) : null}
+      {!compactHeader && <header className="wb-agent-panel__header">
+        <strong>agent</strong>
         {!compactHeader && <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>}
         {!compactHeader && turnActive && (
           <span data-testid="agent-turn-progress" style={{ color: "var(--label-tertiary)" }} aria-live="polite">
-            {`Working · ${elapsedSeconds}s`}
+            {elapsedSeconds === null ? "Working · time unavailable" : `Working · ${elapsedSeconds}s`}
           </span>
         )}
         {!compactHeader && <span
@@ -418,25 +516,11 @@ export function AgentPanel({
           events #{agent.eventCursor}
         </span>}
         {auditSessionId && (
-          <a
-            href={agentAuditExportUrl(projectRoot, auditSessionId)}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "var(--label-secondary)" }}
-          >
-            Export Agent audit
-          </a>
+          <AgentAuditLink url={agentAuditExportUrl(projectRoot, auditSessionId)} title="Agent audit" className="wb-agent-audit-link">Agent audit</AgentAuditLink>
         )}
       </header>}
-      {terminalFailure && (
-        <p
-          data-testid="agent-turn-error"
-          role="status"
-          style={{ margin: "6px 0", color: "var(--status-fails-fg)", fontSize: 12 }}
-        >
-          {terminalFailure}
-        </p>
-      )}
+      {!compactHeader && <AgentUsagePanel events={agent.providerSteps ?? []} />}
+      <AgentPlanPanel key={agent.sessionId ?? "new"} />
       <div
         ref={transcriptRef}
         role="log"
@@ -464,24 +548,26 @@ export function AgentPanel({
           </nav>
         )}
         {agent.messages.length === 0 && !turnActive ? (
-          <div data-testid="agent-empty" className="wb-agent-terminal-empty">
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Start a task</div>
-            <div>Ask about the selected node, active head, or model output.</div>
-          </div>
+          <div data-testid="agent-empty" className="wb-agent-terminal-empty" />
         ) : turns.map((turn, index) => {
-          const live = turnActive && index === turns.length - 1;
+          const latest = index === turns.length - 1;
+          const live = turnActive && latest;
+          const lastReply = turn.responses[turn.responses.length - 1];
           if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;
           return (
             <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
-              {!live && (turn.steps.length > 0 || turn.drafts.length > 0) && (
-                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning">
+              {(turn.steps.length > 0 || turn.drafts.length > 0) && (
+                <details ref={latest && inspectCurrentTurn ? stoppedWorkRef : undefined} data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={turn === lastActivityTurn}>
                   <summary>
-                    <span>{workSummary(turn.steps.length, turn.drafts.length)}</span>
+                    <span>
+                      {live ? "Working" : lastReply?.stop_reason === "error" || lastReply?.stop_reason === "aborted" ? "Stopped" : "Worked"}
+                      <span className="wb-agent-work-count"> · {workSummary(turn.steps.length, turn.drafts.length)}</span>
+                    </span>
                     {turn.seconds !== null && <span>{duration(turn.seconds)}</span>}
                   </summary>
                   <div className="wb-agent-reasoning-content">
-                    {turn.steps.map(renderTranscriptMessage)}
+                    <ActivityLog steps={turn.steps} live={live} render={renderTranscriptMessage} />
                     {turn.drafts.map(renderTranscriptMessage)}
                   </div>
                 </details>
@@ -490,10 +576,40 @@ export function AgentPanel({
                 const shown = shownRows(message);
                 return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
               })}
+              {turn.steps.map((message) => {
+                const chart = shownChart(message);
+                return chart ? <AgentChart key={`chart-${message.entry_id}`} chart={chart} /> : null;
+              })}
+              {turn.steps.filter((message) => message.role === "tool").map((message) => (
+                <AgentTargetRecovery key={`target-recovery-${message.entry_id}`} content={message.content}
+                  disabled={turnActive || agent.confirmationBusyId !== null}
+                  onSelect={(prompt) => { void agent.sendPrompt(prompt); }} />
+              ))}
               {turn.responses.map(renderTranscriptMessage)}
+              {!live && lastReply?.stop_reason === "aborted" && <small data-testid="agent-turn-stopped" className="wb-agent-stop-note">Stopped</small>}
+              {receipts.get(turn.id)?.map((proposal) => <AgentProposalReceipt key={proposal.proposal_id} proposal={proposal} />)}
             </div>
           );
         })}
+        {receipts.get("")?.map((proposal) => <AgentProposalReceipt key={proposal.proposal_id} proposal={proposal} />)}
+        {terminalFailure && (
+          <div data-testid="agent-turn-error" role="status" className="wb-agent-callout">
+            <span>{terminalFailure}</span>
+            {inspectCurrentTurn && stoppedReceipts.length === 0 && <small className="wb-agent-stop-note">No tool receipts are recorded in this turn.</small>}
+            {stoppedResult.unreadable && <small className="wb-agent-stop-note">Some receipt details could not be read. Review the recorded text before continuing.</small>}
+            {(stoppedReceipts.length > 0 || (inspectCurrentTurn && stoppedReply?.content.trim())) && <div className="wb-agent-stop-actions">
+              {stoppedReceipts.length > 0
+                ? <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("steps")}>Review recorded steps</button>
+                : <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("reply")}>Review stopped reply</button>}
+              {stoppedResult.ref && <button type="button" className="wb-agent-message-link" disabled={!agent.openNavigation}
+                title={!agent.openNavigation ? "Navigation is unavailable in this view" : stoppedResult.ref.label}
+                onClick={() => {
+                  setReviewProblem(agent.openNavigation?.(stoppedResult.ref!) ? null : "The recorded operation could not be opened. Review its source link in the recorded steps.");
+                }}>Open recorded operation</button>}
+            </div>}
+            {reviewProblem && <small role="alert" className="wb-agent-stop-note">{reviewProblem}</small>}
+          </div>
+        )}
         {turnActive && (
           /* The turn in progress lives in the conversation, where its reply
            * will land, instead of in boxes above that push it away. */
@@ -505,14 +621,8 @@ export function AgentPanel({
               aria-live="polite"
             >
               <span className="agt-working__dot" aria-hidden="true" />
-              <span>{observableActivity(agent.lastEventType)}</span>
-              <span className="agt-working__time">{elapsedSeconds} s</span>
-              {recentToolSteps.length > 0 && (
-                <details className="agt-working__steps">
-                  <summary>{recentToolSteps.length} recent {recentToolSteps.length === 1 ? "step" : "steps"}</summary>
-                  <ul>{recentToolSteps.map((step, stepIndex) => <li key={`${stepIndex}:${step}`}>{step}</li>)}</ul>
-                </details>
-              )}
+              <span className="agt-working__label">{activeToolActivityLabel(agent.activeToolCalls) ?? observableActivity(agent.lastEventType)}</span>
+              <span className="agt-working__time">{elapsedSeconds === null ? "Elapsed time unavailable" : `${elapsedSeconds} s`}</span>
             </div>
             {agent.liveResponseText && (
               <div
@@ -543,7 +653,7 @@ export function AgentPanel({
         >
           <span className="wb-agent-terminal-marker" aria-hidden="true">⋮</span>
           <span>
-            {agent.activeOperation.operation_id} → {agent.activeOperation.status}
+            {agent.activeOperation.operation_id === "operation.multi_step" ? "Workflow" : agent.activeOperation.operation_id} → {agent.activeOperation.status}
             {agent.activeOperation.target_run_id
               ? ` · child run ${agent.activeOperation.target_run_id}`
               : ""}
@@ -554,14 +664,14 @@ export function AgentPanel({
         /* The answer to the question that prompted the workflow. Without it a
          * confirmed operation reports only that it finished, and the computed
          * result stays in an artifact the user never opens. */
-        <div
+        <details
           data-testid="agent-operation-post-estimation"
-          className="wb-agent-terminal-line"
+          className="wb-agent-terminal-line agt-op-results"
           data-role="tool"
-          style={{ flex: "0 0 auto", fontSize: 12, alignItems: "flex-start" }}
+          open={agent.activeOperation.postEstimationResults.length === 1}
         >
-          <span className="wb-agent-terminal-marker" aria-hidden="true">↳</span>
-          <div style={{ display: "grid", gap: 6 }}>
+          <summary>Results of {agent.activeOperation.postEstimationResults.length} {agent.activeOperation.postEstimationResults.length === 1 ? "step" : "steps"}</summary>
+          <div className="agt-op-results__list">
             {agent.activeOperation.postEstimationResults.map((entry) => (
               <div key={entry.artifact_id}>
                 <div style={{ fontWeight: 600 }}>
@@ -570,16 +680,13 @@ export function AgentPanel({
                     {" "}· step {entry.workflow_step_id}
                   </span>
                 </div>
-                <div style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {Object.entries(entry.result)
-                    .filter(([key]) => key !== "schema_version")
-                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${/p_value$/.test(key) && typeof value === "number" ? formatPValue(value) : formatAgentResultValue(value)}`)
-                    .join(" · ")}
-                </div>
+                {resultLines(entry.result).map((line, index) => (
+                  <div key={index} className="agt-op-results__line">{line}</div>
+                ))}
               </div>
             ))}
           </div>
-        </div>
+        </details>
       )}
       {agent.activeOperation?.stdout && (
         /* What the sandboxed program printed. This is the captured output of a
@@ -628,157 +735,9 @@ export function AgentPanel({
           </span>
         </div>
       )}
-      {agent.proposals.length > 0 && (
-        <aside
-          data-testid="agent-action-rail"
-          aria-label="Agent actions"
-          className="wb-agent-action-rail"
-        >
-          {/* Only what still waits for the person stays above the input;
-              confirmed or declined proposals fold into one line (review 6). */}
-          {settledProposals.length > 0 && (
-            <details className="wb-agent-settled" data-testid="agent-settled-proposals">
-              <summary>
-                {settledProposals.length === 1 ? "1 earlier proposal" : `${settledProposals.length} earlier proposals`}
-                {" · "}{settledProposals.map((proposal) => proposal.status).join(", ")}
-              </summary>
-              <ul>
-                {settledProposals.map((proposal) => (
-                  <li key={proposal.proposal_id} data-testid={`agent-proposal-${proposal.proposal_id}`}>
-                    <strong>{proposal.operation_id}</strong> · {proposal.status}
-                    {(proposal.readable ?? []).length > 0 && <span> · {(proposal.readable ?? []).join("; ")}</span>}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {pendingProposals.map((proposal) => {
-        const pending = proposal.status === "pending";
-        return (
-          <article
-            key={proposal.proposal_id}
-            data-testid={`agent-proposal-${proposal.proposal_id}`}
-            className="wb-agent-proposal"
-            aria-label={`Agent proposal ${proposal.proposal_id}`}
-          >
-            <div className="wb-agent-proposal-header">
-              <strong>{proposal.operation_id}</strong>
-              <span>revision {proposal.revision}</span>
-              <span className="wb-agent-proposal-status">{proposal.status}</span>
-            </div>
-            {proposal.readable && proposal.readable.length > 0 ? (
-              <>
-                <ol data-testid="agent-proposal-readable" className="wb-agent-proposal-change" style={{ margin: "4px 0", paddingLeft: 18 }}>
-                  {proposal.readable.map((line, index) => (
-                    <li key={index}>{line}</li>
-                  ))}
-                </ol>
-                <details className="wb-agent-proposal-detail">
-                  <summary>Technical parameters</summary>
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, margin: 0 }}>
-                    {JSON.stringify(proposal.changes, null, 2)}
-                  </pre>
-                </details>
-              </>
-            ) : (
-              <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
-            )}
-            {proposal.revision > 1 && <p role="note">Parameters were revised. The Agent rationale below describes the original proposal; review the current parameter summary before confirming.</p>}
-            {proposal.expected_effect.length > 0 && (
-              <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
-            )}
-            {proposal.risks.length > 0 && (
-              <div className="wb-agent-proposal-detail">Risk: {proposal.risks.join("; ")}</div>
-            )}
-            {pending && (
-              <>
-                <div className="wb-agent-proposal-actions">
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-confirm"
-                    aria-label={`Confirm proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null || editingProposalId === proposal.proposal_id}
-                    onClick={() => void agent.confirmProposal(proposal.proposal_id)}
-                  >
-                    {agent.confirmationBusyId === proposal.proposal_id
-                      ? "Confirming…"
-                      : "Confirm proposal"}
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-decline"
-                    aria-label={`Decline proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
-                    onClick={() => void agent.declineProposal(proposal.proposal_id)}
-                  >
-                    {agent.confirmationBusyId === proposal.proposal_id ? "Working…" : "Decline"}
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-revise"
-                    aria-label={`Revise proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
-                    onClick={() => {
-                      setEditingProposalId(proposal.proposal_id);
-                      setRevisionDraft(proposal.changes);
-                      setRevisionError(null);
-                    }}
-                  >
-                    Revise
-                  </button>
-                </div>
-                {editingProposalId === proposal.proposal_id && (
-                  <div className="wb-agent-proposal-editor">
-                    <ProposalFields projectRoot={projectRoot} label={`Proposal changes ${proposal.proposal_id}`} value={revisionDraft} onChange={setRevisionDraft} onIssues={setRevisionIssues} />
-                    {revisionIssues.length > 0 && <p role="status">{revisionIssues.join(" ")}</p>}
-                    {revisionError && <div role="alert">{revisionError}</div>}
-                    <div className="wb-agent-proposal-actions">
-                      <button
-                        type="button"
-                        className="wb-agent-proposal-confirm"
-                        aria-label={`Save revision ${proposal.proposal_id}`}
-                        disabled={agent.confirmationBusyId !== null || revisionIssues.length > 0}
-                        onClick={async () => {
-                          try {
-                            const parsed: unknown = revisionDraft;
-                            if (
-                              typeof parsed !== "object" ||
-                              parsed === null ||
-                              Array.isArray(parsed)
-                            ) {
-                              throw new Error("Changes must be a JSON object");
-                            }
-                            const saved = await agent.reviseProposal(
-                              proposal.proposal_id,
-                              proposal.revision,
-                              parsed as Record<string, unknown>,
-                            );
-                            if (saved) setEditingProposalId(null);
-                          } catch (error) {
-                            setRevisionError(
-                              error instanceof Error ? error.message : "Invalid proposal changes",
-                            );
-                          }
-                        }}
-                      >
-                        Save revision
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-agent-proposal-revise"
-                        aria-label={`Cancel revision ${proposal.proposal_id}`}
-                        onClick={() => setEditingProposalId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </article>
-        );
-          })}
+      {pendingProposals.length > 0 && (
+        <aside data-testid="agent-action-rail" aria-label="Agent actions" className="wb-agent-action-rail">
+          <AgentApprovalBar proposals={pendingProposals} projectRoot={projectRoot} />
         </aside>
       )}
       {composer ?? <AgentComposer showScope={false} variant="terminal" />}

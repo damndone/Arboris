@@ -11,6 +11,7 @@ Extracted from ``api.py`` in v1.6.10 (D1 decomposition, Phase 4).
 from __future__ import annotations
 
 from collections.abc import Callable
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -37,8 +38,10 @@ from .domain_memory.trace_contracts import (
 )
 from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EVENT_FIELDS
 from .services.execution_profile import current_execution_profile
+from .http.agent_extension_routes import router as agent_extension_router
 from .http.agent_routes import router as agent_router
 from .http.agent_instructions_routes import router as agent_instructions_router
+from .http.agent_permission_settings_routes import router as agent_permission_settings_router
 from .http.agent_conversation_routes import router as agent_conversation_router
 from .http.drafts_routes import router as drafts_router
 from .http.data_operation_routes import router as data_operation_router
@@ -63,6 +66,8 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _validate_supported_deployment()
+    from .agent.startup_recovery import RecoveryProjectCatalog
+    _app.state.agent_startup_recovery = await asyncio.to_thread(RecoveryProjectCatalog().reconcile)
     yield
 
 
@@ -358,7 +363,9 @@ app.include_router(egress_router)
 app.include_router(script_export_router)
 app.include_router(disclosure_router)
 app.include_router(agent_router)
+app.include_router(agent_extension_router)
 app.include_router(agent_instructions_router)
+app.include_router(agent_permission_settings_router)
 app.include_router(agent_conversation_router)
 app.include_router(notebook_router)
 app.include_router(rerun_router)

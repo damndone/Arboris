@@ -1,0 +1,26 @@
+{
+  "identification": "over",
+  "weak_instruments": {
+    "first_stage_f": 209.3440420161273,
+    "threshold": 10.0,
+    "caution_threshold": 104.7,
+    "verdict": "strong",
+    "message": "First-stage F = 209.3; the instruments are strong.",
+    "anderson_rubin_95": null
+  },
+  "endogeneity": {
+    "test": "wu_hausman",
+    "statistic": 43.35015635537833,
+    "pvalue": 6.31729113464985e-11,
+    "verdict": "rejects_exogeneity",
+    "message": "The Wu-Hausman test rejects exogeneity of the regressor (p < 0.05)."
+  },
+  "overidentification": {
+    "applicable": true,
+    "test": "sargan",
+    "statistic": 59.45345215840825,
+    "pvalue": 1.2545520178264269e-14,
+    "verdict": "suspect",
+    "message": "Instrument exogeneity rejected (p < 0.05); instruments suspect."
+  }
+}

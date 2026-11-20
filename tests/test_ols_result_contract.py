@@ -714,3 +714,106 @@ def test_direct_workflow_run_inputs_round_trip_preserves_did_cs_honest_wire_fiel
     for field, value in expected.items():
         assert run_inputs["form"][field] == value
         assert run_inputs["executable_payload"]["form"][field] == value
+
+
+
+def test_the_agent_reading_flags_a_coefficient_with_zero_standard_error():
+    """QRData 355 (6af0a0da round): a constant regressor was read as an effect of 0.00 with standard error 0.
+
+    A stored result with such a coefficient (written before OLS omitted the term, or by
+    another estimator) is read as not identified.
+    """
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    result, _ = run_ols(_frame(), "y", ["x"], True, "m")
+    result["coefficients"]["constant"] = {**result["coefficients"]["x"], "estimate": 0.0, "std_error": 0.0}
+    project = _public_requested_model_coefficients(run_id="r", result=result, requested_terms=("x", "constant"))
+    x, constant = project["coefficients"]
+    assert "identified" not in x
+    assert constant["identified"] is False and "not identified" in constant["note"]
+
+
+@pytest.mark.parametrize("covariance", ["unadjusted", "robust"])
+def test_a_term_the_rows_cannot_identify_is_omitted_like_stata(covariance):
+    """A constant column and a multiple of an earlier column are omitted, and the rest is
+    the fit without them on the same rows; statsmodels' pseudo-inverse used to print a
+    number for each (0.00 with standard error 0, and two shares of one effect)."""
+    frame = _frame().assign(constant=3.0)
+    frame["double_x"] = 2 * frame["x"]
+    frame.loc[frame.index[0], "double_x"] = np.nan
+    reference, _ = run_ols(frame.iloc[1:], "y", ["x"], covariance == "robust", "m", covariance=covariance)
+    result, fitted = run_ols(frame, "y", ["x", "constant", "double_x"], covariance == "robust", "m", covariance=covariance)
+
+    assert list(result["coefficients"]) == list(reference["coefficients"])
+    for term, coefficient in reference["coefficients"].items():
+        assert result["coefficients"][term]["estimate"] == coefficient["estimate"]
+        assert result["coefficients"][term]["std_error"] == coefficient["std_error"]
+    assert result["nobs"] == reference["nobs"] == len(frame) - 1
+    assert result["omitted_terms"] == [
+        {"variable": "constant", "term": "constant", "reason": "zero_variance"},
+        {"variable": "double_x", "term": "double_x", "reason": "perfect_collinearity"},
+    ]
+    assert result["x_columns"] == ["x", "constant", "double_x"]
+    assert result["formula"] == fitted.model.formula == reference["formula"]
+    assert "not_identified_terms" not in result
+
+
+def test_a_full_rank_design_is_fitted_exactly_as_before():
+    import statsmodels.formula.api as smf
+
+    frame = _frame()
+    result, fitted = run_ols(frame, "y", ["x"], False, "m", covariance="unadjusted")
+    direct = smf.ols("Q('y') ~ Q('x')", data=frame).fit()
+    assert fitted.params.tolist() == direct.params.tolist()
+    assert fitted.bse.tolist() == direct.bse.tolist()
+    assert "omitted_terms" not in result and "not_identified_terms" not in result
+
+
+def test_category_levels_other_terms_determine_are_named_not_identified():
+    """Stata omits one such level; a formula term cannot, so every level in the set is
+    flagged and the Agent's reading says so, while a term outside the set is not."""
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    rows = 60
+    frame = pd.DataFrame({
+        "y": [float((index * 7) % 11) + index / 10 for index in range(rows)],
+        "x": [float((index * 5) % 13) for index in range(rows)],
+        "coarse": [f"c{index % 3}" for index in range(rows)],
+        "fine": [f"f{index % 6}" for index in range(rows)],
+    })
+    result, _ = run_ols(frame, "y", ["x", "coarse", "fine"], False, "m", categorical_x={"coarse", "fine"})
+    assert "omitted_terms" not in result
+    flagged = set(result["not_identified_terms"])
+    assert "x" not in flagged and "Intercept" not in flagged
+    assert {"C(Q('coarse'))[T.c1]", "C(Q('fine'))[T.f4]"} <= flagged
+    project = _public_requested_model_coefficients(
+        run_id="r", result=result, requested_terms=("x", "C(Q('fine'))[T.f4]")
+    )
+    x, level = project["coefficients"]
+    assert "identified" not in x
+    assert level["identified"] is False and "not identified" in level["note"]
+
+
+def test_the_agent_reading_names_an_omitted_term():
+    from workbench.agent.context_tools import _public_requested_model_coefficients
+
+    result, _ = run_ols(_frame().assign(constant=1.0), "y", ["x", "constant"], False, "m")
+    project = _public_requested_model_coefficients(run_id="r", result=result, requested_terms=("x", "constant"))
+    assert project["missing_terms"] == ["constant"]
+    assert project["omitted_terms"] == [{
+        "variable": "constant", "term": "constant",
+        "reason": "omitted: constant on the analysis rows; it has no estimate",
+    }]
+
+
+def test_columns_the_fit_does_not_read_change_nothing_in_the_estimate():
+    """The fit copies only the columns it reads; an unused column, even one with missing values, is not part of it."""
+    frame = _frame()
+    wide = frame.assign(unused=[1.0, None, 3.0, None, 5.0, 6.0, 7.0, 8.0], label=list("abcdefgh"))
+    snapshot = {"upload_sha256": "fixture", "model_input_artifact": "fixture"}
+    narrow_result, narrow_fit = run_ols(frame, "y", ["x"], True, "m", dataset_snapshot=snapshot)
+    wide_result, wide_fit = run_ols(wide, "y", ["x"], True, "m", dataset_snapshot=snapshot)
+    assert wide_fit.params.tolist() == narrow_fit.params.tolist()
+    assert wide_fit.bse.tolist() == narrow_fit.bse.tolist()
+    assert wide_result["nobs"] == narrow_result["nobs"] == len(frame)
+    assert wide_result["analysis_sample"] == narrow_result["analysis_sample"]

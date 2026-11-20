@@ -123,6 +123,31 @@ def test_net_growth_over_budget_fails_and_lists_the_largest_additions(repo):
     assert growth and "docs/evidence/part_" in growth[0], violations
 
 
+def test_a_version_entry_raises_the_growth_limit_only_for_its_baseline(repo):
+    root, git = repo
+    for index in range(BUDGET["net_growth_bytes"] // (400 * KIB) + 1):
+        _write(root, f"docs/evidence/part_{index:02d}.bin", 400 * KIB)
+    git("add", "-A")
+    assert any(item.startswith("net growth") for item in check(root).violations)
+    entry = {"net_growth_bytes": BUDGET["net_growth_bytes"] + 512 * KIB, "reason": "approved"}
+    (root / "scripts").mkdir()
+    (root / "scripts" / "repo_evidence_allowlist.json").write_text(json.dumps({"versions": {"v0.1.0": entry}}))
+    git("add", "-A")
+    assert check(root).violations == []
+    (root / "scripts" / "repo_evidence_allowlist.json").write_text(json.dumps({"versions": {"v0.0.9": entry}}))
+    git("add", "-A")
+    assert any(item.startswith("net growth") for item in check(root).violations)
+
+
+def test_a_version_entry_without_a_reason_is_refused(repo):
+    root, git = repo
+    (root / "scripts").mkdir()
+    entry = {"net_growth_bytes": BUDGET["net_growth_bytes"] * 2, "reason": " "}
+    (root / "scripts" / "repo_evidence_allowlist.json").write_text(json.dumps({"versions": {"v0.1.0": entry}}))
+    git("add", "-A")
+    assert any("versions.v0.1.0 needs a reason" in item for item in check(root).violations)
+
+
 def test_too_many_added_files_fail(repo):
     root, git = repo
     for index in range(BUDGET["added_files"] + 1):

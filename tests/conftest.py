@@ -61,12 +61,18 @@ def _egress_audit_outside_the_home_directory(tmp_path_factory):
     must never write to the real one."""
 
     previous = os.environ.get("WORKBENCH_EGRESS_AUDIT_DIR")
+    previous_recovery = os.environ.get("WORKBENCH_AGENT_RECOVERY_DIR")
     os.environ["WORKBENCH_EGRESS_AUDIT_DIR"] = str(tmp_path_factory.mktemp("egress-audit"))
+    os.environ["WORKBENCH_AGENT_RECOVERY_DIR"] = str(tmp_path_factory.mktemp("agent-recovery"))
     yield
     if previous is None:
         os.environ.pop("WORKBENCH_EGRESS_AUDIT_DIR", None)
     else:
         os.environ["WORKBENCH_EGRESS_AUDIT_DIR"] = previous
+    if previous_recovery is None:
+        os.environ.pop("WORKBENCH_AGENT_RECOVERY_DIR", None)
+    else:
+        os.environ["WORKBENCH_AGENT_RECOVERY_DIR"] = previous_recovery
 
 
 @pytest.fixture(autouse=True, scope="session")

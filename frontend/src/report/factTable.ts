@@ -43,6 +43,7 @@ export interface FigureFactInput {
 }
 
 const MAX_FIGURE_FACTS = 80;
+const FIGURE_ROWS_PROTOCOL = "figure-rows/v1";
 const MAX_POST_ESTIMATION_FACTS = 80;
 
 /** Extract only bounded numeric leaves from the serve-time figure source. */
@@ -129,8 +130,9 @@ function artifactPayload(value: unknown): Record<string, unknown> {
 function valueAt(root: Record<string, unknown>, path: string[]): unknown {
   let value: unknown = root;
   for (const key of path) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    value = (value as Record<string, unknown>)[key];
+    if (!value || typeof value !== "object") return undefined;
+    value = Array.isArray(value) ? (/^(0|[1-9]\d*)$/.test(key) ? value[Number(key)] : undefined)
+      : (value as Record<string, unknown>)[key];
   }
   return value;
 }
@@ -149,6 +151,322 @@ const POST_ESTIMATION_FACT_LABELS: Record<string, string> = {
   "model.joint_f_test": "Joint F test",
   "model.white_test": "White test",
 };
+
+type NativeReportFields = readonly (readonly [path: string | string[], label: string])[];
+type NativeReportQualifiers = Readonly<Record<string, string | boolean>>;
+
+const PREDICTION_REPORT_FIELDS: NativeReportFields = [
+  ["metrics:rmse", "Holdout RMSE"],
+  ["mean_baseline:rmse", "Training-mean baseline RMSE"],
+  ["metrics:mae", "Holdout MAE"],
+  ["split:test_rows", "Holdout observations"],
+  ["metrics:r2", "Holdout R²"],
+];
+
+const LOCAL_LEVEL_REPORT_FIELDS: NativeReportFields = [
+  ["forecast:last:mean", "Forecast mean at horizon"],
+  ["forecast:last:lower", "Forecast interval lower bound at horizon"],
+  ["forecast:last:upper", "Forecast interval upper bound at horizon"],
+  ["forecast:steps", "Forecast horizon (periods)"],
+  ["policy:confidence_level", "Forecast interval confidence level"],
+  ["holdout:metrics:rmse", "Holdout RMSE"],
+];
+
+const HELD_OUT_QUALIFIERS = { evaluation: "held_out" };
+const CLASSIFICATION_REPORT_FIELDS: NativeReportFields = [
+  ["metrics:log_loss", "Holdout log loss"],
+  ["metrics:brier_score", "Holdout Brier score"],
+  ["metrics:roc_auc", "Holdout ROC AUC"],
+  ["metrics:accuracy", "Holdout accuracy at 0.5"],
+  ["prevalence_baseline:log_loss", "Training-prevalence baseline log loss"],
+  ["split:test_rows", "Holdout rows"],
+];
+
+const NATIVE_REPORT_FIELDS = new Map<string, {
+  label: string;
+  fields: NativeReportFields;
+  qualifiers?: NativeReportQualifiers;
+}>([
+  ["prediction.native_elastic_net", {
+    label: "Elastic net prediction", fields: PREDICTION_REPORT_FIELDS, qualifiers: HELD_OUT_QUALIFIERS,
+  }],
+  ["prediction.native_ridge", {
+    label: "Ridge prediction", fields: PREDICTION_REPORT_FIELDS, qualifiers: HELD_OUT_QUALIFIERS,
+  }],
+  ["prediction.native_ridge_selection", {
+    label: "Ridge with validation and holdout", qualifiers: HELD_OUT_QUALIFIERS,
+    fields: [...PREDICTION_REPORT_FIELDS, ["selection:selected_alpha", "Validation-selected ridge penalty"],
+      ["selection:selected_validation_rmse", "Validation RMSE"], ["selection:fit_rows", "Initial fit rows"],
+      ["selection:validation_rows", "Validation rows"], ["selection:refit_rows", "Refit rows"]],
+  }],
+  ["prediction.native_logistic", {
+    label: "Logistic classification", fields: CLASSIFICATION_REPORT_FIELDS, qualifiers: HELD_OUT_QUALIFIERS,
+  }],
+  ["prediction.native_cart", {
+    label: "Classification tree", qualifiers: HELD_OUT_QUALIFIERS,
+    fields: [...CLASSIFICATION_REPORT_FIELDS, ["model_structure:node_count", "Tree nodes"],
+      ["model_structure:root_predictor", "Root split predictor"]],
+  }],
+  ["prediction.native_cart_regression", {
+    label: "Regression tree", qualifiers: HELD_OUT_QUALIFIERS,
+    fields: [
+      ["metrics:mse", "Holdout MSE"],
+      ["mean_baseline:mse", "Training-mean baseline MSE"],
+      ["metrics:rmse", "Holdout RMSE"],
+      ["metrics:mae", "Holdout MAE"],
+      ["split:test_rows", "Holdout observations"],
+      ["model_structure:node_count", "Tree nodes"],
+      ["model_structure:root_predictor", "Root split predictor"],
+    ],
+  }],
+  ["prediction.native_random_forest_regression", {
+    label: "Random forest regression", qualifiers: HELD_OUT_QUALIFIERS,
+    fields: [["metrics:mse", "Holdout MSE"], ["metrics:rmse", "Holdout RMSE"], ["metrics:mae", "Holdout MAE"],
+      ["mean_baseline:rmse", "Training-mean baseline RMSE"], ["split:test_rows", "Holdout rows"],
+      ["model_structure:tree_count", "Trees"], ["options:max_features", "Predictors per split"], ["options:seed", "Seed"]],
+  }],
+  ["prediction.native_random_forest_classification", {
+    label: "Random forest classification", qualifiers: HELD_OUT_QUALIFIERS,
+    fields: [...CLASSIFICATION_REPORT_FIELDS, ["model_structure:tree_count", "Trees"],
+      ["options:max_features", "Predictors per split"], ["options:seed", "Seed"]],
+  }],
+  ["time_series.correlogram", {
+    label: "Correlogram", qualifiers: { scope: "descriptive" },
+    fields: [
+      ["metrics:lag_one_acf", "Lag-1 autocorrelation"],
+      ["metrics:lag_one_pacf", "Lag-1 partial autocorrelation"],
+      ["policy:max_lag", "Maximum lag"],
+      ["n_observations", "Observed periods"],
+    ],
+  }],
+  ["time_series.stationarity_statistic", {
+    label: "Fixed-lag stationarity statistic", qualifiers: { evidence_scope: "statistic_only" },
+    fields: [["statistic", "Diagnostic statistic"], ["null_hypothesis", "Null hypothesis"],
+      ["method", "Diagnostic method"], ["n_effective", "Effective observations"], ["policy:lag", "Fixed lag"]],
+  }],
+  ["time_series.johansen_rank", {
+    label: "Johansen rank diagnostics", qualifiers: { evidence_scope: "statistics_only", rank_criterion: "uncalibrated" },
+    fields: [["n_effective", "Fitted periods"], ["policy:difference_lags", "Lagged differences"],
+      ...[0, 1, 2, 3].flatMap(rank => [
+        [`trace_statistics:${rank}`, `Trace statistic for rank at most ${rank}`] as const,
+        [`max_eigenvalue_statistics:${rank}`, `Maximum-eigenvalue statistic for rank ${rank}`] as const,
+      ])],
+  }],
+  ["time_series.native_arima", {
+    label: "ARIMA forecast", fields: LOCAL_LEVEL_REPORT_FIELDS, qualifiers: { interval: "conditional_prediction" },
+  }],
+  ["time_series.arima_residual_check", {
+    label: "ARIMA with Ljung–Box", qualifiers: { interval: "conditional_prediction", residual_reference: "asymptotic_chi_square" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["fit:diagnostics:whiteness:status", "Residual check status"],
+      ["fit:diagnostics:whiteness:reason_code", "Residual check limitation"],
+      ["fit:diagnostics:whiteness:n_effective", "Effective innovations"],
+      ["fit:diagnostics:whiteness:fit_df", "Fitted AR and MA terms"],
+      ["fit:diagnostics:whiteness:lag", "Ljung–Box lag"], ["fit:diagnostics:whiteness:statistic", "Ljung–Box statistic"],
+      ["fit:diagnostics:whiteness:df", "Ljung–Box degrees of freedom"], ["fit:diagnostics:whiteness:p_value", "Ljung–Box p-value"]],
+  }],
+  ["time_series.native_sarima", {
+    label: "Seasonal ARIMA forecast", qualifiers: { interval: "conditional_prediction" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["policy:seasonal_order:3", "Season length (periods)"]],
+  }],
+  ["time_series.native_arimax", {
+    label: "ARIMAX scenario forecast", fields: LOCAL_LEVEL_REPORT_FIELDS, qualifiers: { interval: "given_supplied_predictors" },
+  }],
+  ["time_series.native_sarimax", {
+    label: "SARIMAX scenario forecast", qualifiers: { interval: "given_supplied_predictors" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["policy:seasonal_order:3", "Season length (periods)"]],
+  }],
+  ["time_series.native_var", {
+    label: "Vector autoregression", qualifiers: { interval: "conditional_marginal_prediction" },
+    fields: [
+      ["fit:n_effective", "Fitted periods"], ["policy:lag_order", "VAR lag order"],
+      ["forecast:steps", "Forecast periods"], ["fit:stability", "Stability assessment"],
+      ["diagnostics:granger:f_statistic", "Granger conditional F statistic"],
+      ["diagnostics:granger:p_value", "Granger conditional p-value"],
+    ],
+  }],
+  ["time_series.native_vecm", {
+    label: "Rank-one VECM", qualifiers: { interval: "conditional_marginal_prediction", rank: "fixed_one" },
+    fields: [
+      ["fit:n_effective", "Fitted periods"], ["fit:rank", "Declared rank"], ["policy:difference_lags", "Lagged differences"],
+      ["forecast:steps", "Forecast periods"], ["fit:normalized_series", "Normalized level series"],
+    ],
+  }],
+  ["time_series.varma11_fixed_ma", {
+    label: "VARMA with fixed diagonal MA", qualifiers: { interval: "conditional_marginal_prediction", ma: "fixed" },
+    fields: [["policy:ma_coefficient", "Fixed diagonal MA"], ["fit:conditional_log_likelihood", "Conditional log likelihood"],
+      ["fit:n_effective", "Fitted periods"], ["forecast:steps", "Forecast periods"]],
+  }],
+  ["time_series.native_arfima", {
+    label: "ARFIMA(0,d,0)", qualifiers: { interval: "conditional_prediction" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["policy:fractional_difference", "Fractional difference (d)"],
+      ["policy:difference_mode", "Fractional difference mode"], ["fit:marginal_variance", "Marginal variance"]],
+  }],
+  ["time_series.markov_switching", {
+    label: "Markov switching mean", qualifiers: { interval: "conditional_mixture_prediction" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS,
+      ["fit:mean_low", "Lower-regime mean"], ["fit:mean_high", "Higher-regime mean"],
+      ["forecast:last:probability_low", "Lower-regime probability at horizon"],
+      ["forecast:last:probability_high", "Higher-regime probability at horizon"],
+    ],
+  }],
+  ["time_series.holt_winters_additive", {
+    label: "Additive Holt-Winters forecast", qualifiers: { interval: "conditional_prediction" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["parameters:alpha", "Level smoothing (alpha)"], ["policy:season_period", "Season length"]],
+  }],
+  ["time_series.holt_winters_fit_alpha", {
+    label: "Holt-Winters with holdout", qualifiers: { interval: "conditional_prediction" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["parameters:alpha", "Training-selected alpha"], ["estimation:training_steps", "Training periods"]],
+  }],
+  ["time_series.holt_winters_fit_joint", {
+    label: "Joint additive Holt-Winters", qualifiers: { interval: "conditional_prediction", smoothing: "jointly_estimated" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["parameters:alpha", "Level smoothing (alpha)"],
+      ["parameters:beta", "Trend smoothing (beta)"], ["parameters:gamma", "Seasonal smoothing (gamma)"],
+      ["holdout:metrics:naive_rmse", "Seasonal naive holdout RMSE"], ["holdout:training_steps", "Holdout training periods"]],
+  }],
+  ["time_series.ets_trend", {
+    label: "Additive ETS trend", qualifiers: { interval: "conditional_prediction", smoothing: "fixed" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["model_name", "ETS specification"], ["parameters:alpha", "Level smoothing"],
+      ["parameters:beta", "Trend smoothing"], ["parameters:phi", "Damping"]],
+  }],
+  ["time_series.ets_trend_estimate", {
+    label: "Estimated ETS trend", qualifiers: { interval: "conditional_prediction", smoothing: "profiled" },
+    fields: [...LOCAL_LEVEL_REPORT_FIELDS, ["model_name", "ETS specification"], ["parameters:alpha", "Level smoothing"],
+      ["policy:smoothing_modes:alpha", "Level smoothing mode"], ["parameters:beta", "Trend smoothing"],
+      ["policy:smoothing_modes:beta", "Trend smoothing mode"], ["parameters:phi", "Damping"]],
+  }],
+  ["time_series.native_volatility", {
+    label: "Conditional variance forecast", qualifiers: { quantity: "conditional_variance", units: "squared_input" },
+    fields: [
+      ["policy:family", "Volatility model"],
+      ["forecast:last:variance", "Conditional variance at horizon"],
+      ["forecast:steps", "Forecast horizon (periods)"],
+      ["fit:persistence", "Estimated variance persistence"],
+      ["holdout:metrics:mean_gaussian_loss", "Holdout mean Gaussian loss"],
+      ["holdout:metrics:variance_mae", "Holdout variance MAE versus squared innovations"],
+    ],
+  }],
+  ["time_series.native_egarch", {
+    label: "EGARCH one-step variance", qualifiers: { quantity: "conditional_variance", units: "squared_input" },
+    fields: [
+      ["forecast:last:variance", "Next conditional variance"], ["forecast:last:log_variance", "Next log variance"],
+      ["parameters:gamma", "Signed innovation coefficient"], ["parameters:beta", "Log variance persistence"],
+      ["holdout:metrics:mean_gaussian_loss", "Holdout mean Gaussian loss"],
+    ],
+  }],
+  ["time_series.native_igarch", {
+    label: "IGARCH conditional variance", qualifiers: { quantity: "conditional_variance", units: "squared_input" },
+    fields: [
+      ["forecast:last:variance", "Conditional variance at horizon"], ["forecast:steps", "Forecast periods"],
+      ["policy:persistence", "Integrated persistence"], ["parameters:omega", "Per-period variance increment"],
+      ["fit:long_run_variance_reason", "Long-run variance status"],
+    ],
+  }],
+  ["time_series.figarch_fixed", {
+    label: "FIGARCH conditional variance", qualifiers: { quantity: "conditional_variance", units: "squared_input", coefficients: "fixed" },
+    fields: [
+      ["forecast:last:variance", "Conditional variance at horizon"], ["forecast:steps", "Forecast periods"],
+      ["policy:truncation", "Retained lags"], ["fit:retained_weight_mass", "Retained weight mass"],
+      ["fit:omitted_weight_mass", "Omitted weight mass"], ["fit:long_run_variance_status", "Long-run variance status"],
+    ],
+  }],
+  ["time_series.local_level", { label: "Local-level forecast", fields: LOCAL_LEVEL_REPORT_FIELDS }],
+  ["time_series.local_level_fit", { label: "Fitted local-level forecast", fields: LOCAL_LEVEL_REPORT_FIELDS }],
+  ["quant.replay", {
+    label: "Portfolio replay",
+    qualifiers: { scope: "offline_simulation" },
+    fields: [
+      ["metrics:cumulative_net_return", "Simulated cumulative net return"],
+      ["metrics:total_fees", "Simulated total fees"],
+      ["metrics:final_equity", "Simulated final equity"],
+      ["metrics:max_drawdown", "Maximum drawdown"],
+      ["inputs:transaction_cost_bps", "Transaction cost (bps)"],
+    ],
+  }],
+  ["quant.replay_fee_comparison", {
+    label: "Portfolio replay fee comparison", qualifiers: { scope: "offline_simulation", difference: "higher_minus_base" },
+    fields: [
+      ["inputs:base_transaction_cost_bps", "Base fee (bps)"],
+      ["inputs:higher_transaction_cost_bps", "Higher fee (bps)"],
+      ["metrics:base:cumulative_net_return", "Base-fee net return"],
+      ["metrics:higher:cumulative_net_return", "Higher-fee net return"],
+      ["metrics:higher_minus_base:cumulative_net_return", "Net return difference (fraction)"],
+      ["metrics:higher_minus_base:total_fees", "Additional simulated fees paid"],
+      ["metrics:higher_minus_base:final_equity", "Final equity difference"],
+    ],
+  }],
+  ["quant.replay_tail_risk", {
+    label: "Historical portfolio tail risk",
+    qualifiers: { scope: "offline_simulation", frequency: "per_observation", annualized: false, loss_sign: "positive_is_loss" },
+    fields: [
+      ["metrics:value_at_risk", "Historical value at risk"],
+      ["metrics:expected_shortfall", "Historical expected shortfall"],
+      ["metrics:confidence_bps", "Confidence level (basis points)"],
+      ["metrics:window", "Trailing window (periods)"],
+      ["inputs:end_period", "Last completed period"],
+    ],
+  }],
+  ["quant.min_variance_walk_forward", {
+    label: "Walk-forward portfolio", qualifiers: { scope: "offline_simulation", benchmark: "equal_weights" },
+    fields: [
+      ["metrics:strategy:cumulative_net_return", "Minimum-variance net return"],
+      ["metrics:benchmark:cumulative_net_return", "Equal-weight net return"],
+      ["metrics:cumulative_net_return_difference", "Net return difference (fraction)"],
+      ["metrics:strategy:max_drawdown", "Minimum-variance maximum drawdown"],
+      ["metrics:benchmark:max_drawdown", "Equal-weight maximum drawdown"],
+      ["metrics:strategy:total_fees", "Minimum-variance fees"],
+      ["metrics:benchmark:total_fees", "Equal-weight fees"],
+      ["inputs:transaction_cost_bps", "Trading fee (basis points)"],
+      ["inputs:window", "Training window periods"],
+    ],
+  }],
+  ["quant.rolling_risk", {
+    label: "Rolling asset risk",
+    qualifiers: { frequency: "per_observation", annualized: false },
+    fields: [
+      ["metrics:latest_max_volatility", "Latest maximum volatility (per observation)"],
+      ["metrics:maximum_volatility", "Maximum rolling volatility (per observation)"],
+      ["metrics:window", "Window (observations)"],
+      ["policy:annualized", "Annualized"],
+      ["policy:units:volatility", "Volatility units"],
+    ],
+  }],
+  ["quant.min_variance", {
+    label: "Historical minimum variance", qualifiers: { frequency: "per_observation", annualized: false },
+    fields: [
+      ["metrics:sample_variance", "Portfolio sample variance"],
+      ["metrics:objective_variance", "Regularized objective variance"],
+      ["metrics:sample_rank", "Sample covariance rank"],
+      ["inputs:shrinkage_bps", "Shrinkage (basis points)"], ["inputs:end_period", "Last completed period"],
+    ],
+  }],
+]);
+
+function nativeReportDefinition(entry: PostEstimationResult) {
+  if (entry.artifact_type !== "workflow_capability_result") return undefined;
+  const definition = NATIVE_REPORT_FIELDS.get(entry.operation_id);
+  if (!definition) return undefined;
+  const extra: Array<NativeReportFields[number]> = [];
+  if (["time_series.native_var", "time_series.native_vecm", "time_series.varma11_fixed_ma"].includes(entry.operation_id)) {
+    for (let i = 0; i < 8; i += 1) {
+      const base = ["forecast", "last_by_series", String(i)];
+      const name = valueAt(entry.result, [...base, "series"]);
+      if (typeof name === "string") {
+        extra.push([[...base, "mean"], `${name} forecast mean at horizon`],
+          [[...base, "lower"], `${name} marginal interval lower bound`],
+          [[...base, "upper"], `${name} marginal interval upper bound`]);
+      }
+    }
+  }
+  if (entry.operation_id === "quant.min_variance") {
+    const allocation = valueAt(entry.result, ["allocation"]);
+    if (allocation && typeof allocation === "object" && !Array.isArray(allocation)) {
+      for (const asset of Object.keys(allocation).slice(0, 32)) {
+        extra.push([["allocation", asset], `${asset} portfolio weight`]);
+      }
+    }
+  }
+  return extra.length ? { ...definition, fields: [...definition.fields, ...extra] } : definition;
+}
 
 function workflowProviderId(entry: PostEstimationResult): string | undefined {
   if (entry.artifact_type === "p7_analysis") return "evidence.workflow.p7.v1";
@@ -216,58 +534,81 @@ function collectPostEstimationAtomicValues(
 /** Make declared post-estimation results citable in a generated report.
  *
  * These are server-computed scalars with artifact provenance, so they belong
- * in the deterministic fact table rather than in prose. Every atomic field of
- * the result is emitted, including qualifiers such as
- * `stationary_point_within_observed_range`: citing a turning point without the
- * flag saying it sits outside the observed data is how an extrapolation gets
- * reported as a finding. Schema tags are dropped -- they identify the payload
- * format, not the result. */
+ * in the deterministic fact table. Legacy operations keep their atomic
+ * fields and qualifiers. Native research contributes selected aggregate
+ * findings, with one finding from each result before secondary findings. */
 export function buildPostEstimationFacts(
   results: PostEstimationResult[],
   startAt = 0,
 ): CitableFact[] {
+  const definitions = results.map(entry => ({ entry, definition: nativeReportDefinition(entry) }));
+  const legacy = definitions.filter(({ definition }) => !definition).map(({ entry }) => entry);
+  const native = definitions.flatMap(({ entry, definition }) => {
+    if (!definition) return [];
+    const findings = definition.fields.flatMap(([path, label]) => {
+      const parts = typeof path === "string" ? path.split(":") : path;
+      const value = valueAt(entry.result, parts);
+      return isAtomicFact(value) ? [{ entry, definition, path: parts.join(":"), label, value }] : [];
+    });
+    return [findings];
+  });
+  const rounds = Math.max(0, ...native.map((findings) => findings.length));
+  const nativeFindings = Array.from({ length: rounds }, (_, round) =>
+    native.flatMap((findings) => findings.slice(round, round + 1)),
+  ).flat();
+  const nativeLimit = legacy.length > 0 ? MAX_POST_ESTIMATION_FACTS / 2 : MAX_POST_ESTIMATION_FACTS;
+  const nativeTruncated = nativeFindings.length > nativeLimit;
+  const selectedNative = nativeFindings.slice(0, nativeLimit - Number(nativeTruncated));
+  const legacyLimit = MAX_POST_ESTIMATION_FACTS - selectedNative.length - Number(nativeTruncated);
   const facts: CitableFact[] = [];
   let counter = startAt;
-  for (const entry of results) {
-    const label =
-      POST_ESTIMATION_FACT_LABELS[entry.operation_id] ?? entry.operation_id;
+
+  function appendFact(
+    entry: PostEstimationResult,
+    nodeLabel: string,
+    path: string,
+    label: string,
+    value: string | number | boolean,
+    extraQualifiers?: NativeReportQualifiers,
+  ) {
     const providerId = workflowProviderId(entry);
+    facts.push({
+      id: `c${++counter}`,
+      node_key: `post_estimation:${entry.workflow_step_id}`,
+      node_label: nodeLabel,
+      field: `post_estimation:${entry.workflow_step_id}:${path}`,
+      label,
+      value,
+      ...(providerId ? { provider_id: providerId } : {}),
+      artifact_ids: [entry.artifact_id],
+      qualifiers: { ...workflowProvenance(entry), ...extraQualifiers },
+    });
+  }
+
+  for (const entry of legacy) {
+    const label = POST_ESTIMATION_FACT_LABELS[entry.operation_id] ?? entry.operation_id;
     let truncated = false;
     collectPostEstimationAtomicValues(entry.result, [], (path, value) => {
-      // Reserve one slot for a visible truncation marker. Without it, a large
-      // result could look complete while later atomic evidence was discarded.
-      if (facts.length >= MAX_POST_ESTIMATION_FACTS - 1) {
+      // Reserve one slot for a visible truncation marker.
+      if (facts.length >= legacyLimit - 1) {
         truncated = true;
         return false;
       }
       const key = path.join(":");
-      facts.push({
-        id: `c${++counter}`,
-        node_key: `post_estimation:${entry.workflow_step_id}`,
-        node_label: label,
-        field: `post_estimation:${entry.workflow_step_id}:${key}`,
-        label: `${label} — ${key.replace(/_/g, " ")}`,
-        value,
-        ...(providerId ? { provider_id: providerId } : {}),
-        artifact_ids: [entry.artifact_id],
-        qualifiers: workflowProvenance(entry),
-      });
+      appendFact(entry, label, key, `${label} — ${key.replace(/_/g, " ")}`, value);
       return true;
     });
     if (truncated) {
-      facts.push({
-        id: `c${++counter}`,
-        node_key: `post_estimation:${entry.workflow_step_id}`,
-        node_label: label,
-        field: `post_estimation:${entry.workflow_step_id}:facts_truncated`,
-        label: `${label} — evidence truncated at ${MAX_POST_ESTIMATION_FACTS - 1} facts`,
-        value: true,
-        ...(providerId ? { provider_id: providerId } : {}),
-        artifact_ids: [entry.artifact_id],
-        qualifiers: workflowProvenance(entry),
-      });
-      return facts;
+      appendFact(entry, label, "facts_truncated", `${label} — evidence truncated at ${legacyLimit - 1} facts`, true);
+      break;
     }
+  }
+  for (const { entry, definition, path, label, value } of selectedNative) {
+    appendFact(entry, definition.label, path, `${definition.label} — ${label}`, value, definition.qualifiers);
+  }
+  if (nativeTruncated) {
+    const { entry, definition } = nativeFindings[selectedNative.length];
+    appendFact(entry, definition.label, "facts_truncated", `Native research evidence truncated at ${selectedNative.length} facts`, true);
   }
   return facts;
 }
@@ -526,6 +867,9 @@ function collectNumericLeaves(
     return false;
   }
   if (value && typeof value === "object") {
+    // A chart's row sample is not a citable report fact: a report cites the summary
+    // of every row, and the sample reaches a provider only where rows may.
+    if ((value as { protocol_version?: unknown }).protocol_version === FIGURE_ROWS_PROTOCOL) return false;
     for (const [key, item] of Object.entries(value)) {
       if (collectNumericLeaves(item, `${path}.${key}`, leaves, limit)) {
         return true;

@@ -10,9 +10,9 @@ Decorate-only (v1.6.0 discipline): this is computed at response time from graph.
 node_index.json and is NEVER written back. graph.json stays byte-identical, so golden holds.
 
 Dedup key per node:
-- node_hash when the node is in node_index.json (cacheable stage-output);
-- else the bare node_id (deterministic across the family — e.g. the raw upload node),
-  so genuinely-shared non-cacheable prefix nodes still collapse to one.
+- node_hash::node_id when the node is in node_index.json (cacheable stage-output);
+- for unindexed variables, the parent dataset's hash or the owning run scopes the key;
+- other unindexed nodes keep their bare node_id, except dataset parents that need a run key.
 
 Legacy degrade (R5): a run with no node_index.json (flag-off / pre-v1.6.1) has no node
 identity. If the *target* run is legacy the caller returns the old per-run graph shape
@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 
 from ..artifacts import read_json
 from ..graph_store import GraphStore, graph_to_json
+from .card_preview import build_card_previews
 from .family import Family
 from .node_index import NODE_INDEX_FILENAME
 from .rerun_provenance import run_rerun_from, settle_node_rerun_from
@@ -191,11 +192,34 @@ def forest_node_key(node_id: str, node_index: dict[str, dict]) -> str:
     return node_id
 
 
+def _run_node_keys(
+    run_id: str, graph_nodes: dict[str, dict], node_index: dict[str, dict],
+) -> dict[str, str]:
+    keys = {node_id: forest_node_key(node_id, node_index) for node_id in graph_nodes}
+    for node_id, node in graph_nodes.items():
+        if node["kind"] != "variable":
+            continue
+        parent = node.get("parent_stage_id")
+        dataset_hash = None
+        if graph_nodes.get(parent, {}).get("kind") == "dataset_stage":
+            dataset_hash = (node_index.get(parent) or {}).get("node_hash")
+            if not dataset_hash:
+                keys[parent] = f"run:{run_id}::{parent}"
+        if keys[node_id] == node_id:
+            # Role-only and dropped columns may be missing from the index.
+            # An indexed dataset proves the same identity as an indexed column
+            # from that dataset. A column name alone does not.
+            scope = dataset_hash or f"run:{run_id}"
+            keys[node_id] = f"{scope}::{node_id}"
+    return keys
+
+
 def build_headset(
     runs_dir: Path,
     family: Family,
     *,
     annotate: Optional[Callable[..., None]] = None,
+    include_card_previews: bool = True,
 ) -> dict[str, Any]:
     """Build the head-set union DAG for `family`. `annotate` (optional) is applied to
     each NodeView as `annotate(view, manifest, form)` with the manifest + run_inputs.form
@@ -237,7 +261,11 @@ def build_headset(
         form = inputs.get("form") or {}
 
         # id -> dedup key for this run's nodes
-        keymap = {nid: forest_node_key(nid, node_index) for nid in graph.get("nodes", {})}
+        keymap = _run_node_keys(run_id, graph["nodes"], node_index)
+        card_previews = build_card_previews(
+            runs_dir / run_id, graph, manifest, inputs,
+            [nid for nid, key in keymap.items() if key not in nodes],
+        ) if include_card_previews else {}
         # Only well-formed provenance is served (older runs also used the key
         # for dataset bridges and context-less Agent reruns).
         rerun_from = run_rerun_from(inputs)
@@ -270,6 +298,8 @@ def build_headset(
                 view["producing_stage"] = entry.get("producing_stage")
                 view["cas_ref"] = entry.get("cas_ref")
                 view["runs"] = [run_id]
+                if nid in card_previews:
+                    view["card_preview"] = card_previews[nid]
                 dataset_artifacts = _dataset_artifacts(runs_dir, run_id, nid)
                 if dataset_artifacts:
                     view["artifacts"] = dataset_artifacts

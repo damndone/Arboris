@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Iterable
 from uuid import uuid4
 
-from ..jsonl_store import append_jsonl_atomic, read_jsonl
+from ..jsonl_store import _exclusive_jsonl_lock, append_jsonl_atomic, jsonl_lines, read_jsonl
+from .business_identity import identity_value
 
 
 def _now() -> str:
@@ -28,6 +30,79 @@ class ProposalConfirmationError(ProposalError):
 
 class ProposalStaleError(ProposalError):
     """The proposal preconditions changed before confirmation."""
+
+
+class ProposalAdmissionConflict(ProposalError):
+    """A prepared invocation conflicts with its request or durable records."""
+
+
+class ProposalAdmissionNeedsReconciliation(ProposalError):
+    """Admission cannot replay a proposal whose lifecycle has progressed."""
+
+
+@dataclass(frozen=True)
+class ProposalInvocation:
+    """Server-owned tool identity, separate from operation preconditions."""
+
+    invocation_id: str
+    provider_step: int
+    tool_call_id: str
+
+    def __post_init__(self) -> None:
+        if (type(self.invocation_id) is not str or not self.invocation_id.strip()
+                or len(self.invocation_id) > 512 or type(self.provider_step) is not int
+                or self.provider_step < 1 or type(self.tool_call_id) is not str):
+            raise ProposalAdmissionConflict("invalid proposal invocation identity")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"invocation_id": self.invocation_id, "provider_step": self.provider_step,
+                "tool_call_id": self.tool_call_id}
+
+
+def _canonical_prepared(value: Any) -> str:
+    """Keep JSON types exact; never coerce scope or request fields for replay."""
+    if type(value) is dict:
+        if any(type(key) is not str for key in value):
+            raise ProposalAdmissionConflict("prepared proposal requires string JSON keys")
+        for item in value.values():
+            _canonical_prepared(item)
+    elif type(value) is list:
+        for item in value:
+            _canonical_prepared(item)
+    elif value is not None and type(value) not in {str, int, float, bool}:
+        raise ProposalAdmissionConflict("prepared proposal requires JSON values")
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    except (ValueError, TypeError) as exc:
+        raise ProposalAdmissionConflict("invalid prepared proposal JSON") from exc
+
+
+def _prepared_digest(value: Any) -> str:
+    return hashlib.sha256(_canonical_prepared(value).encode("utf-8")).hexdigest()
+
+
+def _unique_prepared_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ProposalAdmissionConflict("duplicate prepared proposal field")
+        value[key] = item
+    return value
+
+
+def _read_complete_records(path: Path) -> list[dict[str, Any]]:
+    """Prepared admission must not discard a torn final record as absent."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+        if not raw or not raw.endswith("\n"):
+            raise ProposalAdmissionConflict("incomplete prepared proposal record")
+        records = [json.loads(line, object_pairs_hook=_unique_prepared_object)
+                   for line in jsonl_lines(raw)]
+        if any(type(row) is not dict for row in records):
+            raise ProposalAdmissionConflict("invalid prepared proposal record")
+        return records
+    except (ValueError, UnicodeError) as exc:
+        raise ProposalAdmissionConflict("corrupt prepared proposal record") from exc
 
 
 @dataclass(frozen=True)
@@ -48,6 +123,13 @@ class ProposalRevision:
     created_at: str
     fingerprint: str
     status: str = "pending"
+
+    def has_valid_fingerprint(self) -> bool:
+        row = self.to_dict()
+        identity = {key: row[key] for key in ("proposal_id", "operation_id", "operation_version", "revision",
+                    "target", "preconditions", "changes", "evidence_refs", "expected_effect", "risks")}
+        canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True)
+        return self.fingerprint == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -216,6 +298,13 @@ class ProposalStore:
             self.proposals_dir.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
 
+    @contextmanager
+    def _creation_lock(self):
+        # All proposal lifecycle writers share this lock. The append primitive
+        # takes a different, per-JSONL lock; never re-enter this flock.
+        with self._lock, _exclusive_jsonl_lock(self.proposals_dir / "creation"):
+            yield
+
     def create(
         self,
         *,
@@ -231,9 +320,17 @@ class ProposalStore:
         operation_version: str = "v1",
         command_id: str | None = None,
         proposal_id: str | None = None,
+        plan_only: bool = False,
     ) -> ProposalRevision:
-        proposal_id = proposal_id or f"proposal_{uuid4().hex}"
-        with self._lock:
+        evidence_refs, expected_effect, risks = tuple(evidence_refs), tuple(expected_effect), tuple(risks)
+        proposal_id = proposal_id or identity_value(
+            owner="agent.proposal.create", slot="proposal_id",
+            inputs={"session_id": session_id, "chain_id": chain_id, "operation_id": operation_id,
+                    "operation_version": operation_version, "command_id": command_id, "target": target,
+                    "preconditions": preconditions, "changes": changes, "evidence_refs": list(evidence_refs),
+                    "expected_effect": list(expected_effect), "risks": list(risks)},
+            create=lambda: f"proposal_{uuid4().hex}")
+        with self._creation_lock():
             path = self._path(proposal_id)
             if path.exists():
                 raise ProposalConfirmationError(f"proposal already exists: {proposal_id}")
@@ -251,9 +348,122 @@ class ProposalStore:
                 evidence_refs=evidence_refs,
                 expected_effect=expected_effect,
                 risks=risks,
+                plan_only=plan_only,
             )
             append_jsonl_atomic(path, proposal.to_dict())
             return proposal
+
+    def create_prepared(
+        self,
+        *,
+        invocation: ProposalInvocation,
+        session_id: str,
+        chain_id: str,
+        operation_id: str,
+        target: dict[str, Any],
+        preconditions: dict[str, Any],
+        changes: dict[str, Any],
+        evidence_refs: Iterable[str],
+        expected_effect: Iterable[str],
+        risks: Iterable[str],
+        operation_version: str = "v1",
+        command_id: str | None = None,
+        proposal_id: str | None = None,
+        plan_only: bool = False,
+    ) -> ProposalRevision:
+        """Commit one prepared first revision, or verify its pending replay.
+
+        This lock serializes proposal records only. It is not a fencing token
+        for the session, turn store, notifications or concurrent approval.
+        """
+        request = {
+            "session_id": session_id, "chain_id": chain_id, "command_id": command_id,
+            "proposal_id": proposal_id, "operation_id": operation_id,
+            "operation_version": operation_version, "target": target,
+            "preconditions": preconditions, "changes": changes,
+            "evidence_refs": list(evidence_refs), "expected_effect": list(expected_effect),
+            "risks": list(risks),
+            **({"plan_only": True} if plan_only else {}),
+        }
+        request = json.loads(_canonical_prepared(request))
+        key = hashlib.sha256(invocation.invocation_id.encode("utf-8")).hexdigest()
+        prepared_path = self.proposals_dir / "prepared" / f"{key}.jsonl"
+        with self._creation_lock():
+            if prepared_path.exists():
+                records = _read_complete_records(prepared_path)
+                if len(records) != 1:
+                    raise ProposalAdmissionConflict("prepared proposal must contain one record")
+                row = records[0]
+                if (set(row) != {"schema_version", "invocation", "request", "request_sha256",
+                                 "revision", "revision_sha256"}
+                        or row["schema_version"] != "agent.prepared_proposal.v1"
+                        or _canonical_prepared(row["invocation"]) != _canonical_prepared(invocation.to_dict())
+                        or type(row["request"]) is not dict
+                        or row["request_sha256"] != _prepared_digest(
+                            {"invocation": row["invocation"], "request": row["request"]})
+                        or _canonical_prepared(row["request"]) != _canonical_prepared(request)
+                        or row["revision_sha256"] != _prepared_digest(row["revision"])):
+                    raise ProposalAdmissionConflict("prepared proposal request or scope conflict")
+                proposal = self._verified_prepared_revision(row["revision"], request)
+            else:
+                revision_request = {**request, "proposal_id": proposal_id or identity_value(
+                    owner="agent.proposal.prepare", slot="proposal_id",
+                    inputs={"invocation": invocation.to_dict(), "request": request},
+                    create=lambda: f"proposal_{uuid4().hex}")}
+                self._path(revision_request["proposal_id"])
+                proposal = self._build_revision(**revision_request, revision=1)
+                row = {"schema_version": "agent.prepared_proposal.v1", "invocation": invocation.to_dict(),
+                       "request": request, "request_sha256": _prepared_digest(
+                           {"invocation": invocation.to_dict(), "request": request}),
+                       "revision": proposal.to_dict(), "revision_sha256": _prepared_digest(proposal.to_dict())}
+                append_jsonl_atomic(prepared_path, row)
+            path = self._path(proposal.proposal_id)
+            if path.exists():
+                records = _read_complete_records(path)
+                if _canonical_prepared(records[0]) != _canonical_prepared(proposal.to_dict()):
+                    raise ProposalAdmissionConflict("prepared proposal first revision conflict")
+                if len(records) != 1:
+                    raise ProposalAdmissionNeedsReconciliation("proposal admission needs_reconciliation")
+            else:
+                append_jsonl_atomic(path, proposal.to_dict())
+            return proposal
+
+    @staticmethod
+    def _verified_prepared_revision(value: Any, request: dict[str, Any]) -> ProposalRevision:
+        try:
+            proposal = ProposalRevision.from_dict(value)
+            status = "plan_prepared" if request.get("plan_only") else "pending"
+            if (_canonical_prepared(proposal.to_dict()) != _canonical_prepared(value)
+                    or proposal.revision != 1 or proposal.status != status
+                    or (request["proposal_id"] is not None and proposal.proposal_id != request["proposal_id"])):
+                raise ValueError("invalid prepared revision shape")
+            datetime.fromisoformat(proposal.created_at)
+            for name in ("session_id", "chain_id", "command_id", "operation_id", "operation_version",
+                         "target", "preconditions", "changes"):
+                if _canonical_prepared(value[name]) != _canonical_prepared(request[name]):
+                    raise ValueError("invalid prepared revision scope")
+            for name in ("evidence_refs", "expected_effect", "risks"):
+                if value[name] != [str(item) for item in request[name]]:
+                    raise ValueError("invalid prepared revision sequence")
+            if not proposal.has_valid_fingerprint():
+                raise ValueError("invalid prepared revision fingerprint")
+            return proposal
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ProposalAdmissionConflict("corrupt prepared proposal revision") from exc
+
+    def activate_plan_proposal(self, proposal: ProposalRevision) -> ProposalRevision:
+        """Publish a previously prepared proposal without changing its confirmation identity."""
+        with self._creation_lock():
+            latest = self.latest_revision(proposal.proposal_id)
+            if latest != proposal:
+                raise ProposalConfirmationError("the plan proposal revision changed")
+            status = self.latest_status(proposal.proposal_id)
+            if status == "plan_prepared":
+                append_jsonl_atomic(self._path(proposal.proposal_id), {"record_type": "plan_activation",
+                    "revision": proposal.revision, "fingerprint": proposal.fingerprint, "status": "pending"})
+            elif status != "pending":
+                raise ProposalConfirmationError(f"proposal is {status}")
+            return replace(latest, status="pending")
 
     def revise(
         self,
@@ -264,7 +474,7 @@ class ProposalStore:
         expected_effect: Iterable[str] | None = None,
         risks: Iterable[str] | None = None,
     ) -> ProposalRevision:
-        with self._lock:
+        with self._creation_lock():
             latest = self.latest_revision(proposal_id)
             if latest.revision != base_revision:
                 raise ProposalConfirmationError("proposal revision is not current")
@@ -284,6 +494,7 @@ class ProposalStore:
                 evidence_refs=latest.evidence_refs,
                 expected_effect=expected_effect or latest.expected_effect,
                 risks=risks or latest.risks,
+                _identity_previous=latest.to_dict(),
             )
             append_jsonl_atomic(self._path(proposal_id), revised.to_dict())
             return revised
@@ -298,7 +509,7 @@ class ProposalStore:
         current_context_fingerprint: str | None,
         current_active_head_run_id: str | None,
     ) -> ProposalConfirmation:
-        with self._lock:
+        with self._creation_lock():
             latest = self.latest_revision(proposal_id)
             status = self.latest_status(proposal_id)
             if revision != latest.revision:
@@ -314,6 +525,9 @@ class ProposalStore:
 
             expected_context = latest.preconditions.get("context_fingerprint")
             expected_head = latest.preconditions.get("active_head_run_id")
+            identity_inputs = {"previous": latest.to_dict(), "revision": revision, "fingerprint": fingerprint,
+                               "actor_type": actor_type, "current_context_fingerprint": current_context_fingerprint,
+                               "current_active_head_run_id": current_active_head_run_id}
             if (
                 expected_context is not None
                 and current_context_fingerprint != expected_context
@@ -333,7 +547,8 @@ class ProposalStore:
                     target=latest.target,
                     preconditions=latest.preconditions,
                     actor_type=actor_type,
-                    confirmed_at=_now(),
+                    confirmed_at=identity_value(owner="agent.proposal.confirm_stale", slot="confirmed_at",
+                                                inputs=identity_inputs, create=_now),
                     status="stale",
                     changes=latest.changes,
                 )
@@ -352,7 +567,8 @@ class ProposalStore:
                 target=latest.target,
                 preconditions=latest.preconditions,
                 actor_type=actor_type,
-                confirmed_at=_now(),
+                confirmed_at=identity_value(owner="agent.proposal.confirm", slot="confirmed_at",
+                                            inputs=identity_inputs, create=_now),
                 status="confirmed",
                 changes=latest.changes,
             )
@@ -366,13 +582,21 @@ class ProposalStore:
         actor_type: str,
         reason: str | None = None,
     ) -> ProposalDecision:
-        with self._lock:
+        return self.decline_with_status(proposal_id, actor_type=actor_type, reason=reason)[0]
+
+    def decline_with_status(
+        self, proposal_id: str, *, actor_type: str, reason: str | None = None,
+        expected: tuple[int, str] | None = None,
+    ) -> tuple[ProposalDecision, bool, bool]:
+        with self._creation_lock():
             latest = self.latest_revision(proposal_id)
+            if expected is not None and expected != (latest.revision, latest.fingerprint):
+                raise ProposalConfirmationError("proposal revision or fingerprint changed")
             status = self.latest_status(proposal_id)
             if status == "declined":
                 existing = self.latest_decision(proposal_id)
                 if existing is not None:
-                    return existing
+                    return existing, False, False
             if status != "pending":
                 raise ProposalConfirmationError(f"proposal is {status}")
             decision = ProposalDecision(
@@ -387,12 +611,18 @@ class ProposalStore:
                 target=latest.target,
                 preconditions=latest.preconditions,
                 actor_type=actor_type,
-                decided_at=_now(),
+                decided_at=identity_value(owner="agent.proposal.decline", slot="decided_at",
+                                          inputs={"previous": latest.to_dict(), "actor_type": actor_type,
+                                                  "reason": reason}, create=_now),
                 status="declined",
                 reason=reason,
             )
             append_jsonl_atomic(self._path(proposal_id), decision.to_dict())
-            return decision
+            last_pending = expected is not None and not any(
+                self.latest_status(item.proposal_id) == "pending"
+                for item in self.latest_revisions_for_session(decision.session_id)
+            )
+            return decision, True, last_pending
 
     def latest_revision(self, proposal_id: str) -> ProposalRevision:
         revisions = self.revisions(proposal_id)
@@ -469,6 +699,9 @@ class ProposalStore:
         for item in reversed(records):
             if item.get("record_type") in {"confirmation", "decision"}:
                 return str(item.get("status", "pending"))
+            if (item.get("record_type") == "plan_activation" and item.get("revision") == latest.revision
+                    and item.get("fingerprint") == latest.fingerprint):
+                return "pending"
         return latest.status
 
     def _path(self, proposal_id: str) -> Path:
@@ -492,6 +725,8 @@ class ProposalStore:
         evidence_refs: Iterable[str],
         expected_effect: Iterable[str],
         risks: Iterable[str],
+        _identity_previous: dict[str, Any] | None = None,
+        plan_only: bool = False,
     ) -> ProposalRevision:
         evidence = tuple(str(item) for item in evidence_refs)
         effects = tuple(str(item) for item in expected_effect)
@@ -524,6 +759,10 @@ class ProposalStore:
             evidence_refs=evidence,
             expected_effect=effects,
             risks=risk_items,
-            created_at=_now(),
+            created_at=identity_value(owner="agent.proposal.revision", slot="created_at",
+                                      inputs={"revision": {**json.loads(canonical), "session_id": session_id,
+                                                           "chain_id": chain_id, "command_id": command_id},
+                                              "previous": _identity_previous}, create=_now),
             fingerprint=fingerprint,
+            status="plan_prepared" if plan_only else "pending",
         )

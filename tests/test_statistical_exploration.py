@@ -36,7 +36,7 @@ def test_filter_spec_accepts_typed_scalar_and_list_values() -> None:
 
 def test_filter_spec_rejects_unknown_operator_and_empty_column() -> None:
     with pytest.raises(StatisticalExplorationValidationError, match="operator"):
-        FilterSpec(column="year", operator="between", value=[1998, 2002])
+        FilterSpec(column="year", operator="approx", value=[1998, 2002])
 
     with pytest.raises(StatisticalExplorationValidationError, match="column"):
         FilterSpec(column="", operator="eq", value=1998)
@@ -290,3 +290,18 @@ def test_corr_refuses_group_by_rather_than_ignoring_it() -> None:
                 options={"group_by": "year", "missing_policy": "listwise"},
             ),
         )
+
+
+def test_filter_spellings_with_one_meaning_and_between():
+    from workbench.statistical_exploration import FilterSpec, StatisticalExplorationValidationError, _apply_filters
+
+    frame = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0, None]})
+    apply = lambda operator, value: _apply_filters(frame, (FilterSpec("a", operator, value),))["a"].tolist()
+    assert apply("ge", 3) == apply("gte", 3) == apply(">=", 3) == [3.0, 4.0]
+    assert apply("le", 2) == apply("lte", 2) == [1.0, 2.0]
+    assert apply("ne", 2) == apply("neq", 2) == [1.0, 3.0, 4.0]
+    assert apply("between", [2, 3]) == [2.0, 3.0]
+    with pytest.raises(StatisticalExplorationValidationError, match="between requires"):
+        FilterSpec("a", "between", 2)
+    with pytest.raises(StatisticalExplorationValidationError, match="unsupported"):
+        FilterSpec("a", "approx", 2)

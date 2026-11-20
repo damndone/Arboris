@@ -47,8 +47,8 @@ def provider_label(config: LLMConfig) -> str:
     return named or host or "an unnamed provider"
 
 
-def identity_text(role: Literal["chain", "global"], config: LLMConfig) -> str:
-    agent = "Chain" if role == "chain" else "Global"
+def identity_text(role: Literal["chain", "main", "global"], config: LLMConfig) -> str:
+    scope = "selected chain" if role == "chain" else "project"
     tokens = config.context_window_tokens or (1_000_000 if config.supports_1m else None)
     window = (
         f"Your context window is {tokens:,} tokens, as declared in the provider configuration. "
@@ -58,8 +58,9 @@ def identity_text(role: Literal["chain", "global"], config: LLMConfig) -> str:
     )
     return "\n".join(
         [
-            f"Agent identity (authoritative): you are the Workbench {agent} Agent, the assistant built into this Arboris Workbench. "
+            "Agent identity (authoritative): you are the Arboris Agent, the assistant built into this Arboris Workbench. "
             f"You run on {provider_label(config)} with the model '{config.model or 'unknown'}'.",
+            f"Current scope: {scope}. Scope controls which project evidence and operations you may use; it does not change your identity.",
             window,
             "What persists: this conversation is saved in the project as an append-only log, and each turn you are given it again. "
             "When it nears your context window its earlier part is replaced by a checked summary (the full log stays on record), "

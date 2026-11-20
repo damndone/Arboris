@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -43,7 +45,7 @@ class ProposalToolAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-proposal-1",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "target": {
@@ -192,7 +194,7 @@ def test_proposal_revision_and_confirmation_create_pending_audit_record_without_
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
 
-    first = orchestrator.create_proposal(**proposal_kwargs())
+    first = admit_proposal(orchestrator, **proposal_kwargs())
     revised = orchestrator.revise_proposal(
         first.proposal_id,
         base_revision=first.revision,
@@ -243,7 +245,7 @@ def test_stale_context_blocks_confirmation_and_leaves_no_pending_operation(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
 
     with pytest.raises(ProposalStaleError):
         orchestrator.confirm_proposal(
@@ -263,7 +265,7 @@ def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -289,7 +291,7 @@ def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
 
 def test_proposal_api_is_async_safe_when_confirmation_calls_are_repeated(tmp_path: Path) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
 
     async def confirm_twice():
         return await asyncio.gather(
@@ -322,7 +324,7 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -332,6 +334,8 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
         current_active_head_run_id="run-1",
     )
 
+    path = tmp_path / "workbench" / "operation-records" / f"{record.record_id}.jsonl"
+    original_lines = path.read_text().splitlines()
     completed = orchestrator.operation_store.append_status(
         record.record_id,
         "completed",
@@ -343,14 +347,16 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
     with pytest.raises(OperationRecordTransitionError):
         orchestrator.operation_store.append_status(record.record_id, "pending")
 
-    assert len((tmp_path / "workbench" / "operation-records" / f"{record.record_id}.jsonl").read_text().splitlines()) == 2
+    final_lines = path.read_text().splitlines()
+    assert final_lines[:-1] == original_lines
+    assert json.loads(final_lines[-1])["status"] == "completed"
 
 
 def test_operation_record_idempotency_does_not_depend_on_dispatch_command_id(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     confirmation = orchestrator.proposal_store.confirm(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -374,7 +380,7 @@ def test_operation_registry_rejects_unregistered_mutations_before_session_write(
     invalid = {**proposal_kwargs(), "operation_id": "arbitrary.file_write"}
 
     with pytest.raises(UnknownOperationError):
-        orchestrator.create_proposal(**invalid)
+        admit_proposal(orchestrator, **invalid)
 
     assert orchestrator.repository.get_branch("chain-session") == []
 
@@ -394,7 +400,7 @@ def test_operation_registry_can_extend_with_explicit_definition() -> None:
     assert definition.effect_level == "read_only"
 
 
-def test_workbench_propose_operation_tool_creates_proposal_only(tmp_path: Path) -> None:
+def test_workbench_run_operation_tool_creates_proposal_only(tmp_path: Path) -> None:
     orchestrator = make_orchestrator(tmp_path)
     tool_registry = orchestrator.tool_registry("chain-a")
 
@@ -402,7 +408,7 @@ def test_workbench_propose_operation_tool_creates_proposal_only(tmp_path: Path) 
         tool_registry.execute(
             {
                 "tool_call_id": "call-proposal-1",
-                "tool_id": "propose_operation",
+                "tool_id": "run_operation",
                 "arguments": {
                     key: value
                     for key, value in proposal_kwargs().items()
@@ -457,7 +463,7 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -470,11 +476,13 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     executor = SuccessfulRerunExecutor()
 
     completed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
 
@@ -494,11 +502,13 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     assert child_branch[-1].parent_ref == EntryRef("chain-session", source_leaf_id)
 
     duplicate = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
     assert duplicate == completed
@@ -509,7 +519,7 @@ def test_confirmed_proposal_rechecks_preconditions_before_creating_branch(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -522,11 +532,13 @@ def test_confirmed_proposal_rechecks_preconditions_before_creating_branch(
 
     with pytest.raises(ProposalStaleError):
         asyncio.run(
-            orchestrator.execute_confirmed_proposal(
+            orchestrator.execute_confirmed_operation(
                 record.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint="ctx-changed",
                 current_active_head_run_id="run-1",
-                executor=executor,
+                rerun_executor=executor,
             )
         )
 
@@ -540,7 +552,7 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -552,11 +564,13 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     executor = FailingRerunExecutor()
 
     failed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
 
@@ -574,11 +588,13 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     assert child_entries[-1].payload["operation_result"]["status"] == "failed"
 
     duplicate = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
     assert duplicate == failed
@@ -611,7 +627,7 @@ def test_submitted_child_is_reconciled_before_operation_completion(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", CompletedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     kwargs = proposal_kwargs()
@@ -621,7 +637,7 @@ def test_submitted_child_is_reconciled_before_operation_completion(
         "plan_hash": "plan-hash",
         "canonical_patch_hash": "patch-hash",
     }
-    proposal = orchestrator.create_proposal(**kwargs)
+    proposal = admit_proposal(orchestrator, **kwargs)
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -632,19 +648,24 @@ def test_submitted_child_is_reconciled_before_operation_completion(
     )
 
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
     assert submitted.status == "running"
     assert submitted.outputs["target_run_id"] == "run-child"
 
     completed = asyncio.run(
-        orchestrator.reconcile_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            current_context_fingerprint=record.preconditions.get("context_fingerprint"),
+            current_active_head_run_id=record.preconditions.get("active_head_run_id"),
+            allow_recovery=True,
             project_root=tmp_path / "project",
         )
     )
@@ -687,10 +708,10 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", FailedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", FailedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -700,16 +721,21 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
     failed = asyncio.run(
-        orchestrator.reconcile_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             submitted.record_id,
+            current_context_fingerprint=submitted.preconditions.get("context_fingerprint"),
+            current_active_head_run_id=submitted.preconditions.get("active_head_run_id"),
+            allow_recovery=True,
             project_root=tmp_path / "project",
         )
     )
@@ -746,10 +772,10 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", CompletedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -759,11 +785,13 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
 
@@ -788,7 +816,7 @@ def test_recover_operations_fails_interrupted_submission_without_retry(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -835,7 +863,7 @@ def test_recover_operations_fails_when_recorded_child_is_missing(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -845,11 +873,13 @@ def test_recover_operations_fails_when_recorded_child_is_missing(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
 
@@ -890,7 +920,7 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         "custom_message",
         {"message_type": "agent_context", "content": "verified"},
     )
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain-a",
         operation_id="graph.fork",
         target={
@@ -925,8 +955,10 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
 
     with pytest.raises(InjectedOperationCrash):
         asyncio.run(
-            orchestrator.execute_confirmed_fork(
+            orchestrator.execute_confirmed_operation(
                 record.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint="ctx-1",
                 current_active_head_run_id="run-1",
             )
@@ -938,7 +970,7 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         main_session_id="main-session",
     )
     recovered = asyncio.run(
-        restarted.recover_operations(project_root=tmp_path / "project")
+        restarted.recover_operations(project_root=orchestrator.repository.root.parent)
     )[0]
 
     assert recovered.status == "completed"
@@ -972,7 +1004,7 @@ def test_model_rerun_executor_adapts_proposal_changes_and_provenance(
             return type("Result", (), {"run_id": "run-child", "status": "running"})()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", RecordingRerunService
+        "workbench.agent.orchestration_reruns.RerunService", RecordingRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     executor = orchestrator.model_rerun_executor(tmp_path / "project")

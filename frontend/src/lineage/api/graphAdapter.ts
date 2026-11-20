@@ -79,7 +79,6 @@ export function normalizeTrust(t: unknown): Trust {
   const key = String(t);
   if (!UNKNOWN_TRUST_WARNED.has(key)) {
     UNKNOWN_TRUST_WARNED.add(key);
-    // eslint-disable-next-line no-console
     console.warn(
       `[graphAdapter] unrecognised trust value ${JSON.stringify(t)}; falling back to "review"`,
     );
@@ -273,6 +272,7 @@ function adaptHeadSetNodeWithRunProvenance(
     title: displayTitle(raw, stage, isTerminal),
     subtitle: stage !== "unknown" ? `${stage} · ${raw.kind}` : undefined,
     summary: raw.summary ?? undefined,
+    cardPreview: raw.card_preview,
     parentStageId: raw.parent_stage_id ?? null,
     trust: normalizeTrust(raw.trust as BackendTrust),
     trustReason: raw.trust_reason ?? undefined,

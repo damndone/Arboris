@@ -102,7 +102,7 @@ describe("DetailDrawerTabs", () => {
     expect(onActive).not.toHaveBeenCalled();
   });
 
-  it("renders Report review beside nodes without a close button", () => {
+  it("renders Report review beside nodes, closable like them", () => {
     const { onActive, onClose } = renderTabs({
       tabs: [
         tab("a"),
@@ -115,13 +115,10 @@ describe("DetailDrawerTabs", () => {
     expect(
       screen.getByRole("tab", { name: "Report review" }),
     ).toHaveAttribute("aria-current", "true");
-    expect(
-      screen.queryByRole("button", { name: "Close Report review tab" }),
-    ).not.toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("tab", { name: "Report review" }));
     expect(onActive).toHaveBeenCalledWith(REPORT_REVIEW_TAB_ID);
-    expect(onClose).not.toHaveBeenCalledWith(REPORT_REVIEW_TAB_ID);
+    fireEvent.click(screen.getByRole("button", { name: "Close Report review tab" }));
+    expect(onClose).toHaveBeenCalledWith(REPORT_REVIEW_TAB_ID);
 
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
     expect(onActive).toHaveBeenCalledWith("b");

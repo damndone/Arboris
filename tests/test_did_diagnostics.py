@@ -36,6 +36,45 @@ def test_bundle_has_all_four_sections_and_is_json_safe():
     json.dumps(diag)  # must not raise
 
 
+@pytest.mark.parametrize("cluster_col", [None, "district"])
+def test_event_study_only_copies_fit_columns(monkeypatch, cluster_col):
+    import json
+
+    from workbench.econometrics.runner import run_event_study
+    from workbench.engine import did_diagnostics
+
+    frame = _panel(staggered=True)
+    frame["district"] = frame["id"].map({"A": 1.0, "B": 2.0, "C": 3.0})
+    frame.loc[frame.index[0], "district"] = np.nan
+    frame["unused_covariate"] = np.arange(len(frame), dtype=float)
+    norm = normalize_did_input(frame, mode="cohort", entity="id", time="year",
+                               y="y", cohort="first_treat")
+    options = {"covariance": "clustered", "cluster_col": cluster_col}
+    _, fitted = run_did(norm.frame, y="y", x=[], entity="id", time="year",
+                        model_id="did_1", **options)
+    expected = run_event_study(norm.frame, y="y", x=[], entity="id", time="year",
+                               event_time_col="_did_event_time", **options)
+    expected["applicable"] = True
+    seen_columns = []
+
+    def observe(projected, **kwargs):
+        seen_columns.append(set(projected.columns))
+        assert projected.index.equals(norm.frame.index)
+        assert np.shares_memory(projected["y"].to_numpy(), norm.frame["y"].to_numpy())
+        return run_event_study(projected, **kwargs)
+
+    monkeypatch.setattr(did_diagnostics, "run_event_study", observe)
+    diagnostic = build_did_diagnostics(fitted, norm, norm.frame, **options)
+
+    required = {"y", "id", "year", "_did_event_time"}
+    if cluster_col:
+        required.add(cluster_col)
+    assert seen_columns == [required]
+    assert json.dumps(diagnostic["event_study"], sort_keys=True, allow_nan=False) == json.dumps(
+        expected, sort_keys=True, allow_nan=False,
+    )
+
+
 def test_staggered_panel_attaches_interpretation_restriction():
     norm = normalize_did_input(_panel(staggered=True), mode="cohort", entity="id",
                                time="year", y="y", cohort="first_treat")
@@ -79,12 +118,12 @@ def test_parallel_trends_rejects_on_violated_pretrend():
 
 
 def test_parallel_trends_uses_the_leads_covariance():
-    # Two leads of 1.0 with variance 1: independent, F = (1 + 1) / 2 = 1; perfectly
-    # correlated at 0.9, the joint test sees one shift, F = 2 / (1 + 0.9) / 2.
+    # Without finite denominator df, report the actual Wald chi-square, not Wald/q.
     independent = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.0], [0.0, 1.0]]))
     correlated = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.9], [0.9, 1.0]]))
-    assert independent["statistic"] == pytest.approx(1.0)
-    assert correlated["statistic"] == pytest.approx(1 / 1.9)
+    assert independent["statistic"] == pytest.approx(2.0)
+    assert independent["distribution"] == "chi2"
+    assert correlated["statistic"] == pytest.approx(2 / 1.9)
 
 
 def test_parallel_trends_not_rejected_when_leads_flat():

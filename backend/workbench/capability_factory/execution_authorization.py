@@ -235,6 +235,12 @@ class OptionExecutionAuthorization:
     transition_id: str | None = None
     prior_receipt_digest: str | None = None
     transition_metadata: tuple[tuple[str, str], ...] = ()
+    approval_id: str | None = None
+    approval_proposal_id: str | None = None
+    approval_fingerprint: str | None = None
+    approval_execution_key: str | None = None
+
+    _APPROVAL_KEYS = frozenset({"approval_id", "approval_proposal_id", "approval_fingerprint", "approval_execution_key"})
 
     _KEYS = frozenset(
         {
@@ -285,6 +291,9 @@ class OptionExecutionAuthorization:
     }
 
     def __post_init__(self) -> None:
+        if any(getattr(self, key) is not None for key in self._APPROVAL_KEYS):
+            for key in self._APPROVAL_KEYS:
+                _identifier(getattr(self, key), key)
         object.__setattr__(self, "authorization_id", _identifier(self.authorization_id, "authorization_id"))
         for field in (
             "notebook_id",
@@ -393,10 +402,11 @@ class OptionExecutionAuthorization:
 
     @property
     def contract_version(self) -> str:
-        return OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION
+        return "OptionExecutionAuthorization@1.1" if self.approval_id is not None else OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION
 
     def _payload(self) -> dict[str, Any]:
         return {
+            **({key:getattr(self, key) for key in self._APPROVAL_KEYS} if self.approval_id is not None else {}),
             "contract_version": self.contract_version,
             "notebook_id": self.notebook_id,
             "option_id": self.option_id,
@@ -469,11 +479,15 @@ class OptionExecutionAuthorization:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "OptionExecutionAuthorization":
-        if not isinstance(value, Mapping) or set(value) not in {cls._KEYS, cls._LEGACY_KEYS}:
+        if not isinstance(value, Mapping) or set(value) not in {cls._KEYS, cls._LEGACY_KEYS, cls._KEYS | cls._APPROVAL_KEYS}:
             raise ExecutionAuthorizationError("option execution authorization has an unknown or missing field")
-        if value["contract_version"] != OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION:
+        if value["contract_version"] not in {OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION, "OptionExecutionAuthorization@1.1"}:
             raise ExecutionAuthorizationError("contract_version is unsupported")
         result = cls(
+            approval_id=value.get("approval_id"),
+            approval_proposal_id=value.get("approval_proposal_id"),
+            approval_fingerprint=value.get("approval_fingerprint"),
+            approval_execution_key=value.get("approval_execution_key"),
             authorization_id=value["authorization_id"],
             notebook_id=value["notebook_id"],
             option_id=value["option_id"],
@@ -646,6 +660,7 @@ class OptionExecutionAuthorizationStore:
                     raise ExecutionAuthorizationInvalidated(
                         "authorization claim invalidated: freshness"
                     )
+                self.require_operation_approval(current)
                 return current
             if current.status == "rejected":
                 raise ExecutionAuthorizationRejected(
@@ -679,6 +694,7 @@ class OptionExecutionAuthorizationStore:
                 raise ExecutionAuthorizationRejected(
                     f"authorization claim rejected: {reason}"
                 )
+            self.require_operation_approval(current)
             claimed = replace(
                 current,
                 status="claimed",
@@ -694,6 +710,20 @@ class OptionExecutionAuthorizationStore:
             )
             self._append_locked(claimed)
             return claimed
+
+    def require_operation_approval(self, authorization):
+        from ..operation_approvals import OperationApprovalStore, OperationApprovalError
+
+        if authorization.approval_id is None:
+            raise ExecutionAuthorizationRejected("capability execution requires a common operation approval")
+        try:
+            return OperationApprovalStore(self.root / "workbench", clock=self._clock).require_binding(
+                authorization.approval_id, proposal_id=authorization.approval_proposal_id,
+                fingerprint=authorization.approval_fingerprint, execution_key=authorization.approval_execution_key,
+                credential_digest=authorization.payload_digest)
+        except OperationApprovalError as exc:
+            raise ExecutionAuthorizationRejected(str(exc)) from exc
+
 
     def transition(
         self,

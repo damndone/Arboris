@@ -17,9 +17,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from ..egress import EgressPolicyError, authorize_export
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import analysis_disclosure
@@ -33,6 +35,7 @@ from ..agent.family_evidence import bounded_model_family_evidence
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
 from ..services.operation_presentation import operation_title
 from ..artifacts import read_json
+from ..native_research import native_result_operation, read_native_result_bytes
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
@@ -58,6 +61,7 @@ from ..report_export import ReportExportError, export_report
 from ..report_contract import ReportContractError, validate_report_packet
 from ..report_quality import validate_report_response_quality
 from ..report_view_model import build_regression_table, regression_table_export_rows
+from ..figure_plans import ensure_figures
 from ..report_store import AiReportRecordRequest, list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream, read_model_coefficient_view
@@ -80,6 +84,7 @@ from .responses.runs import (
     AiReportList,
     AiReportSaved,
     ArtifactGroups,
+    FiguresDrawn,
     BatchRunSubmitted,
     DatasetExportPreview,
     DatasetExportResult,
@@ -692,6 +697,7 @@ def export_result_table_endpoint(
     """
 
     run_root = _resolve_run_root(project_root, run_id)
+    authorize_export(project_root, "result_table.export")
     sections = request.sections or ["regression_table", "table_1", "statistical_evidence", "model_family_evidence"]
     unknown = sorted(set(sections) - _RESULT_TABLE_SECTIONS)
     if unknown:
@@ -970,6 +976,8 @@ def export_dataset_endpoint(
 
     try:
         exported = export_dataset(project_root, run_id, request.node_id, request.options())
+    except EgressPolicyError:
+        raise
     except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -1052,6 +1060,14 @@ def list_ai_reports_endpoint(run_id: str, project_root: str) -> AiReportList:
     return {"reports": list_ai_reports(_resolve_run_root(project_root, run_id))}
 
 
+@router.post("/runs/{run_id}/figures")
+def draw_figures_endpoint(run_id: str, project_root: str) -> FiguresDrawn:
+    """Draw the run's figures if it deferred them; a no-op once drawn. GET routes stay read-only."""
+    run_root = _resolve_run_root(project_root, run_id)
+    ensure_figures(run_root)
+    return {"figures": sum(1 for record in _read_artifact_records(run_root) if record.get("artifact_type") == "figure")}
+
+
 @router.get("/runs/{run_id}/artifacts")
 def list_artifacts_endpoint(run_id: str, project_root: str) -> ArtifactGroups:
     run_root = _resolve_run_root(project_root, run_id)
@@ -1061,22 +1077,32 @@ def list_artifacts_endpoint(run_id: str, project_root: str) -> ArtifactGroups:
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}")
 def download_artifact_endpoint(
-    run_id: str, artifact_id: str, project_root: str
-) -> FileResponse:
+    run_id: str, artifact_id: str, project_root: str, view: Literal["download", "local"] = "download",
+) -> Response:
     run_root = _resolve_run_root(project_root, run_id)
     records = _read_artifact_records(run_root)
-    matched = next(
-        (record for record in records if record.get("artifact_id") == artifact_id),
-        None,
-    )
-    if matched is None:
+    matches = [record for record in records if record.get("artifact_id") == artifact_id]
+    if not matches:
         raise WorkbenchAPIError(
             status_code=404,
             code=ERROR_ARTIFACT_NOT_FOUND,
             message=f"Artifact not found: {artifact_id}",
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
+    matched = matches[0]
     path = _resolve_artifact_path(run_root, matched)
+    native_operation = native_result_operation(artifact_id)
+    if native_operation is None or view == "download":
+        authorize_export(project_root, "artifact.export")
+    if native_operation is not None:
+        payload = read_native_result_bytes(run_root, matched, path, native_operation) if len(matches) == 1 else None
+        if payload is None:
+            raise WorkbenchAPIError(
+                status_code=409, code="ARTIFACT_SHA256_MISMATCH",
+                message="The saved native result no longer matches its registered fingerprint.",
+            )
+        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(path.name, safe='')}"} if view == "download" else {}
+        return Response(payload, media_type="application/json", headers=headers)
     return FileResponse(
         path,
         filename=path.name,
@@ -1103,6 +1129,7 @@ def get_report_endpoint(run_id: str, project_root: str) -> Annotated[FileRespons
                 "errors": errors,
             },
         )
+    authorize_export(project_root, "report.export")
     return FileResponse(report_path, media_type="text/html")
 
 

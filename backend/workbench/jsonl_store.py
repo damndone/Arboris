@@ -11,12 +11,29 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+def jsonl_lines(raw: str | bytes, *, keepends: bool = False) -> list:
+    """The lines of a JSON Lines text or byte string, split at ``\\n`` only.
+
+    ``str.splitlines()`` also splits at U+2028, U+2029 and U+0085, which
+    ``json.dumps(..., ensure_ascii=False)`` leaves raw inside strings, so one
+    such character cut a record in two. A final line without a newline is kept
+    (with ``keepends`` it is the one line that does not end in ``\\n``).
+    """
+
+    newline = b"\n" if isinstance(raw, bytes) else "\n"
+    pieces = raw.split(newline)
+    lines = [piece + newline for piece in pieces[:-1]] if keepends else pieces[:-1]
+    if pieces[-1]:
+        lines.append(pieces[-1])
+    return lines
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     raw = path.read_text(encoding="utf-8")
     records: list[dict[str, Any]] = []
-    lines = raw.splitlines(keepends=True)
+    lines = jsonl_lines(raw, keepends=True)
     for index, line in enumerate(lines):
         if not line.strip():
             continue
@@ -27,7 +44,7 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             # It is safe to discard only that record; corruption anywhere
             # else must remain visible to the caller instead of being silently
             # converted into a different operation history.
-            if index == len(lines) - 1 and not line.endswith(("\n", "\r")):
+            if index == len(lines) - 1 and not line.endswith("\n"):
                 break
             raise ValueError(f"invalid JSONL record at line {index + 1}") from exc
         if not isinstance(value, dict):

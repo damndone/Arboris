@@ -228,11 +228,16 @@ def test_agent_core_persists_messages_and_emits_stream_events(tmp_path: Path) ->
             "message_start",
             "message_update",
             "message_update",
+            "provider_step",
             "message_end",
             "turn_end",
             "save_point",
             "agent_end",
         ]
+        [observation] = [event for event in events.replay("session-a") if event.event_type == "provider_step"]
+        assert observation.payload["request_id"] == adapter.requests[0].request_id
+        assert observation.payload["usage"] is None and observation.payload["usage_state"] == "unavailable"
+        assert observation.payload["cost"] is None
         assert adapter.requests[0].messages[-1]["content"] == "check the model"
         assert "command_id" not in adapter.requests[0].messages[-1]
 
@@ -399,6 +404,7 @@ def test_agent_core_abort_closes_active_tool_execution_as_aborted(
 
 def test_agent_core_timeout_closes_active_tool_execution_as_timed_out(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     async def scenario() -> None:
         repository = JsonlSessionRepository(tmp_path / "workbench")
@@ -415,7 +421,17 @@ def test_agent_core_timeout_closes_active_tool_execution_as_timed_out(
             tool_runtime=runtime,
         )
 
-        reply = await agent.prompt("inspect this model", budget={"timeout_s": 0.01})
+        loop = asyncio.get_running_loop()
+        clock = [loop.time()]
+        # Session/event writes must not spend this test's deadline before the
+        # runtime enters execute. Advance time only after the tool is active.
+        with monkeypatch.context() as controlled_clock:
+            controlled_clock.setattr(loop, "time", lambda: clock[0])
+            running = asyncio.create_task(agent.prompt("inspect this model", budget={"timeout_s": 0.01}))
+            await runtime.started.wait()
+            assert agent._active_tool_task is not None and not agent._active_tool_task.done()
+            clock[0] += 0.02
+            reply = await running
         assert reply and "agent_timeout" in reply
 
         branch = repository.get_branch("session-a")
@@ -808,7 +824,8 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
     async def fake_stream(messages: list[dict[str, str]], actual_config: LLMConfig, **_kwargs):
         calls.append((messages, actual_config))
         yield {"type": "text_delta", "delta": "one streamed answer"}
-        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat",
+               "provider_request_id": "upstream-reported-1"}
 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
@@ -821,7 +838,8 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "done"]
         assert streamed[0].delta == "one streamed answer"
-        assert streamed[1].provider_request_id == "request-1"
+        assert streamed[1].provider_request_id == "upstream-reported-1"
+        assert streamed[1].request_id == "request-1"
         assert calls == [(request.messages, config)]
 
     asyncio.run(scenario())
@@ -846,7 +864,9 @@ def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch) ->
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "text_delta", "done"]
         assert [event.delta for event in streamed[:2]] == ["first ", "second"]
-        assert streamed[-1].provider_request_id == "request-stream-1"
+        # A local correlation id must not masquerade as an unreported upstream id.
+        assert streamed[-1].provider_request_id is None
+        assert streamed[-1].request_id == "request-stream-1"
 
     asyncio.run(scenario())
 
@@ -981,3 +1001,80 @@ def test_concurrent_writers_to_one_session_lose_nothing(tmp_path: Path) -> None:
     replayed = AgentEventStream(root).replay("session-a")
     assert len(replayed) == writers * per_writer
     assert [event.seq for event in replayed] == list(range(1, writers * per_writer + 1))
+
+
+class _ToolThenTextAdapter:
+    """First call asks for a tool; the next answers in text."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                "tool_call_id": "slow-1", "tool_id": "slow_tool", "arguments": {}})
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        yield ModelStreamEvent.text_delta(request.request_id, "adjusted")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+def test_a_steer_during_a_tool_reaches_the_model_at_the_tool_boundary(tmp_path: Path) -> None:
+    """v1.9.1: the person's correction is the next thing the model reads, not after the whole turn."""
+
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        adapter = _ToolThenTextAdapter()
+        agent = AgentCore(repository, events, adapter, session_id="session-a")
+        registry = ToolRegistry()
+
+        async def slow_tool(arguments, context):
+            await agent.steer("use log wages instead")
+            return {"done": True}
+
+        registry.register(ToolDefinition(tool_id="slow_tool", version="v1", side_effect="none",
+                                         input_schema={"type": "object", "properties": {}}, handler=slow_tool))
+        agent.attach_tools(registry.descriptors(), registry)
+        assert await agent.prompt("estimate the wage model") == "adjusted"
+        second = adapter.requests[1].messages
+        assert [m["role"] for m in second[-2:]] == ["tool", "user"]
+        assert second[-1]["content"] == "use log wages instead"
+        applied = [e for e in events.replay("session-a")
+                   if e.event_type == "queue_update" and (e.payload or {}).get("applied")]
+        assert len(applied) == 1
+        assert len(adapter.requests) == 2  # no extra turn after the answer
+
+    asyncio.run(scenario())
+def test_repeated_inspection_only_reports_unchanged_for_the_same_returned_evidence(tmp_path):
+    async def scenario():
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+        revisions = iter(["draft", "confirmed", "confirmed"])
+
+        async def inspect(arguments, _context):
+            reference = arguments["node_ref"]
+            return {"node_ref": reference, "status": next(revisions) if reference == "model:x" else "ready"}
+
+        tools.register(ToolDefinition(
+            tool_id="inspect_node_context", version="v1", side_effect="none", handler=inspect,
+            input_schema={"type": "object", "required": ["node_ref"], "properties": {"node_ref": {"type": "string"}}},
+        ))
+        adapter = SequencedToolCallAdapter(["model:x", "dataset:y", "model:x", "model:x"])
+        agent = AgentCore(repository, events, adapter, session_id="session-a", tools=tools.descriptors(), tool_runtime=tools)
+        await agent.prompt("Inspect the revised evidence", budget={"max_steps": 4})
+        returned = [json.loads(entry.payload["content"]) for entry in repository.get_branch("session-a")
+                    if entry.entry_type == "message" and entry.payload.get("role") == "tool"]
+        assert len(returned) == 4 and returned[0]["output"]["status"] == "draft"
+        assert returned[2]["output"]["status"] == "confirmed"
+        assert "already_answered_this_turn" not in returned[2]
+        assert returned[3]["already_answered_this_turn"] is True
+        repeated = [event for event in events.replay("session-a")
+                    if event.event_type == "loop_guard" and event.payload.get("reason") == "repeated_inspection_replayed"]
+        assert len(repeated) == 1
+
+    asyncio.run(scenario())

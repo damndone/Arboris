@@ -1,16 +1,22 @@
 """Workflow results: bounded read-only context projection."""
 
 from __future__ import annotations
+
+import dataclasses
 import json
+from pathlib import Path
 from typing import Any
-from ..context_compiler import resolve_registered_artifact
+from ..context_compiler import registered_artifact_suffix, resolve_registered_artifact
 from ..operations import OperationRecord, OperationRecordStore
 from ...jsonl_store import read_jsonl
+from ...services.results_service import read_model_results
 from ..tools import ToolVisibleError
+from .coefficients import _lmm_published_results
 from .requests import (
     InspectCompletedOperationsRequest,
     InspectNotebookWorkflowResultsRequest,
     InspectOperationArtifactRequest,
+    InspectProjectModelCoefficientsRequest,
     InspectProjectNotebookWorkflowResultsRequest,
     _PROJECT_RUN_ID_RE,
 )
@@ -18,8 +24,44 @@ from .summaries import (
     _bounded_completed_operation,
     _bounded_node,
     _operation_artifact_ids,
+    _operation_artifact_source,
+    _operation_model_branches,
     _public_operation_artifact_result,
+    _resolve_verified_registered_artifact,
 )
+
+#: Fitted branches and terms per branch whose estimates go out with an executed workflow's
+#: results; the rest are named and stay readable with inspect_project_model_coefficients.
+ESTIMATED_BRANCHES = 4
+ESTIMATED_TERMS = 16
+
+
+def _resolve_operation_artifact(project_root: Path, record: OperationRecord, artifact_id: str) -> tuple[str, str, Any]:
+    """Preserve local reads; admit child reads only through the recorded branch."""
+
+    run_id = str(record.target.get("run_id") or "")
+    artifact = resolve_registered_artifact(project_root / "runs" / run_id, artifact_id)
+    if artifact is not None:
+        return run_id, artifact_id, artifact
+    source = _operation_artifact_source(record, artifact_id)
+    if source is None:
+        return run_id, artifact_id, None
+    source_run_id, registered_id = source
+    run_root = project_root / "runs" / source_run_id
+    # Genesis also emits datasets and figures. Do not load those files just
+    # to discover they cannot be projected as JSON evidence.
+    if registered_artifact_suffix(run_root, registered_id) != ".json":
+        return source_run_id, registered_id, None
+    artifact = resolve_registered_artifact(run_root, registered_id)
+    if artifact is not None:
+        verified = _resolve_verified_registered_artifact(run_root, artifact_id=registered_id, expected_type=artifact[0])
+        if verified is None:
+            artifact = None
+        else:
+            payload, sha256 = verified
+            artifact = artifact[0], sha256, payload
+    return source_run_id, registered_id, artifact
+
 
 def _notebook_source_runs_by_revision(
     records: list[dict[str, Any]],
@@ -214,29 +256,53 @@ class WorkflowResultsMixin:
             (
                 candidate
                 for candidate in records
-                if candidate.record_id == request.operation_record_id
+                if request.operation_record_id in _record_ids(candidate)
             ),
             None,
         )
         if record is None:
+            hint = self._scope_hint(
+                request.operation_record_id, chain_id=chain_id, session_id=session_id,
+                owner_run_id=request.owner_run_id, op_node_id=request.op_node_id,
+            )
+            if hint:
+                code, message = hint
+                raise ToolVisibleError(code + ": " + message)
             raise ToolVisibleError(
                 "OPERATION_RESULT_NOT_IN_SCOPE: the completed operation is not "
                 "available in this Chain and node scope."
             )
-        allowed_artifacts = set(_operation_artifact_ids(record))
-        if request.artifact_id not in allowed_artifacts:
+        declared_artifacts = _operation_artifact_ids(record)
+        allowed_artifacts = set(declared_artifacts)
+        artifact_id = request.artifact_id
+        if artifact_id not in allowed_artifacts:
+            # A bare id naming exactly one declared artifact (13 refusals, NVIDIA rounds).
+            matches = [item for item in declared_artifacts if str(item).endswith(":" + artifact_id)]
+            if len(matches) == 1:
+                from ..tools import tool_note
+                artifact_id = matches[0]
+                tool_note(f"artifact {request.artifact_id} is {artifact_id} of this operation; read that.")
+                # Everything downstream, including the evidence reference, names the exact id.
+                request = dataclasses.replace(request, artifact_id=artifact_id)
+        if artifact_id not in allowed_artifacts:
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_NOT_DECLARED: the artifact was not emitted "
-                "by this completed operation."
+                "by this completed operation. Do not remove a run prefix or guess a replacement. "
+                "Use an exact artifact_id returned by inspect_completed_operations. "
+                "Declared ids (bounded): " + json.dumps(declared_artifacts[:16], ensure_ascii=False)[:2400]
             )
-        artifact = resolve_registered_artifact(
-            self.project_root / "runs" / request.owner_run_id,
-            request.artifact_id,
-        )
+        source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, artifact_id)
         if artifact is None:
+            suffix = registered_artifact_suffix(self.project_root / "runs" / source_run_id, registered_id)
+            if suffix not in {None, ".json"}:
+                raise ToolVisibleError(
+                    f"OPERATION_ARTIFACT_UNAVAILABLE: this artifact is a {suffix} file (such as the workflow's "
+                    "report), not a JSON result. Its numbers come from the operation's analysis steps: read "
+                    "their result artifacts (the other artifact ids of this operation) instead."
+                )
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_UNAVAILABLE: the declared artifact is not "
-                "available from the active run."
+                "available from its recorded run and branch binding, or its registered content could not be verified."
             )
         artifact_type, artifact_sha256, payload = artifact
         public_result, omitted_sections = _public_operation_artifact_result(
@@ -258,12 +324,17 @@ class WorkflowResultsMixin:
                     "artifact_id": request.artifact_id,
                     "artifact_type": artifact_type,
                     "sha256": artifact_sha256,
+                    **({"source_run_id": source_run_id, "registered_artifact_id": registered_id}
+                       if (source_run_id, registered_id) != (request.owner_run_id, request.artifact_id) else {}),
                 },
                 "result": public_result,
                 "reason": (
                     None
                     if public_result is not None
-                    else "This artifact type has no registered public Agent result view."
+                    else ("This artifact type has no registered public Agent result view. Read model estimates with "
+                          "inspect_project_model_coefficients using run_ids " + json.dumps([source_run_id]) + "."
+                          if artifact_type == "model_result"
+                          else "This artifact type has no registered public Agent result view.")
                 ),
             },
             "omitted_sections": omitted_sections,
@@ -277,35 +348,95 @@ class WorkflowResultsMixin:
         answered in the turn that ran it.
         """
 
-        run_id = str((record.target or {}).get("run_id") or "")
         state = ((record.outputs or {}).get("workflow_state") or {}).get("steps") or {}
         steps = {item.get("step_id"): item for item in (record.changes or {}).get("steps") or () if isinstance(item, dict)}
         results: list[dict[str, Any]] = []
         for step_id, step_state in state.items():
+            model_branches = _operation_model_branches(step_state)
             entry: dict[str, Any] = {
                 "step_id": step_id,
                 "operation_id": (steps.get(step_id) or {}).get("operation_id"),
                 "status": step_state.get("status"),
+                "read_with": {
+                    "owner_run_id": record.target.get("run_id"),
+                    "op_node_id": record.target.get("node_ref"),
+                    "active_head_run_id": record.preconditions.get("active_head_run_id"),
+                    "operation_record_id": record.record_id,
+                },
+                **({"model_branches": model_branches} if model_branches else {}),
                 "artifacts": [],
             }
+            without_view: list[str] = []
             for artifact_id in step_state.get("artifact_ids") or ():
-                artifact = resolve_registered_artifact(self.project_root / "runs" / run_id, str(artifact_id))
+                source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, str(artifact_id))
                 if artifact is None:
-                    entry["artifacts"].append({"artifact_id": artifact_id, "available": False})
+                    without_view.append(str(artifact_id))
                     continue
-                artifact_type, _sha256, payload = artifact
+                artifact_type, sha256, payload = artifact
                 public_result, _omitted = _public_operation_artifact_result(artifact_type, payload)
-                item: dict[str, Any] = {"artifact_id": artifact_id, "artifact_type": artifact_type}
+                if public_result is None and not (artifact_type == "model_result" and not model_branches):
+                    without_view.append(str(artifact_id))
+                    continue
+                item: dict[str, Any] = {
+                    "artifact_id": artifact_id, "artifact_type": artifact_type,
+                    "evidence_ref": {"operation_record_id": record.record_id, "artifact_id": artifact_id,
+                                     "artifact_type": artifact_type, "sha256": sha256,
+                                     **({"source_run_id": source_run_id, "registered_artifact_id": registered_id}
+                                        if (source_run_id, registered_id) != (record.target.get("run_id"), artifact_id) else {})},
+                }
                 if public_result is None:
                     item["available"] = False
+                    item["reason"] = "Read model estimates with inspect_project_model_coefficients using the returned model_branches run_id."
                 elif len(json.dumps(public_result, ensure_ascii=False, default=str)) > max_chars:
                     item["available"] = False
                     item["reason"] = "too large to include; read it with inspect_operation_artifact"
                 else:
                     item["result"] = public_result
                 entry["artifacts"].append(item)
+            if without_view:
+                # Files and records with no public result view (data copies, profiles, exports):
+                # not numerical evidence, so only their ids, not a sha-bearing entry each.
+                entry["artifacts_without_result_view"] = without_view
+            if model_branches:
+                entry["model_estimates"] = self._branch_estimates(model_branches)
             results.append(entry)
         return results
+
+    def produced_model_estimates(self, run_id: str) -> dict[str, Any]:
+        """A confirmed refit's estimates in the inspect_project_model_coefficients view."""
+
+        return self._branch_estimates([{"run_id": run_id}])
+
+    def _branch_estimates(self, model_branches: list[dict[str, str]]) -> dict[str, Any]:
+        """Every term of the first fitted branches, in the inspect_project_model_coefficients view.
+
+        After a confirmed fit the Agent read these with a separate call in most model tasks
+        (QRData round 7: 8 of 22); handing them over with the result saves that round trip.
+        """
+
+        models: list[dict[str, Any]] = []
+        for branch in model_branches[:ESTIMATED_BRANCHES]:
+            run_id = branch["run_id"]
+            try:
+                run_root = self._project_run_root(run_id)
+                terms = list(dict.fromkeys(
+                    term for result in [*read_model_results(run_root), *_lmm_published_results(run_root)]
+                    if isinstance(result, dict) and isinstance(result.get("coefficients"), dict)
+                    for term in result["coefficients"]))
+                view = self.inspect_project_model_coefficients(InspectProjectModelCoefficientsRequest(
+                    run_ids=(run_id,), terms=tuple(terms[:ESTIMATED_TERMS])))
+            except (ToolVisibleError, OSError, ValueError, TypeError, KeyError):
+                continue  # the branch stays readable with inspect_project_model_coefficients
+            for model in view.get("models") or ():
+                if len(terms) > ESTIMATED_TERMS:
+                    model = {**model, "terms_not_shown": terms[ESTIMATED_TERMS:]}
+                models.append(model)
+        shown = {model.get("run_id") for model in models}
+        return {
+            "models": models,
+            "runs_not_shown": [branch["run_id"] for branch in model_branches if branch["run_id"] not in shown],
+            "read_more_with": "inspect_project_model_coefficients (run_ids and terms not shown here)",
+        }
 
     def inspect_notebook_workflow_results(
         self,
@@ -433,6 +564,35 @@ class WorkflowResultsMixin:
             )
         return evidence, unavailable + max(len(artifact_ids) - 16, 0)
 
+    def _scope_hint(self, record_id: str, *, chain_id: str, session_id: str,
+                    owner_run_id: str, op_node_id: str) -> tuple[str, str] | None:
+        """Preserve owned completed-record locations; status needs the exact node scope.
+
+        A persisted running state is not evidence that a process is still alive,
+        nor does a completed child run authorize reading without its parent receipt.
+        """
+
+        store = OperationRecordStore(self.project_root / "workbench", create=False)
+        for record in store.list_records():
+            if (record.chain_id == chain_id and record.agent_session_id == session_id
+                    and record.workflow_step_id is None
+                    and record_id in _record_ids(record)):
+                if record.status == "completed":
+                    return ("OPERATION_RESULT_NOT_IN_SCOPE",
+                            "the completed operation is not available in this Chain and node scope."
+                            f" It ran on node {record.target.get('node_ref')} of run {record.target.get('run_id')}: "
+                            f"call again with owner_run_id {record.target.get('run_id')}, op_node_id "
+                            f"{record.target.get('node_ref')} and operation_record_id {record.record_id}.")
+                if (record.status in {"pending", "submitted", "running", "recovering"}
+                        and record.target.get("run_id") == owner_run_id
+                        and record.target.get("node_ref") == op_node_id):
+                    return ("OPERATION_RESULT_NOT_COMPLETED",
+                            f"last persisted status: {record.status}; no completed operation receipt is available. "
+                            "This status does not prove a process is running. Do not automatically rerun the operation. "
+                            "Inspect its saved execution state and request human takeover to reconcile the completion "
+                            "receipt; do not invent one. Artifacts remain unavailable.")
+        return None
+
     def _completed_operation_records(
         self,
         *,
@@ -456,3 +616,13 @@ class WorkflowResultsMixin:
         ]
         return sorted(records, key=lambda record: (record.updated_at, record.record_id), reverse=True)
 
+
+def _record_ids(record: OperationRecord) -> set[str]:
+    """The ids that name one operation record: its own and its workflow's.
+
+    Results show both (``record_id`` and ``workflow_id``); the workflow id is
+    derived from the record, so accepting it names the same record.
+    """
+
+    workflow_id = record.workflow_id or (record.execution or {}).get("workflow_id") or f"workflow_{record.record_id}"
+    return {record.record_id, str(workflow_id)}

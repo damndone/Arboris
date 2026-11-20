@@ -663,3 +663,15 @@
 .nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
 .nb-user-intent textarea { background: var(--bg-card-2, transparent); border: 1px solid var(--separator); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
 .nb-user-intent button { justify-self: start; }
+.nb-comparison-scroll { overflow-x: auto; }
+.nb-comparison table { width: 100%; border-collapse: collapse; text-align: left; }
+.nb-comparison th, .nb-comparison td { padding: 0.75rem; vertical-align: top; border-bottom: 1px solid var(--separator); min-width: 10rem; overflow-wrap: anywhere; }
+.nb-comparison p { color: var(--label-secondary); font-size: 0.85rem; }
+
+.plan-comparison-workspace { max-width: 1200px; width: 100%; box-sizing: border-box; margin-inline: auto; }
+.plan-comparison-title { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 600; letter-spacing: -0.02em; }
+.plan-comparison-record { border-top: 1px solid var(--separator); padding-top: 12px; }
+.plan-comparison-record > summary { cursor: pointer; color: var(--label-secondary); padding-block: 8px; }
+.plan-comparison-workspace :is(button, summary, textarea):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.plan-comparison-workspace .nb-comparison { min-width: 0; }
+.plan-comparison-workspace .nb-comparison table { font-variant-numeric: tabular-nums; }

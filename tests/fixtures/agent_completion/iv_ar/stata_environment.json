@@ -1,0 +1,1 @@
+{"stata_version":"18","os":"Unix","definition":"Native regress/test; robust HC1 Wald converted to HC0 by N/df_r. Point tests only; not a global topology oracle."}

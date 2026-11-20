@@ -18,7 +18,7 @@ const HAND_WRITTEN_BASELINE = 0;
 
 // Functions whose result the client composes itself (not a server response).
 const CLIENT_COMPOSED: Record<string, string> = {
-  "src/api.ts previewFile": "parses CSV/Excel in the browser; only SPSS/Stata rows come from /uploads/preview",
+  "src/api.ts previewFile": "derives column statistics and role suggestions from the rows /uploads/preview returns",
 };
 
 const FRONTEND = path.resolve(__dirname, "..");

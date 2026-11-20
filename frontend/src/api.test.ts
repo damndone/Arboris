@@ -8,7 +8,6 @@ import {
   getRunGraph,
   runBatchWorkflow,
   runWorkflow,
-  previewFile,
   reportUrl,
   artifactDownloadUrl,
   waitForRunTerminal,
@@ -23,7 +22,6 @@ import {
   patchDraftNode,
   fetchProjectForest,
 } from "./api";
-import * as XLSX from "xlsx";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -89,7 +87,8 @@ test("fetchRunDetail returns artifact_counts and errors", async () => {
   expect(detail.errors.issues).toEqual([]);
 });
 
-test("fetchRunArtifacts returns groups array", async () => {
+test("fetchRunArtifacts draws deferred figures first, then returns groups array", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({ figures: 0 }));
   (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
     jsonResponse({
       groups: [
@@ -111,6 +110,7 @@ test("fetchRunArtifacts returns groups array", async () => {
 
   const result = await fetchRunArtifacts("/tmp/demo", "abc");
 
+  expect(fetch).toHaveBeenCalledWith("/api/runs/abc/figures?project_root=%2Ftmp%2Fdemo", { method: "POST" });
   expect(fetch).toHaveBeenCalledWith(
     "/api/runs/abc/artifacts?project_root=%2Ftmp%2Fdemo"
   );
@@ -401,64 +401,7 @@ test("runBatchWorkflow posts y_list and x as form data", async () => {
   expect(result.runs[0].model_type).toBe("ols_robust");
 });
 
-test("previewFile parses CSV and suggests y/x columns", async () => {
-  const file = new File(
-    [
-      "outcome,treatment,revenue,firm_id,date\n",
-      "10,1,100,a,2026-01-01\n",
-      "12,0,120,b,2026-01-02\n",
-      "15,1,150,c,2026-01-03\n",
-    ],
-    "sample.csv",
-    { type: "text/csv" },
-  );
-
-  const preview = await previewFile(file);
-
-  expect(preview.fileName).toBe("sample.csv");
-  expect(preview.rowCount).toBe(3);
-  expect(preview.columnCount).toBe(5);
-  expect(preview.previewRows).toHaveLength(3);
-  expect(preview.suggestedY).toBe("outcome");
-  expect(preview.suggestedX).toEqual(["treatment", "revenue"]);
-  expect(preview.columns.find((column) => column.name === "outcome")).toMatchObject({
-    dtype: "numeric",
-    suggestedRole: "y",
-    missingRate: 0,
-    uniqueCount: 3,
-  });
-  expect(preview.columns.find((column) => column.name === "firm_id")).toMatchObject({
-    dtype: "string",
-    suggestedRole: "id",
-  });
-});
-
-test("previewFile parses XLSX first sheet", async () => {
-  const sheet = XLSX.utils.json_to_sheet([
-    { target: 1, x1: 10, x2: 100, user_id: "u1" },
-    { target: 2, x1: 20, x2: 200, user_id: "u2" },
-    { target: 3, x1: 30, x2: 300, user_id: "u3" },
-  ]);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Data");
-  const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const file = new File([data], "sample.xlsx", {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const preview = await previewFile(file);
-
-  expect(preview.fileName).toBe("sample.xlsx");
-  expect(preview.rowCount).toBe(3);
-  expect(preview.columnCount).toBe(4);
-  expect(preview.suggestedY).toBe("target");
-  expect(preview.suggestedX).toEqual(["x1", "x2"]);
-  expect(preview.columns.find((column) => column.name === "x1")).toMatchObject({
-    dtype: "numeric",
-    suggestedRole: "x",
-    mean: 20,
-  });
-});
+// previewFile is covered in api.spreadsheetPreview.test.ts and api.statisticalPreview.test.ts.
 
 test("connectRunEvents wires step events and terminal close", () => {
 

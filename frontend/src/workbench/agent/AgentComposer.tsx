@@ -1,7 +1,10 @@
+import { AgentRunControls, agentTurnActive } from "./AgentRunControls";
 import { useEffect, useRef, useState } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
 import { ContextUsageRing } from "./ContextUsageRing";
+import { useAgentSlashCommands } from "./useAgentSlashCommands";
+import { activeToolActivityLabel, observableActivity } from "./toolActivity";
 import "./agent.css";
 
 export function AgentComposer({
@@ -31,6 +34,7 @@ function CompactAgentComposer({
   onExpand?: () => void;
 }) {
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+  const { handleCommand, feedback } = useAgentSlashCommands(agent, onExpand);
   const observedActiveTurn = useRef(false);
   const [compactTurn, setCompactTurn] = useState<{
     startedAt: number;
@@ -41,11 +45,13 @@ function CompactAgentComposer({
   const remainingTokens = agent.contextWindowTokens === null
     ? 0
     : Math.max(0, agent.contextWindowTokens - agent.contextUsedTokens);
-  const isActive = agent.isSubmitting || ["running", "working"].includes(agent.sessionStatus.toLowerCase());
-  const activityStartAt = agent.activeTurnStartedAt ?? compactTurn?.startedAt ?? null;
+  const isActive = agentTurnActive(agent);
+  const activityStartAt = agent.activeTurnStartedAt
+    ?? (!isActive || compactTurn?.completedAt === undefined ? compactTurn?.startedAt : null)
+    ?? null;
   const activityEndAt = isActive ? now : compactTurn?.completedAt ?? now;
   const elapsedSeconds = activityStartAt === null
-    ? 0
+    ? null
     : Math.max(0, Math.floor((activityEndAt - activityStartAt) / 1_000));
   const hasActivity = isActive || compactTurn?.completedAt !== undefined;
 
@@ -71,6 +77,7 @@ function CompactAgentComposer({
   }, [compactTurn, isActive]);
 
   const submitCompactPrompt = () => {
+    if (handleCommand(agent.prompt)) return;
     if (agent.prompt.trim().length === 0 || isActive) return;
     observedActiveTurn.current = false;
     setCompactTurn({ startedAt: Date.now() });
@@ -78,8 +85,8 @@ function CompactAgentComposer({
   };
 
   const activityText = isActive
-    ? `Working · ${elapsedSeconds}s · ${compactActivityLabel(agent.lastEventType)}`
-    : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds}s`;
+    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${activeToolActivityLabel(agent.activeToolCalls) ?? observableActivity(agent.lastEventType)}`
+    : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`}`;
 
   return (
     <div className="wb-agent-compact-composer-shell">
@@ -88,12 +95,14 @@ function CompactAgentComposer({
           type="button"
           className="wb-agent-compact-activity"
           aria-label="View Agent activity"
+          title={activityText}
           onClick={onExpand}
         >
           <span>{activityText}</span>
           <span aria-hidden="true">›</span>
         </button>
       )}
+      <AgentRunControls />
       <div className="wb-agent-compact-composer-row">
         <div
           data-testid="agent-compact-composer"
@@ -116,7 +125,10 @@ function CompactAgentComposer({
             placeholder="Ask about the current analysis"
             onChange={(event) => agent.setPrompt(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (event.key === "Escape" && agentTurnActive(agent) && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void agent.abortTurn();
+              } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submitCompactPrompt();
               }
@@ -147,6 +159,12 @@ function CompactAgentComposer({
             ))}
           </select>
         </label>
+            {isActive && agent.prompt.trim().startsWith("/") && (
+              <button type="button" aria-label="Run Agent command" title="Run command (Enter)"
+                className="wb-agent-send" onClick={submitCompactPrompt}>
+                <span aria-hidden="true">↑</span>
+              </button>
+            )}
             {isActive ? (
               <button
                 type="button"
@@ -183,16 +201,9 @@ function CompactAgentComposer({
           <span aria-hidden="true">▲</span>
         </button>
       </div>
+      {feedback && <p role={feedback.error ? "alert" : "status"} className="wb-agent-command-feedback">{feedback.text}</p>}
     </div>
   );
-}
-
-function compactActivityLabel(lastEventType: string | null): string {
-  const eventType = lastEventType?.toLowerCase() ?? "";
-  if (eventType.includes("tool")) return "Checking evidence";
-  if (eventType.includes("proposal")) return "Preparing proposal";
-  if (eventType.includes("response") || eventType.includes("message")) return "Drafting answer";
-  return "Working";
 }
 
 function AgentComposerContent({
@@ -205,6 +216,11 @@ function AgentComposerContent({
   variant: "graph" | "terminal";
 }) {
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+  const { handleCommand, feedback } = useAgentSlashCommands(agent);
+  const submit = () => {
+    if (handleCommand(agent.prompt)) return;
+    if (agent.prompt.trim() && !agentTurnActive(agent)) void agent.sendPrompt(agent.prompt);
+  };
 
   const {
     contextUsedTokens,
@@ -217,7 +233,6 @@ function AgentComposerContent({
     capabilityCatalog,
     prompt,
     scopeLabel,
-    sendPrompt,
     sessionStatus,
     setModel,
     setPrompt,
@@ -231,6 +246,7 @@ function AgentComposerContent({
       data-testid="agent-composer"
       className={`wb-agent-composer${variant === "terminal" ? " wb-agent-terminal-composer" : ""}`}
     >
+      <AgentRunControls />
       <div className="wb-agent-composer-input-row">
         {variant === "terminal" && (
           <span
@@ -249,9 +265,12 @@ function AgentComposerContent({
           placeholder="Ask about the current analysis or request a typed change and rerun"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Escape" && agentTurnActive(agent) && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              void sendPrompt(prompt);
+              void abortTurn();
+            } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit();
             }
           }}
         />
@@ -291,7 +310,7 @@ function AgentComposerContent({
               role="listbox"
               aria-label="Agent model"
               value={model}
-              disabled={isSubmitting || modelOptions.length === 0}
+              disabled={agentTurnActive(agent) || modelOptions.length === 0}
               onChange={(event) => void setModel(event.target.value)}
             >
               {modelOptions.length === 0 && <option value={model}>{model}</option>}
@@ -320,11 +339,17 @@ function AgentComposerContent({
           >
             <span aria-hidden="true">⌁</span>
           </button>
-          {isSubmitting ? (
+          {agentTurnActive(agent) && prompt.trim().startsWith("/") && (
+            <button type="button" aria-label="Run Agent command" title="Run command (Enter)"
+              className="wb-agent-send" onClick={submit}>
+              <span aria-hidden="true">↑</span>
+            </button>
+          )}
+          {agentTurnActive(agent) ? (
             <button
               type="button"
               aria-label="Stop Agent"
-              title="Stop the current Agent request"
+              title="Stop (Esc)"
               className="wb-agent-stop"
               onClick={() => void abortTurn()}
             >
@@ -336,13 +361,14 @@ function AgentComposerContent({
               aria-label="Send to Agent"
               className="wb-agent-send"
               disabled={prompt.trim().length === 0}
-              onClick={() => void sendPrompt(prompt)}
+              onClick={submit}
             >
               <span aria-hidden="true">↑</span>
             </button>
           )}
         </div>
       </div>
+      {feedback && <p role={feedback.error ? "alert" : "status"} className="wb-agent-command-feedback">{feedback.text}</p>}
       {error && (
         <div role="alert" className="wb-agent-error">
           {error}

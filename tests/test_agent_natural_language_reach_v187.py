@@ -245,7 +245,7 @@ def test_the_genesis_executor_merges_the_run_level_declarations():
 
     source = (
         Path(__file__).parent.parent
-        / "backend/workbench/agent/workflow_runtime.py"
+        / "backend/workbench/agent/workflow_runtime_parts/models.py"
     ).read_text()
 
     assert "genesis_run_params" in source, (

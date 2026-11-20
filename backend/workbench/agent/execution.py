@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event, RLock
 from typing import Any, Protocol
 
 import fcntl
 
+from ..contracts.common.errors import OperationValidationError
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .risk import RiskAuthorizationRequired, RiskAuthorizationStore
 
@@ -30,7 +33,9 @@ class ChainExecutionLease:
     Operation records prevent two executors from claiming the same proposal.
     This second key prevents two different proposals from mutating the same
     Chain head concurrently, even when each HTTP request constructs a fresh
-    WorkbenchOrchestrator instance.
+    WorkbenchOrchestrator instance. A live holder retains its OS file lock
+    until release; the JSON deadline governs recovery only after that lock is
+    free, never takeover from a worker that is still running.
     """
 
     def __init__(
@@ -47,6 +52,8 @@ class ChainExecutionLease:
         self.active_head_run_id = active_head_run_id
         self.execution_key = execution_key
         self.lease_seconds = lease_seconds
+        self._lock = RLock()
+        self._handle = None
         identity = json.dumps(
             {"chain_id": chain_id, "active_head_run_id": active_head_run_id},
             ensure_ascii=False,
@@ -60,10 +67,18 @@ class ChainExecutionLease:
         )
 
     def acquire(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._lock:
+            if self._handle is not None:
+                return
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            handle = self._path.open("a+", encoding="utf-8")
             try:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise OperationClaimConflict(
+                        "another operation is executing against the same Chain active head"
+                    ) from exc
                 handle.seek(0)
                 raw = handle.read().strip()
                 current = json.loads(raw) if raw else {}
@@ -71,6 +86,7 @@ class ChainExecutionLease:
                 expires_at = float(current.get("expires_at", 0) or 0)
                 if current.get("status") == "active" and expires_at > now:
                     if current.get("execution_key") == self.execution_key:
+                        self._handle = handle
                         return
                     raise OperationClaimConflict(
                         "another operation is executing against the same Chain active head"
@@ -88,15 +104,18 @@ class ChainExecutionLease:
                 json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
                 handle.write("\n")
                 handle.flush()
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                self._handle = handle
+            except BaseException:
+                handle.close()
+                raise
 
     def release(self) -> None:
-        if not self._path.exists():
-            return
-        with self._path.open("r+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._lock:
+            handle = self._handle
+            if handle is None:
+                return
             try:
+                handle.seek(0)
                 raw = handle.read().strip()
                 current = json.loads(raw) if raw else {}
                 if current.get("execution_key") != self.execution_key:
@@ -108,7 +127,11 @@ class ChainExecutionLease:
                 handle.write("\n")
                 handle.flush()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                self._handle = None
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    handle.close()
 
 
 def _now() -> datetime:
@@ -222,8 +245,10 @@ class WorkbenchOperationLifecycle:
         lease_owner: str,
         failpoint: OperationFailpoint | None = None,
         risk_authorization_store: RiskAuthorizationStore | None = None,
+        project_root: Path | None = None,
     ) -> None:
         self.operation_store = operation_store
+        self.project_root = project_root
         self.operation_registry = operation_registry
         self.handlers = handlers
         self.lease_owner = lease_owner
@@ -232,6 +257,59 @@ class WorkbenchOperationLifecycle:
 
     async def execute(self, record_id: str) -> OperationRecord:
         record = self.operation_store.get(record_id)
+        from ..native_research import NATIVE_RESEARCH_OPERATIONS
+
+        cancellable_math = record.operation_id == 'operation.multi_step' and any(
+            step.get('operation_id') in {'iv.ar_confidence', *NATIVE_RESEARCH_OPERATIONS}
+            for step in record.changes.get('steps', [])
+        )
+        if cancellable_math:
+            # Reuse this operation's caller cancellation and owned lifetime.
+            # The math layer only receives a check; it imports no Agent state.
+            from ..checks.ar_cancellation import cancellation_scope
+            requested = Event()
+            reason = []
+
+            def request_cancel(error):
+                if not requested.is_set():
+                    reason.append(error)
+                    requested.set()
+
+            def check_cancel():
+                if requested.is_set():
+                    raise reason[0]
+
+            with cancellation_scope(check_cancel):
+                return await self._execute_draining(record_id, request_cancel=request_cancel)
+        return await self._execute_draining(record_id)
+
+    async def _execute_draining(self, record_id, *, request_cancel=None):
+        # Cancelling an await on to_thread does not stop its native worker.
+        # Keep the whole effect/commit/lease lifetime owned until it drains,
+        # rather than cancelling the handler and releasing a still-live lease.
+        # Exact AR additionally observes the same cancellation in its native
+        # and root-certification loops. Other effects retain drain semantics.
+        owned = asyncio.create_task(self._execute_owned(record_id))
+        try:
+            return await asyncio.shield(owned)
+        except asyncio.CancelledError as error:
+            if request_cancel is not None:
+                request_cancel(error)
+            while not owned.done():
+                try:
+                    await asyncio.shield(owned)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            # Retrieve a drained failure even when cancellation wins the
+            # caller-facing outcome; no task exception should be abandoned.
+            if not owned.cancelled():
+                owned.exception()
+            raise
+
+    async def _execute_owned(self, record_id: str) -> OperationRecord:
+        record = self.operation_store.get(record_id)
         definition = self.operation_registry.require(
             record.operation_id,
             record.operation_version,
@@ -239,14 +317,29 @@ class WorkbenchOperationLifecycle:
         handler = self.handlers[definition.executor_key]
         validate = getattr(handler, "validate", None)
         if validate is not None:
-            validation = validate(record)
-            if inspect.isawaitable(validation):
-                await validation
+            try:
+                validation = validate(record)
+                if inspect.isawaitable(validation):
+                    await validation
+            except OperationValidationError as exc:
+                # The plan cannot run. Say so on the record: left pending, the Agent is told it ran and looks for results.
+                return self.operation_store.append_status(
+                    record.record_id, "failed",
+                    error={"type": type(exc).__name__, "message": str(exc)},
+                    effect_status="failed", projection_status="failed",
+                )
         key = execution_key(
             proposal_id=record.proposal_id,
             revision=record.proposal_revision,
             fingerprint=record.proposal_fingerprint,
         )
+        from ..operation_approvals import OperationApprovalStore
+
+        OperationApprovalStore(self.operation_store.root).require_binding(
+            record.execution.get("approval_id"), proposal_id=record.proposal_id,
+            fingerprint=record.proposal_fingerprint, execution_key=key,
+            reconcile=bool(record.execution.get("bindings")) or record.effect_status == "committed")
+        first_dispatch = record.status == "pending" and not record.execution.get("execution_key")
         record = self.operation_store.claim_execution(
             record_id,
             execution_key=key,
@@ -255,26 +348,6 @@ class WorkbenchOperationLifecycle:
         self.failpoint.hit("after_claim", record)
         domain_lease: Any = None
         try:
-            if definition.requires_risk_authorization:
-                authorization_id = record.execution.get("risk_authorization_id")
-                if not authorization_id or self.risk_authorization_store is None:
-                    raise RiskAuthorizationRequired(
-                        "high-risk operation requires a consumed risk authorization"
-                    )
-                self.risk_authorization_store.require_consumed(
-                    str(authorization_id),
-                    operation_id=record.operation_id,
-                    operation_version=record.operation_version,
-                    proposal_id=record.proposal_id,
-                    revision=record.proposal_revision,
-                    fingerprint=record.proposal_fingerprint,
-                    session_id=record.agent_session_id,
-                    chain_id=record.chain_id,
-                    active_head_run_id=str(
-                        record.preconditions.get("active_head_run_id") or ""
-                    ),
-                    execution_key=key,
-                )
             acquire_domain_lease = getattr(handler, "acquire_domain_lease", None)
             if acquire_domain_lease is not None:
                 domain_lease = acquire_domain_lease(
@@ -283,6 +356,22 @@ class WorkbenchOperationLifecycle:
                 )
                 if inspect.isawaitable(domain_lease):
                     domain_lease = await domain_lease
+            # Common to native operations and the CF4 handler. Check after
+            # acquiring the domain lease so an undo cannot race dispatch.
+            validate_session = getattr(handler, "validate_session", None)
+            if validate_session is not None:
+                validate_session(record)
+            from .extension_runtime import dispatch_hooks
+            hook_facts = {"operation_ids": sorted({record.operation_id, *(
+                item["operation_id"] for item in record.changes.get("steps", []))}),
+                "record_id": record.record_id}
+            if self.project_root is not None and not record.execution.get("bindings") and record.effect_status != "committed":
+                dispatch_hooks(self.project_root, "before_operation", hook_facts, key=key)
+            admit_research = getattr(handler, "admit_research", None)
+            if admit_research is not None:
+                proof = admit_research(record, first_dispatch=first_dispatch)
+                record = self.operation_store.append_status(record.record_id, record.status,
+                    execution=merge_execution(record.execution, {"research_specification": proof}))
             prepare = getattr(handler, "prepare", None)
             if prepare is not None:
                 prepared = prepare(
@@ -308,6 +397,7 @@ class WorkbenchOperationLifecycle:
                 )
             else:
                 self.failpoint.hit("before_child_effect", record)
+                OperationApprovalStore(self.operation_store.root).start(record.execution["approval_id"], execution_key=key)
                 effect = handler.execute(
                     record,
                     execution_key=key,
@@ -423,7 +513,18 @@ class WorkbenchOperationLifecycle:
                 published = publish_state(terminal, phase=terminal.status)
                 if inspect.isawaitable(published):
                     await published
-            return terminal
+            return self._after_operation(terminal, key=key)
+        except asyncio.CancelledError as exc:
+            cancelled = self.operation_store.append_status(
+                record.record_id, 'cancelled', execution=record.execution,
+                error={'type': type(exc).__name__, 'message': str(exc)},
+                effect_status='failed', projection_status='complete')
+            publish_state = getattr(handler, 'publish_state', None)
+            if publish_state is not None:
+                published = publish_state(cancelled, phase='cancelled')
+                if inspect.isawaitable(published):
+                    await published
+            raise
         except (InjectedOperationCrash, OperationClaimConflict):
             raise
         except Exception as exc:
@@ -472,7 +573,7 @@ class WorkbenchOperationLifecycle:
                 published = publish_state(failed, phase="failed")
                 if inspect.isawaitable(published):
                     await published
-            return failed
+            return self._after_operation(failed, key=key)
         finally:
             release_domain_lease = getattr(handler, "release_domain_lease", None)
             if domain_lease is not None and release_domain_lease is not None:
@@ -483,3 +584,19 @@ class WorkbenchOperationLifecycle:
                 )
                 if inspect.isawaitable(released):
                     await released
+
+    def _after_operation(self, record, *, key):
+        if self.project_root is None:
+            return record
+        from .extension_runtime import dispatch_hooks
+        from .extensions import ExtensionError
+        try:
+            dispatch_hooks(self.project_root, "after_operation",
+                {"operation_ids": sorted({record.operation_id, *(
+                    item["operation_id"] for item in record.changes.get("steps", []))}),
+                 "record_id": record.record_id, "status": record.status}, key=key)
+        except (ExtensionError, OSError):
+            # An observer cannot change a committed success or the original failure.
+            return self.operation_store.append_status(record.record_id, record.status,
+                execution=merge_execution(record.execution, {"extension_hook_error": "after_operation"}))
+        return record

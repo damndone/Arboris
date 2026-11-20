@@ -23,6 +23,8 @@ from ...agent.navigation import (
     AgentNavigationRef,
 )
 from ...agent.proposals import ProposalConfirmation, ProposalDecision, ProposalRevision
+from ...agent.plans import Plan, PlanProposalRef, PlanStep
+from ...agent.turn_store import TurnRecord
 from ...analysis_loop.recovery import RecoveryAction
 from ...analysis_loop.validation import PacketStatus
 from .common import JsonSchema, define_view, view_of, viewed
@@ -42,12 +44,141 @@ PublicProposal = view_of(
     record_type=Literal["revision"],
     status=str,
     readable=list[str],
+    session_grant_class=NotRequired[Literal["analyze", "derive", "modify"]],
     confirmation=NotRequired[ProposalConfirmationView],
     decision=NotRequired[ProposalDecisionView],
 )
 ActivityOperationItem = view_of(AgentActivityItem, "ActivityOperationItem", kind=Literal["operation"])
 ActivityEventItem = view_of(AgentActivityEventItem, "ActivityEventItem", kind=Literal["event"])
 IntentDecisionView = view_of(AnalysisLoopDecision, "IntentDecisionView", omit=("packets",))
+PlanProposalRefView = view_of(PlanProposalRef, "PlanProposalRefView")
+AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str,
+                          proposal_ref=NotRequired[PlanProposalRefView],
+                          completed_operation_ids=NotRequired[list[str]])
+AgentTurnRecord = view_of(TurnRecord, "AgentTurnRecord")
+
+
+class AgentPlanVersion(TypedDict):
+    version: int
+    status: str
+    updated_at: str
+
+
+class AgentPlanResponse(TypedDict):
+    plan: AgentAnalysisPlan | None
+    versions: list[AgentPlanVersion]
+
+
+class AgentPlanMutationResponse(TypedDict):
+    plan: AgentAnalysisPlan
+
+
+class AgentPlanPreflightCheck(TypedDict):
+    level: Literal["L0", "L1"]
+    status: Literal["passed", "deferred", "blocked"]
+    code: str
+    message: str
+    operation_id: NotRequired[str]
+    workflow_step_id: NotRequired[str]
+    columns: NotRequired[list[str]]
+    parameter_fields: NotRequired[list[str]]
+
+
+class AgentPlanPreflightSource(TypedDict):
+    run_id: str
+    node_ref: str
+    artifact_id: str
+    sha256: str
+
+
+class AgentPlanPreflightStep(TypedDict):
+    step_id: str
+    status: Literal["ready", "deferred", "blocked"]
+    checks: list[AgentPlanPreflightCheck]
+    estimated_seconds: float | None
+    source: NotRequired[AgentPlanPreflightSource]
+
+
+class AgentPlanPreflightResponse(TypedDict):
+    plan_id: str
+    plan_version: int
+    status: Literal["ready", "deferred", "blocked"]
+    can_approve: bool
+    steps: list[AgentPlanPreflightStep]
+
+
+class PlanCriterionTextSlot(TypedDict):
+    criterion_index: int
+
+
+class PlanOutputSlot(TypedDict):
+    step_id: str
+    output_index: int
+
+
+PlanCriterionSlot = PlanCriterionTextSlot | PlanOutputSlot
+
+
+class PlanRequirementOperation(TypedDict):
+    step_id: str
+    operation_id: str
+    spec: dict[str, Any]
+
+
+class PlanRequirementDefinition(TypedDict):
+    id: str
+    covers: list[PlanCriterionSlot]
+    operation: PlanRequirementOperation
+    allow_not_applicable: NotRequired[bool]
+
+
+class PlanCompletionView(TypedDict, total=False):
+    scope: str
+    playbooks: list[str]
+    source: dict[str, Any]
+    target: dict[str, Any]
+    requirements: list[PlanRequirementDefinition]
+
+
+AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView],
+                           completion=NotRequired[PlanCompletionView], completion_evidence=NotRequired[dict[str, Any]],
+                           task_requirements=NotRequired[dict[str, Any]])
+
+
+class PlanVerifiedArtifact(TypedDict):
+    run_id: str
+    artifact_id: str
+    sha256: NotRequired[str]
+
+
+class PlanRequirementVerification(TypedDict):
+    id: str
+    status: str
+    reason: str
+    verified_artifacts: list[PlanVerifiedArtifact]
+
+
+class PlanCriteriaVerification(TypedDict):
+    plan_id: str
+    plan_version: int
+    basis_sha256: str
+    status: str
+    requirements: list[PlanRequirementVerification]
+    unbound_slots: list[PlanCriterionSlot]
+    unchecked_requirements: NotRequired[list[str]]
+
+
+class AgentPlanVerificationResponse(TypedDict):
+    plan_id: str
+    plan_version: int
+    status: str
+    playbook_status: str
+    criteria_not_machine_checked: NotRequired[bool]
+    criteria_verification: PlanCriteriaVerification
+
+
+class AgentTurnStateResponse(TypedDict):
+    turns: list[AgentTurnRecord]
 
 
 class HierarchyNodeView(TypedDict):
@@ -86,15 +217,38 @@ class AgentCompactionView(TypedDict):
     summarized_messages: int
 
 
+class AgentAttachment(TypedDict):
+    attachment_id: str
+    name: str
+    kind: str
+    media_type: str
+    bytes: int
+    sha256: str
+
+
+class AgentContextPart(TypedDict):
+    label: str
+    tokens: int
+
+
 class AgentContextUsage(TypedDict):
     """How full the next request is, as the server will send it."""
 
     estimated_tokens: int
+    #: The same estimate by kind, largest first.
+    breakdown: NotRequired[list[AgentContextPart]]
     window_tokens: int
     #: False: the model declares no window and ``window_tokens`` is assumed.
     window_declared: bool
     #: Above this the older conversation is summarized before the next step.
     compact_at_tokens: int
+
+
+class AgentToolActivity(TypedDict):
+    """What a tool step was about and how long the tool took; absent when unknown."""
+
+    target: str | None
+    seconds: float | None
 
 
 class AgentMessage(TypedDict):
@@ -106,13 +260,17 @@ class AgentMessage(TypedDict):
     name: str | None
     stop_reason: str | None
     error: str | None
+    reasoning: NotRequired[str]
+    attachments: NotRequired[list[AgentAttachment]]
     numeric_check: NotRequired[NumericCheckUnverified | NumericCheckFailed]
     navigation: list[NavigationRefView]
     compaction: NotRequired[AgentCompactionView]
+    activity: NotRequired[AgentToolActivity]
 
 
 class AgentSession(TypedDict):
     session_id: str
+    execution_mode: NotRequired[Literal["ask", "auto"]]
     role: Literal["main", "chain"] | None
     chain_id: str | None
     status: str | None
@@ -133,11 +291,23 @@ class AgentChapter(TypedDict):
     at: str
 
 
+class AgentRestoredFocus(TypedDict):
+    kind: Literal["project", "dataset", "node", "plan", "report"]
+    id: str
+    run_id: NotRequired[str | None]
+
+
+class AgentRestoredLineage(TypedDict):
+    run_id: str | None
+    focus: AgentRestoredFocus | None
+
+
 class AgentSessionChange(TypedDict):
     """A session after a rewind or fork, and the message to put back in the input."""
 
     session: AgentSession
     restored_prompt: str | None
+    lineage: NotRequired[AgentRestoredLineage]
 
 
 class AgentTurn(TypedDict):
@@ -148,6 +318,12 @@ class AgentTurn(TypedDict):
 
 class AgentTurnCancelling(TypedDict):
     status: Literal["cancelling"]
+    session_id: str
+
+
+class AgentMessageQueued(TypedDict):
+    status: Literal["queued"]
+    queue: Literal["steer", "follow_up"]
     session_id: str
 
 
@@ -295,6 +471,10 @@ class ProposalStatus(TypedDict):
     status: str
 
 
+class ProposalDeclined(ProposalStatus):
+    continue_after_decline: bool
+
+
 class ProposalConfirmed(TypedDict):
     proposal: PublicProposal
     operation: OperationRecordView
@@ -362,6 +542,9 @@ class AgentConversation(TypedDict):
     status: str | None
     #: The conversation it branched from, if any.
     forked_from: str | None
+    desktop_notifications: NotRequired[bool]
+    desktop_notifications_supported: NotRequired[bool]
+    desktop_notification_status: NotRequired[str | None]
 
 
 class AgentConversations(TypedDict):
@@ -371,3 +554,9 @@ class AgentConversations(TypedDict):
 class AgentConversationDeleted(TypedDict):
     session_id: str
     deleted: bool
+
+
+class OperationApprovalRevoked(TypedDict):
+    approval_id: str
+    status: Literal["revoked"]
+    operation_record_id: str

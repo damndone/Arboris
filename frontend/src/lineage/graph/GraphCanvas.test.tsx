@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -560,17 +560,42 @@ describe("GraphCanvas", () => {
       );
     });
 
-    it("locks node dragging in automatic layouts and enables it in Manual", () => {
+    it.each(["lr", "tb"])("keeps the %s arrangement until a node is moved", async (mode) => {
       renderCanvas();
-      expect(screen.getByTestId("graph-canvas-root")).toHaveAttribute(
-        "data-nodes-draggable",
-        "false",
-      );
-      fireEvent.click(screen.getByTestId("toolbar-layout-free"));
-      expect(screen.getByTestId("graph-canvas-root")).toHaveAttribute(
-        "data-nodes-draggable",
-        "true",
-      );
+      const automatic = screen.getByTestId(`toolbar-layout-${mode}`);
+      const manual = screen.getByTestId("toolbar-layout-free");
+      fireEvent.click(automatic);
+
+      const card = screen.getByText("Cleaned data");
+      const view = card.ownerDocument.defaultView!;
+      const node = card.closest<HTMLElement>(".react-flow__node")!;
+      const other = document.querySelector<HTMLElement>(".react-flow__node:not([data-id='stage:cleaned'])")!;
+      const startingPosition = node.style.transform;
+      const otherPosition = other.style.transform;
+      const mouse = (type: "mouseDown" | "mouseMove" | "mouseUp", target: HTMLElement | Window, clientX: number, clientY: number) => {
+        const event = createEvent[type](target, { button: 0, clientX, clientY });
+        // d3-drag listens on event.view, which jsdom's constructor cannot receive from Vitest.
+        Object.defineProperty(event, "view", { value: view });
+        fireEvent(target, event);
+      };
+
+      mouse("mouseDown", card, 100, 100);
+      mouse("mouseUp", view, 100, 100);
+      expect(automatic).toHaveAttribute("aria-pressed", "true");
+
+      mouse("mouseDown", card, 100, 100);
+      mouse("mouseMove", view, 145, 135);
+      mouse("mouseUp", view, 145, 135);
+      // Let d3's drag-related click suppression expire before the next click.
+      await new Promise<void>((resolve) => view.setTimeout(resolve, 0));
+
+      expect(manual).toHaveAttribute("aria-pressed", "true");
+      expect(node.style.transform).not.toBe(startingPosition);
+      expect(other.style.transform).toBe(otherPosition);
+
+      fireEvent.click(automatic);
+      expect(automatic).toHaveAttribute("aria-pressed", "true");
+      expect(node.style.transform).toBe(startingPosition);
     });
 
     it("clicking Horizontal flips aria-pressed to LR", () => {

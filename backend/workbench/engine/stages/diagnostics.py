@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ...figure_plans import defer_figures
 from ..context import ModelingContext, RunEnv
 from ...domain import GuardrailIssue, Severity
 
@@ -249,6 +250,7 @@ class DiagnosticsStage:
                 fitted=fitted,
                 nobs=result.get("nobs") if isinstance(result.get("nobs"), int) else None,
                 inputs=model_input_ids,
+                facts={"outcome_type": ctx.artifacts.get("_data_detected_y_type")},
             )
             # The report's VIF table shows the check library's design-level
             # GVIF, so it cannot disagree with the issue raised from it.
@@ -313,35 +315,64 @@ class DiagnosticsStage:
                     model_input_ids,
                 )
 
+                from ..completion_evidence import publish_completion_evidence
+                from ..iv_diagnostics import iv_point_definition
+
+                native = iv_fitted.model
+                primary = dict(model_results)['iv_2sls_1']
+                definition = iv_point_definition(native)
+                publish_completion_evidence(ctx, env, primary, point_definition=definition,
+                    retained_positions=np.flatnonzero(native.notnull),
+                    diagnostics={'iv': iv_diag}, diagnostic_artifact_ids=['iv_diagnostics'])
+
         if model_type == "did":
-            from ..did_diagnostics import build_did_diagnostics
-            did_fitted = fitted_models.get("did_1")
+            from ..did_diagnostics import build_did_diagnostics, prepare_did_att
+
+            did_model_id = "did_1"
+            did_fitted = fitted_models.get(did_model_id)
             norm = ctx.artifacts.get("_did_normalized")
             if did_fitted is not None and norm is not None:
-                # Diagnostics are supplementary: did_1 is already fit + written.
-                # A failure here must NOT fail the run — degrade to an
-                # "unavailable" artifact and continue.
+                from ..panel_diagnostics import panel_evidence
+
+                covariance, cluster = ctx.artifacts.get("_panel_covariance") or ("clustered", None)
+                # Finish the consumers of the ATT fit before allocating the event-study fit.
+                del fitted_models[did_model_id]
+                del fitted  # The diagnostics loop retains its last fit in a local.
+                prepared_att = prepare_did_att(did_fitted)
+                primary = dict(model_results)[did_model_id]
                 try:
-                    covariance, cluster = ctx.artifacts.get("_panel_covariance") or ("clustered", None)
-                    did_diag = build_did_diagnostics(
-                        did_fitted, norm, norm.frame, covariance=covariance, cluster_col=cluster,
+                    panel, positions, definition = panel_evidence(
+                        did_fitted, primary, norm.frame, y=norm.y, x=["_did_D", *normalized_x],
+                        entity=norm.entity, time=norm.time, cluster=cluster,
                     )
-                except Exception as exc:  # noqa: BLE001 - any failure degrades
-                    did_diag = {"available": False, "error": str(exc)}
-                # v1.6.6 V: capture the TWFE event study for the event-study
-                # figure. {event_time, coef, se} — the shape create_figures wants.
-                if isinstance(did_diag, dict):
-                    did_event_study = did_diag.get("event_study")
-                did_diag_path = run_root / "did_diagnostics.json"
-                write_json(did_diag_path, did_diag)
-                register_artifact(
-                    run_root,
-                    "did_diagnostics",
-                    did_diag_path,
-                    "model_diagnostic",
-                    "econometrics",
-                    model_input_ids,
-                )
+                    panel.pop("residuals", None)  # Completion publishes the summary only.
+                finally:
+                    del did_fitted
+                    # Preserve the supplementary artifact even if panel evidence fails.
+                    try:
+                        did_diag = build_did_diagnostics(
+                            None, norm, norm.frame, covariance=covariance, cluster_col=cluster,
+                            prepared_att=prepared_att,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - did_1 already exists
+                        did_diag = {"available": False, "error": str(exc)}
+                    if isinstance(did_diag, dict):
+                        did_event_study = did_diag.get("event_study")
+                    did_diag_path = run_root / "did_diagnostics.json"
+                    write_json(did_diag_path, did_diag)
+                    register_artifact(
+                        run_root,
+                        "did_diagnostics",
+                        did_diag_path,
+                        "model_diagnostic",
+                        "econometrics",
+                        model_input_ids,
+                    )
+                from ..completion_evidence import publish_completion_evidence
+
+                publish_completion_evidence(ctx, env, primary, point_definition=definition,
+                    retained_positions=positions, diagnostics={'panel': panel, 'did': did_diag},
+                    diagnostic_artifact_ids=['did_diagnostics'])
 
         if model_type == "cs_did":
             cs_result = ctx.artifacts.get("_cs_did_result")
@@ -559,17 +590,13 @@ class DiagnosticsStage:
             else:
                 env.step("estimation", "complete", "Model(s) fitted")
 
-        env.step("visualization", "start", "Creating figures...")
         numeric_columns = [
             str(column)
             for column in cleaned.select_dtypes(include="number").columns
         ]
-        create_figures(
-            cleaned,
-            run_root,
+        figure_options = dict(
             numeric_columns=numeric_columns,
             time_column=time_candidates[0] if time_candidates else None,
-            model_results=model_results,
             outcome_column=normalized_y if normalized_y in cleaned.columns else None,
             regressors=normalized_x,
             model_type=model_type,
@@ -579,7 +606,14 @@ class DiagnosticsStage:
             did_event_study=did_event_study,
             exposure_column=exposure_col or None,
         )
-        env.step("visualization", "complete", "Created diagnostic figures")
+        # Figures are drawn when first read, from the files this run has written (figure_plans).
+        env.step("visualization", "start", "Creating figures...")
+        if defer_figures(run_root, model_result_ids=[artifact_id for artifact_id, _ in model_results],
+                         **figure_options):
+            env.step("visualization", "complete", "Figures are drawn when first opened")
+        else:
+            create_figures(cleaned, run_root, model_results=model_results, **figure_options)
+            env.step("visualization", "complete", "Created diagnostic figures")
 
         ctx.artifacts["_diagnostic_artifacts"] = diagnostic_artifacts
         return ctx

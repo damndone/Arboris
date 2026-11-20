@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Iterator
 
 from .project_index_contract import ProjectContextIndex, ProjectIndexError
+from ..jsonl_store import jsonl_lines
 
 
 _JOURNAL_NAME = "project-context-index.jsonl"
@@ -168,7 +169,7 @@ class ProjectContextIndexStore:
         if len(raw) > _MAX_JOURNAL_BYTES or (raw and not raw.endswith(b"\n")):
             raise ProjectIndexStoreError("index journal is truncated or too large")
         records: list[ProjectContextIndex] = []
-        for line_number, line in enumerate(raw.splitlines(), start=1):
+        for line_number, line in enumerate(jsonl_lines(raw), start=1):
             try:
                 event = json.loads(line.decode("utf-8"), object_pairs_hook=_strict_object_pairs)
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:

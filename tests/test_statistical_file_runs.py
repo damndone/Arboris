@@ -219,10 +219,12 @@ def test_upload_preview_returns_rows_labels_and_the_full_row_count(tmp_path) -> 
     assert body["labels"]["value_labels"]["region"]["2"] == "南方"
 
 
-def test_upload_preview_refuses_csv_and_corrupt_files(tmp_path) -> None:
+def test_upload_preview_refuses_unsupported_and_corrupt_files(tmp_path) -> None:
+    # CSV and Excel are previewed by the server since the 2026-11-06 risk review's finding 4
+    # (tests/test_upload_preview_tabular.py); a format no reader imports is still refused.
     project = create_project(tmp_path, "preview-refused")
     for name, payload, code in (
-        ("d.csv", b"a,b\n1,2\n", "UPLOAD_PREVIEW_UNSUPPORTED"),
+        ("d.txt", b"a,b\n1,2\n", "UPLOAD_PREVIEW_UNSUPPORTED"),
         ("d.sav", b"garbage", "UPLOAD_PREVIEW_UNREADABLE"),
     ):
         response = client.post(

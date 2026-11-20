@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any
 from ...artifacts import read_json
 from ..bounds import _public_positive_int, _public_stat_number
+from ..context_compiler import model_evidence_ref
 from .requests import (
     _MAX_PUBLIC_MODEL_PREDICTORS,
 )
+from .identification import _identification_fields, _omitted_terms
 from .summaries import (
     _bounded_by_group,
     _bounded_inference,
@@ -25,6 +27,7 @@ def _public_requested_model_coefficients(
     result: dict[str, Any],
     requested_terms: tuple[str, ...],
     labeler: Any = None,
+    run_root: Path | None = None,
 ) -> dict[str, Any] | None:
     """Project one stored result into term-specific, non-row evidence."""
 
@@ -56,6 +59,7 @@ def _public_requested_model_coefficients(
                     else None
                 ),
                 **_pooled_coefficient_fields(coefficient),
+                **_identification_fields(result, term, coefficient),
             }
         )
 
@@ -124,6 +128,7 @@ def _public_requested_model_coefficients(
         "by_group": _bounded_by_group(result),
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
+        **({"omitted_terms": _omitted_terms(result)} if _omitted_terms(result) else {}),
         # When a requested term is absent, name the terms that do exist, so a
         # request for `region` can find C(Q('region'))[T.2] instead of guessing.
         **(
@@ -136,11 +141,7 @@ def _public_requested_model_coefficients(
             if missing_terms
             else {}
         ),
-        "evidence_ref": {
-            "run_id": run_id,
-            "model_id": model_id,
-            "result_ref": f"model_results:{model_id}",
-        },
+        "evidence_ref": model_evidence_ref(run_root, result, run_id=run_id),
     }
 
 

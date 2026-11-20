@@ -41,6 +41,7 @@ DEFAULT_CPU_SECONDS = 10
 DEFAULT_MEMORY_BYTES = 1_024 * 1_024 * 1_024  # 1 GiB
 DEFAULT_WALL_SECONDS = 30.0
 DEFAULT_OUTPUT_BYTES = 64 * 1_024 * 1_024  # 64 MiB
+_MEMORY_POLL_SECONDS = 0.05
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -117,6 +118,18 @@ def _scrubbed_env(home: Path) -> dict[str, str]:
     }
 
 
+def _process_group_rss_bytes(group: int) -> int:
+    """Resident bytes of one process group; 0 when it cannot be read."""
+    try:
+        completed = subprocess.run(
+            ["/bin/ps", "-o", "rss=", "-g", str(group)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1, check=False,
+        )
+        return sum(int(line) for line in completed.stdout.split()) * 1024
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
 def _apply_rlimits(limits: SandboxLimits):
     def _preexec() -> None:  # pragma: no cover - runs in the child process
         resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds))
@@ -124,8 +137,7 @@ def _apply_rlimits(limits: SandboxLimits):
         try:
             resource.setrlimit(resource.RLIMIT_AS, (limits.memory_bytes, limits.memory_bytes))
         except (ValueError, OSError):
-            # Some platforms refuse RLIMIT_AS for the interpreter itself; CPU and
-            # file-size limits still bound the damage.
+            # macOS refuses RLIMIT_AS; run_python_sandboxed also watches the group's memory.
             pass
         os.setsid()
 
@@ -202,15 +214,28 @@ def run_python_sandboxed(
                 preexec_fn=_apply_rlimits(effective),
                 close_fds=True,
             )
+            deadline = started + effective.wall_seconds
+            over_memory = False
             try:
-                returncode = process.wait(timeout=effective.wall_seconds)
-            except subprocess.TimeoutExpired as exc:
-                timed_out = True
-                _kill_process_group(process)
-                process.wait()
-                raise SandboxTimeoutError(
-                    f"sandboxed code exceeded {effective.wall_seconds}s wall clock"
-                ) from exc
+                while True:
+                    try:
+                        returncode = process.wait(
+                            timeout=max(0.0, min(_MEMORY_POLL_SECONDS, deadline - time.monotonic()))
+                        )
+                        break
+                    except subprocess.TimeoutExpired as exc:
+                        if time.monotonic() >= deadline:
+                            timed_out = True
+                            _kill_process_group(process)
+                            process.wait()
+                            raise SandboxTimeoutError(
+                                f"sandboxed code exceeded {effective.wall_seconds}s wall clock"
+                            ) from exc
+                    if _process_group_rss_bytes(process.pid) > effective.memory_bytes:
+                        over_memory = True
+                        _kill_process_group(process)
+                        returncode = process.wait()
+                        break
             finally:
                 if not timed_out:
                     # A transform can spawn a descendant and exit immediately;
@@ -219,6 +244,8 @@ def run_python_sandboxed(
         duration = time.monotonic() - started
         stdout = _read_capped_output(stdout_path, effective.output_bytes)
         stderr = _read_capped_output(stderr_path, effective.output_bytes)
+        if over_memory:
+            stderr += f"\nstopped: the code exceeded its {effective.memory_bytes // 1_048_576} MiB memory limit\n"
 
     return SandboxResult(
         returncode=returncode,

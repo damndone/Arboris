@@ -14,6 +14,7 @@ from typing import Any, Iterator
 
 from ..custom_capability.canonical import domain_digest
 from .scope import MemoryScope
+from ..jsonl_store import jsonl_lines
 
 
 class ReviewJobError(ValueError):
@@ -164,7 +165,7 @@ class ReviewJobStore:
         if len(raw) > _MAX_BYTES or (raw and not raw.endswith(b"\n")):
             raise ReviewJobError("job journal is truncated or too large")
         result: list[ReviewJobRecord] = []
-        for number, line in enumerate(raw.splitlines(), start=1):
+        for number, line in enumerate(jsonl_lines(raw), start=1):
             try:
                 event = json.loads(line.decode("utf-8"), object_pairs_hook=self._pairs)
                 if not isinstance(event, dict) or set(event) != {"record_type", "record"} or event["record_type"] != "review_job":

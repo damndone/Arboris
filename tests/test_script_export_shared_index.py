@@ -11,7 +11,7 @@ from workbench.services.script_export import export_analysis_script
 
 
 def test_postestimation_registration_survives_export_publication(model_path,tmp_path,monkeypatch):
-    import workbench.agent.workflow_runtime as runtime
+    import workbench.agent.workflow_runtime_parts.postestimation as runtime
     from workbench.script_export import storage
     project,run_id,_ = clone(model_path,tmp_path)
     export_open = threading.Event(); writer_started = threading.Event(); writer_finished = threading.Event()

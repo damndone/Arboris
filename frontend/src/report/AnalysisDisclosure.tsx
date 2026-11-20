@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiUrl, readResponse } from "../api";
+import type { Schema } from "../apiTypes";
 
 export type DisclosureLine = {
   at: string;
@@ -26,6 +27,7 @@ export type AnalysisDisclosureValue = {
   changes: DisclosureLine[];
   entries: DisclosureLine[];
   entries_omitted: number;
+  research_specifications?: Schema<"ResearchSpecificationSections">;
   settings: { include_in_exports: boolean; detail: "summary" | "full" };
 };
 
@@ -133,6 +135,19 @@ export function AnalysisDisclosure({ projectRoot, runId }: { projectRoot?: strin
             ))}
           </ul>
         )}
+        {value.research_specifications && <div>
+          <p>Labels reflect Workbench&apos;s observed order on the same original data. They do not establish external preregistration or scientific validity.</p>
+          {(["pre_specified", "exploratory"] as const).map(key => <section key={key}>
+            <h4>{key === "pre_specified" ? "Pre-specified analyses" : "Exploratory analyses"}</h4>
+            {value.research_specifications![key].length ? <ul>
+              {value.research_specifications![key].map((row,index) => <li key={`${row.record_id}:${row.step_id}:${index}`}>
+                <code>{row.step_id} / {row.operation_id}</code> · {row.status} · {row.verification}: {row.reason}
+                <br /><small>Source: {row.run_id ?? "Unverified"} · Execution: {row.record_id ?? "Unverified"}
+                  {row.specification_event_id && <> · Evidence: {row.specification_event_id}</>}</small>
+              </li>)}
+            </ul> : <p>No analyses with this classification are recorded.</p>}
+          </section>)}
+        </div>}
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input

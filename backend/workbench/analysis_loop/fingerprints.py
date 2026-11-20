@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from .canonical import canonical_json_v1, sha256_canonical
@@ -32,11 +33,38 @@ def dataset_snapshot_fingerprint(
     return _fingerprint("dataset_snapshot_v1", value)
 
 
+def _decimal_ids(values: Any) -> bool:
+    """A list or tuple of nonempty strings of ASCII decimal digits."""
+    if type(values) not in (list, tuple):
+        return False
+    if not values:
+        return True
+    if set(map(type, values)) != {str}:
+        return False
+    joined = "".join(values)
+    return joined.isascii() and joined.isdecimal() and all(values)
+
+
+def _quoted(values: list[str] | tuple[str, ...]) -> str:
+    """json.dumps of strings that need no escaping, with separators (",", ":")."""
+    return '["' + '","'.join(values) + '"]' if values else "[]"
+
+
 def analysis_sample_fingerprint(
     row_set: Any,
     row_order: Any,
 ) -> str:
     """Fingerprint membership and the order in which rows enter estimation."""
+
+    # Decimal ASCII IDs need neither normalization nor JSON escaping. Their
+    # ordinary lexical order matches the quoted canonical sort keys, including
+    # prefixes and leading zeroes. Keep arbitrary iterables on the old path.
+    if _decimal_ids(row_set) and (row_order is row_set or _decimal_ids(row_order)):
+        wire = (
+            '{"fingerprint_type":"analysis_sample_v1","value":{"row_order":'
+            + _quoted(row_order) + ',"row_set":' + _quoted(sorted(row_set)) + "}}"
+        ).encode("ascii")
+        return hashlib.sha256(wire).hexdigest()
 
     row_set_value = sorted(
         row_set,
@@ -46,6 +74,21 @@ def analysis_sample_fingerprint(
         "analysis_sample_v1",
         {"row_set": row_set_value, "row_order": row_order},
     )
+
+
+def analysis_sample_fingerprint_native(row_set: Any, row_order: Any) -> str:
+    """Explicit decimal-ID candidate; default selection remains the reference.
+
+    No sample size has performance acceptance for this encoder yet. Missing
+    optional builds and unsupported shapes retain the existing Python/error
+    semantics; present incompatible builds and computation errors propagate.
+    """
+    from ..native_canonical import encode_analysis_sample_v1
+
+    encoded = encode_analysis_sample_v1(row_set, row_order)
+    if encoded is None:
+        return analysis_sample_fingerprint(row_set, row_order)
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def point_estimation_fingerprint(

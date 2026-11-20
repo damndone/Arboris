@@ -15,11 +15,17 @@ import pandas as pd
 def _two_by_two_did(panel: pd.DataFrame, y, time, treat_group, ctrl_group,
                     pre_periods, post_periods) -> float:
     """Standard 2x2 DiD: (treat_post - treat_pre) - (ctrl_post - ctrl_pre)."""
-    def cell(group, periods):
-        sub = panel[(panel["_grp"] == group) & (panel[time].isin(periods))]
-        return sub[y].mean()
-    return ((cell(treat_group, post_periods) - cell(treat_group, pre_periods))
-            - (cell(ctrl_group, post_periods) - cell(ctrl_group, pre_periods)))
+    cohorts = panel["_grp"]
+    times = panel[time]
+    cohort_mask = cohorts == treat_group
+    post = times.isin(post_periods)
+    treated_post = panel.loc[cohort_mask & post, y].mean()
+    pre = times.isin(pre_periods)
+    treated_change = treated_post - panel.loc[cohort_mask & pre, y].mean()
+    cohort_mask = cohorts == ctrl_group
+    return treated_change - (
+        panel.loc[cohort_mask & post, y].mean() - panel.loc[cohort_mask & pre, y].mean()
+    )
 
 
 def goodman_bacon_decompose(frame: pd.DataFrame, *, y: str, entity: str, time: str,
@@ -33,14 +39,15 @@ def goodman_bacon_decompose(frame: pd.DataFrame, *, y: str, entity: str, time: s
     Never-treated units are encoded either as NaN or as a non-positive cohort
     value (0 / <=0 sentinel) and form the never-treated control group U.
     """
-    df = frame.copy()
+    df = frame.copy(deep=False)  # Rebind complete columns without modifying the input.
     df[time] = pd.to_numeric(df[time], errors="coerce")
     df["_cohort_val"] = pd.to_numeric(df[cohort], errors="coerce")
     # Goodman-Bacon is defined for balanced panels. Enforce it loudly rather than
     # returning a silently-wrong decomposition on ragged data.
     counts = df.groupby(entity)[time].nunique()
-    period_set_sizes = df.groupby(entity)[time].apply(lambda s: tuple(sorted(s.unique())))
-    if counts.nunique() != 1 or period_set_sizes.nunique() != 1:
+    # Every unit holds all distinct periods exactly when all units hold the same set.
+    observed_times = df[time].unique()
+    if df[time].isna().any() or counts.nunique() != 1 or counts.iloc[0] != len(observed_times):
         raise ValueError(
             "DID_UNBALANCED_PANEL: Goodman-Bacon decomposition requires a balanced "
             "panel (every unit observed in the same set of periods)."
@@ -49,7 +56,7 @@ def goodman_bacon_decompose(frame: pd.DataFrame, *, y: str, entity: str, time: s
     never_mask = df["_cohort_val"].isna() | (df["_cohort_val"] <= 0)
     df["_grp"] = df["_cohort_val"].where(~never_mask, np.inf)
 
-    times = sorted(df[time].unique())
+    times = sorted(observed_times)
     n_periods = len(times)
     groups = sorted(g for g in df["_grp"].unique())
     treated_groups = [g for g in groups if np.isfinite(g)]
@@ -57,7 +64,7 @@ def goodman_bacon_decompose(frame: pd.DataFrame, *, y: str, entity: str, time: s
 
     n_total = df[entity].nunique()
     # Group sample shares n_k (fraction of units in timing group k).
-    share = {g: df[df["_grp"] == g][entity].nunique() / n_total for g in groups}
+    share = {g: df.loc[df["_grp"] == g, entity].nunique() / n_total for g in groups}
     # Fraction of time each treated group spends treated, Dbar_k, on the common
     # balanced time grid.
     Dbar = {}

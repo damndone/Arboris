@@ -10,6 +10,7 @@ import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage as scipy_linkage
 from scipy.spatial.distance import cdist
 
+from workbench import native_kernels
 from workbench.contracts.model.multivariate import make_result_envelope
 
 from .common import MultivariatePackError, json_native, prepare_numeric_frame
@@ -137,14 +138,17 @@ def _kmeans(
     tol: float,
 ) -> tuple[np.ndarray, np.ndarray, float, int]:
     rng = np.random.default_rng(random_state)
+    values = np.ascontiguousarray(values, dtype=float)
     n_observations = values.shape[0]
     first_index = int(rng.integers(0, n_observations))
     center_indices = [first_index]
     for _ in range(1, n_clusters):
-        distances = np.min(
-            np.square(values[:, None, :] - values[center_indices][None, :, :]).sum(axis=2),
-            axis=1,
-        )
+        distances = native_kernels.min_distances(values, values[center_indices])
+        if distances is None:
+            distances = np.min(
+                np.square(values[:, None, :] - values[center_indices][None, :, :]).sum(axis=2),
+                axis=1,
+            )
         distances[center_indices] = 0.0
         total = float(distances.sum())
         if total <= 0.0:
@@ -156,16 +160,20 @@ def _kmeans(
     labels = np.full(n_observations, -1, dtype=int)
     iterations = 0
     for iterations in range(1, max_iter + 1):
-        distances = np.square(values[:, None, :] - centers[None, :, :]).sum(axis=2)
-        new_labels = np.argmin(distances, axis=1)
-        new_centers = np.empty_like(centers)
-        for cluster in range(n_clusters):
-            members = values[new_labels == cluster]
-            if len(members) == 0:
-                farthest = int(np.argmax(np.min(distances, axis=1)))
-                new_centers[cluster] = values[farthest]
-            else:
-                new_centers[cluster] = members.mean(axis=0)
+        step = native_kernels.lloyd_step(values, centers)
+        if step is not None:
+            new_labels, new_centers = step
+        else:
+            distances = np.square(values[:, None, :] - centers[None, :, :]).sum(axis=2)
+            new_labels = np.argmin(distances, axis=1)
+            new_centers = np.empty_like(centers)
+            for cluster in range(n_clusters):
+                members = values[new_labels == cluster]
+                if len(members) == 0:
+                    farthest = int(np.argmax(np.min(distances, axis=1)))
+                    new_centers[cluster] = values[farthest]
+                else:
+                    new_centers[cluster] = members.mean(axis=0)
         shift = float(np.max(np.linalg.norm(new_centers - centers, axis=1)))
         converged = np.array_equal(new_labels, labels) or shift <= tol
         centers = new_centers
@@ -181,12 +189,9 @@ def _kmeans(
     return labels, centers, float(final_distances.sum()), iterations
 
 
-def _silhouette(values: np.ndarray, labels: np.ndarray, metric: str) -> float:
+def _silhouette(values: np.ndarray, labels: np.ndarray, metric: str) -> float | None:
     if len(values) > MAX_SILHOUETTE_OBSERVATIONS:
-        raise MultivariatePackError(
-            "MULTIVARIATE_RESOURCE_BOUND",
-            f"silhouette evaluation is bounded at {MAX_SILHOUETTE_OBSERVATIONS} observations",
-        )
+        return None
     unique_labels = np.unique(labels)
     if len(unique_labels) < 2:
         raise MultivariatePackError(
@@ -297,6 +302,15 @@ def fit_clustering(
         candidate_ks=candidate_ks,
         n_observations=len(values),
     )
+    # Both of these need every pairwise distance, n^2 memory; say so before allocating it.
+    if len(values) > MAX_SILHOUETTE_OBSERVATIONS and (
+        selection_name == "silhouette_candidates" or algorithm_name == "hierarchical"
+    ):
+        raise MultivariatePackError(
+            "MULTIVARIATE_RESOURCE_BOUND",
+            "silhouette selection and hierarchical clustering are bounded at "
+            f"{MAX_SILHOUETTE_OBSERVATIONS} observations; use kmeans with a fixed n_clusters",
+        )
     candidate_metrics: list[dict[str, object]] = []
     fitted: tuple[np.ndarray, np.ndarray | None, float | None, int | None] | None = None
     for candidate in candidate_values:
@@ -369,7 +383,7 @@ def fit_clustering(
         "n_clusters": winner_k,
         "candidate_metrics": candidate_metrics,
         "silhouette": next(
-            float(row["silhouette"])
+            row["silhouette"]
             for row in candidate_metrics
             if int(row["n_clusters"]) == winner_k
         ),

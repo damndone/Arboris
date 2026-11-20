@@ -18,6 +18,7 @@ from .contracts import (
 )
 from .scope import MemoryScope
 from .source_access import SourceAccessBinding, SourceAccessValidityRecord
+from ..jsonl_store import jsonl_lines
 
 
 class DomainMemoryStoreError(DomainMemoryContractError):
@@ -285,7 +286,7 @@ class DomainMemoryStore:
             "memory_validity": DomainMemoryValidityRecord.from_dict,
         }
         records: list[tuple[str, Any]] = []
-        for line_number, line in enumerate(raw.splitlines(), start=1):
+        for line_number, line in enumerate(jsonl_lines(raw), start=1):
             try:
                 event = json.loads(line.decode("utf-8"), object_pairs_hook=_strict_pairs)
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:

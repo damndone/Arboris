@@ -12,11 +12,13 @@ def test_live_gap_declarations_have_one_generic_workflow_entry_each() -> None:
         declared_workflow_capability_ids,
         workflow_capability_registry,
     )
+    from workbench.native_research import NATIVE_RESEARCH_OPERATIONS
 
     declared = declared_workflow_capability_ids()
     registry = workflow_capability_registry()
 
-    assert len(declared) == 18
+    assert set(NATIVE_RESEARCH_OPERATIONS) <= set(declared)
+    assert len(declared) == len(set(declared))
     assert set(registry.operation_ids()) == set(declared)
     for operation_id in declared:
         operation = registry.require(operation_id)

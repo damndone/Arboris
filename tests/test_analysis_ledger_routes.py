@@ -16,7 +16,9 @@ NO_ANALYSIS = "runs no analysis and changes no data"
 EXEMPT: dict[tuple[str, str], str] = {
     # Agent: proposals are records; execution is recorded by the lifecycle.
     ("POST", "/agent/sessions"): NO_ANALYSIS,
+    ("POST", "/agent/attachments"): NO_ANALYSIS,
     ("POST", "/llm/providers/models/discover"): "lists a provider's models; persists nothing",
+    ("POST", "/runs/{run_id}/figures"): "draws the run's deferred figures from its own recorded inputs; decides nothing",
     ("POST", "/agent/sessions/{session_id}/analysis-loop/context"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/analysis-loop/intents"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/analysis-loop/proposals"): NO_ANALYSIS,
@@ -25,8 +27,15 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/proposals/{proposal_id}/revise"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm"): LIFECYCLE,
     ("POST", "/agent/sessions/{session_id}/operations/{record_id}/reconcile"): LIFECYCLE,
+    ("POST", "/agent/sessions/{session_id}/operations/{record_id}/revoke-approval"): "revokes an execution approval; does not execute or roll back an analysis",
     ("POST", "/agent/sessions/{session_id}/turns"): "read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/abort"): NO_ANALYSIS,
+    ("POST", "/agent/sessions/{session_id}/steer"): NO_ANALYSIS,
+    ("POST", "/agent/sessions/{session_id}/follow_up"): NO_ANALYSIS,
+    ("POST", "/agent/sessions/{session_id}/plan/approve"): "records criteria_fixed before plan activation; no analysis executes, and planned executions are recorded by the lifecycle",
+    ("PATCH", "/agent/sessions/{session_id}/plan"): "records human plan revisions and question-change intent; analyses still use the recorded operation lifecycle",
+    ("POST", "/agent/sessions/{session_id}/continue"): "a turn like /turns: read-only workflows it runs are recorded by the lifecycle",
+    ("POST", "/agent/sessions/{session_id}/resume"): "repairs original receipts without recounting analyses; any subsequent execution is recorded by the shared lifecycle",
     # Conversation management (v1.9.0): the conversation log and its display
     # metadata only; no data, model or result changes.
     ("POST", "/agent/sessions/{session_id}/rewind"): "moves the conversation's leaf; the log keeps every entry",
@@ -37,6 +46,10 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("PATCH", "/agent/conversations/{session_id}"): "renames, archives or restores a conversation",
     ("DELETE", "/agent/conversations/{session_id}"): "deletes a conversation log; ledger, proposals and records stay",
     ("PUT", "/agent/instructions"): "writes the person's or the project's AGENTS.md",
+    ("PUT", "/projects/agent-permissions"): "writes project permission settings without dispatching operations",
+    ("PUT", "/projects/agent-extensions"): "pins a human-reviewed extension catalog; does not run a tool or analysis",
+    ("POST", "/projects/agent-extensions/disable"): "changes catalog availability only; queries still use the recorded lifecycle",
+    ("POST", "/projects/agent-extensions/review"): "validates and hashes a manifest without changing project state",
     # Manual execution shares the same recorded operation lifecycle.
     ("POST", "/operations/run"): LIFECYCLE,
     # Typed UI data operations that run through the operation lifecycle.
@@ -84,6 +97,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/llm/providers/{provider_id}/activate"): NO_ANALYSIS,
     ("DELETE", "/llm/providers/{provider_id}"): NO_ANALYSIS,
     ("POST", "/llm/providers/{provider_id}/models/refresh"): NO_ANALYSIS,
+    ("POST", "/llm/providers/{provider_id}/models/detect"): "updates provider-reported model metadata; runs no analysis and changes no project data",
     ("POST", "/llm/providers/{provider_id}/probe"): NO_ANALYSIS,
     ("POST", "/llm/chat"): "narrates existing results",
     ("POST", "/domain-memory/settings/confirmations"): NO_ANALYSIS,

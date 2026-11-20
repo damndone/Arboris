@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 
 def test_did_handler_registered():
@@ -180,3 +181,144 @@ def test_did_end_to_end_writes_diagnostics_and_calls_run_did(tmp_path, monkeypat
     # artifact registered in the index
     idx = read_json(run_root / "artifacts_index.json")
     assert any(a["artifact_id"] == "did_diagnostics" for a in idx["artifacts"])
+
+
+def test_did_primary_direct_design_matches_formula_with_cluster_drops(tmp_path, monkeypatch):
+    from workbench import orchestrator
+    from workbench.artifacts import read_json
+    from workbench.contracts.model.inference_kernel import kernel_relative_path
+    from workbench.econometrics import panel_design
+    from workbench.engine import did_spec
+
+    src = _staggered_csv(tmp_path)
+    data = pd.read_csv(src)
+    data["district"] = (data.groupby("id").ngroup() // 2).astype(float)
+    data.loc[0, "district"] = np.nan
+    data["x1"] = np.random.default_rng(12).normal(size=len(data))
+    data.loc[1, "x1"] = np.nan
+    data.to_csv(src, index=False)
+
+    normalized_frames = []
+    primary_designs = []
+    normalize = did_spec.normalize_did_input
+    eligible = panel_design.formula_free_columns
+    real_run_did = orchestrator.run_did
+
+    def observe_normalization(*args, **kwargs):
+        norm = normalize(*args, **kwargs)
+        normalized_frames.append((norm.frame, norm.frame["_did_D"].copy()))
+        return norm
+
+    def observe_design(frame, columns):
+        direct = eligible(frame, columns)
+        if "_did_D" in columns:
+            primary_designs.append(direct)
+        return direct
+
+    def run_with_formula(frame, **kwargs):
+        formula_frame = frame.copy(deep=False)
+        formula_frame["_did_D"] = frame["_did_D"].astype("int64")
+        return real_run_did(formula_frame, **kwargs)
+
+    def run(name):
+        project = create_project(tmp_path, name)
+        outcome = _rw(project.root, [src], mode="auto", model_type="did", y="y", x=["x1"],
+                      entity_col="id", time_col="year", did_mode="cohort",
+                      did_cohort_col="first_treat", model_options={"cluster": "district"})
+        assert outcome["status"] == "completed"
+        return project.root / "runs" / outcome["run_id"]
+
+    monkeypatch.setattr(did_spec, "normalize_did_input", observe_normalization)
+    monkeypatch.setattr(panel_design, "formula_free_columns", observe_design)
+    direct_root = run("direct")
+    with monkeypatch.context() as forced_formula:
+        forced_formula.setattr(orchestrator, "run_did", run_with_formula)
+        formula_root = run("formula")
+
+    assert primary_designs == [True, False]
+    assert len(normalized_frames) == 2
+    for frame, old_indicator in normalized_frames:
+        assert old_indicator.dtype.kind == "i"
+        pd.testing.assert_series_equal(frame["_did_D"], old_indicator)
+    artifacts = (
+        "model_results/did_1.json",
+        kernel_relative_path("did_1"),
+        "model_results/checks_did_1.json",
+        "model_results/diagnostics_did_1.json",
+        "did_diagnostics.json",
+        "model_results/did_1.completion.json",
+        "figures/plan.json",
+    )
+    for path in artifacts:
+        assert (direct_root / path).read_bytes() == (formula_root / path).read_bytes(), path
+
+    primary = read_json(direct_root / "model_results" / "did_1.json")
+    completion = read_json(direct_root / "model_results" / "did_1.completion.json")
+    assert primary["covariance_evidence"]["cluster_variable"] == "district"
+    assert primary["covariance_evidence"]["cluster_count"] == 3
+    assert primary["nobs"] == completion["sample"]["retained_count"] == len(data) - 2
+    direct_cleaned = pd.read_parquet(direct_root / "processed" / "cleaned_dataset.parquet")
+    formula_cleaned = pd.read_parquet(formula_root / "processed" / "cleaned_dataset.parquet")
+    assert "_did_D" not in direct_cleaned.columns
+    pd.testing.assert_frame_equal(direct_cleaned, formula_cleaned)
+
+
+def test_did_releases_primary_fit_before_event_study(tmp_path, monkeypatch):
+    from weakref import ref
+
+    from workbench import orchestrator
+    from workbench.artifacts import read_json
+    from workbench.engine import did_diagnostics
+
+    run_did = orchestrator.run_did
+    run_event_study = did_diagnostics.run_event_study
+    fit_references = []
+    lifetimes_at_event_study = []
+
+    def observe_primary_fit(frame, **kwargs):
+        primary, fitted = run_did(frame, **kwargs)
+        fit_references.extend((ref(fitted), ref(fitted.model)))
+        return primary, fitted
+
+    def observe_event_study(frame, **kwargs):
+        lifetimes_at_event_study.append(tuple(reference() is not None for reference in fit_references))
+        return run_event_study(frame, **kwargs)
+
+    monkeypatch.setattr(orchestrator, "run_did", observe_primary_fit)
+    monkeypatch.setattr(did_diagnostics, "run_event_study", observe_event_study)
+    src = _staggered_csv(tmp_path)
+    project = create_project(tmp_path, "demo")
+    result = _rw(project.root, [src], mode="auto", y="y", x=[], model_type="did",
+                 entity_col="id", time_col="year", did_mode="cohort",
+                 did_cohort_col="first_treat")
+
+    assert result["status"] == "completed"
+    assert lifetimes_at_event_study == [(False, False)]
+    run_root = project.root / "runs" / result["run_id"]
+    diagnostic = read_json(run_root / "did_diagnostics.json")
+    completion = read_json(run_root / "model_results" / "did_1.completion.json")
+    figure_plan = read_json(run_root / "figures" / "plan.json")
+    assert diagnostic["event_study"]["applicable"] is True
+    assert completion["diagnostics"]["did"] == diagnostic
+    assert figure_plan["options"]["did_event_study"] == diagnostic["event_study"]
+
+
+def test_did_keeps_supplementary_diagnostics_if_panel_evidence_fails(tmp_path, monkeypatch):
+    from workbench.artifacts import read_json
+    from workbench.engine import panel_diagnostics
+
+    error = RuntimeError("panel evidence failed after the fit")
+
+    def fail_panel_evidence(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(panel_diagnostics, "panel_evidence", fail_panel_evidence)
+    src = _staggered_csv(tmp_path)
+    project = create_project(tmp_path, "demo")
+    with pytest.raises(RuntimeError) as failure:
+        _rw(project.root, [src], mode="auto", y="y", x=[], model_type="did", entity_col="id",
+            time_col="year", did_mode="cohort", did_cohort_col="first_treat")
+    assert failure.value is error
+    run_root, = (project.root / "runs").iterdir()
+    assert read_json(run_root / "run_manifest.json")["status"] == "failed"
+    assert read_json(run_root / "did_diagnostics.json")["event_study"]["applicable"] is True

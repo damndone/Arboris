@@ -130,21 +130,21 @@ PREVIEW_ROW_LIMIT = 5000
 
 
 @router.post("/uploads/preview")
-async def preview_statistical_upload(
+async def preview_upload(
     project_root: str = Form(...),
     file: UploadFile = File(...),
+    sheet_name: str | None = Form(default=None),
+    transpose: bool = Form(default=False),
 ) -> StatisticalUploadPreview:
-    """Preview rows of an SPSS/Stata file the browser cannot parse itself.
+    """Preview the first rows of an upload as the run will import them.
 
-    CSV and Excel are previewed client-side; this returns the same row shape
-    (first rows as JSON records, codes as stored) plus the file's labels and
-    total row count, so the form can suggest roles the same way.
+    CSV and Excel are read by the import's own reader in a child process the
+    server stops after a time limit; SPSS/Stata also return their labels. The
+    total row count is the whole file's.
     """
 
-    import math
+    import asyncio
     import tempfile
-
-    import pandas as pd
 
     from ..tabular_io import (
         StatisticalFileError,
@@ -153,15 +153,17 @@ async def preview_statistical_upload(
         statistical_format,
         statistical_row_count,
     )
+    from .. import upload_preview
 
     _resolve_project_runs_dir(project_root)
     filename = Path(file.filename or "").name
+    suffix = Path(filename).suffix.lower()
     fmt = statistical_format(filename)
-    if fmt is None:
+    if fmt is None and suffix not in upload_preview.TABULAR_SUFFIXES:
         raise WorkbenchAPIError(
             status_code=422,
             code="UPLOAD_PREVIEW_UNSUPPORTED",
-            message="Server preview is only for .sav, .zsav and .dta files.",
+            message="Preview reads .csv, .xlsx, .xls, .sav, .zsav and .dta files.",
             details={"filename": filename},
         )
     config = load_config(Path(project_root) / "config.yml")
@@ -170,8 +172,20 @@ async def preview_statistical_upload(
     finally:
         await file.close()
     with tempfile.TemporaryDirectory(prefix="workbench-preview-") as directory:
-        path = Path(directory) / f"upload{Path(filename).suffix.lower()}"
+        path = Path(directory) / f"upload{suffix}"
         path.write_bytes(data)
+        if fmt is None:
+            try:
+                return await asyncio.to_thread(
+                    upload_preview.run_preview, path, sheet_name=sheet_name or None, transpose=transpose,
+                    row_limit=PREVIEW_ROW_LIMIT, max_rows=config.max_rows, max_sheets=config.max_excel_sheets,
+                ) | {"labels": {}}
+            except upload_preview.PreviewTimeout as exc:
+                raise WorkbenchAPIError(status_code=422, code="UPLOAD_PREVIEW_TIMEOUT", message=str(exc),
+                                        details={"filename": filename}) from exc
+            except upload_preview.PreviewUnreadable as exc:
+                raise WorkbenchAPIError(status_code=422, code="UPLOAD_PREVIEW_UNREADABLE", message=str(exc),
+                                        details={"filename": filename}) from exc
         try:
             header = read_table(path, nrows=0)
             frame = read_table(path, nrows=PREVIEW_ROW_LIMIT)
@@ -184,23 +198,11 @@ async def preview_statistical_upload(
                 message=str(exc),
                 details={"filename": filename},
             ) from exc
-
-    def cell(value: object) -> object:
-        if value is None or (isinstance(value, float) and math.isnan(value)):
-            return None
-        if isinstance(value, pd.Timestamp):
-            return value.isoformat()
-        if hasattr(value, "item"):
-            return value.item()
-        return value
-
-    rows = [
-        {str(column): cell(value) for column, value in record.items()}
-        for record in frame.astype(object).where(frame.notna(), None).to_dict(orient="records")
-    ]
     return {
         "columns": [str(column) for column in header.columns],
-        "rows": rows,
+        "rows": upload_preview.json_rows(frame),
         "total_rows": total_rows,
         "labels": labels,
+        "sheet_names": [],
+        "selected_sheet": None,
     }

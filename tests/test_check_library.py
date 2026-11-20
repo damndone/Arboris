@@ -45,9 +45,11 @@ def test_every_family_declares_traits_from_the_vocabulary() -> None:
 
 
 def test_every_check_declares_its_blinding_and_sourced_thresholds() -> None:
+    from workbench.checks.context import FIT_TRAIT_VOCABULARY
+
     for spec in CHECKS:
         assert spec.blinding in BLINDING_LEVELS
-        assert spec.requires <= TRAIT_VOCABULARY | {"vce.cluster", "weights.sampling"}, spec.check_id
+        assert spec.requires <= TRAIT_VOCABULARY | FIT_TRAIT_VOCABULARY, spec.check_id
         for threshold in spec.thresholds:
             assert threshold.source.strip(), (spec.check_id, threshold.name)
 

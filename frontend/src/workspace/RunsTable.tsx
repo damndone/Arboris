@@ -1,9 +1,10 @@
 // v1.9.0 — Runs, in the bottom panel (design spec §8.3 #2). The classic run
-// history rail as a table: same list, status, time and View all; choosing a
+// history rail as a table: the complete list, status and time; choosing a
 // run opens it the way the rail did.
 
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef } from "react";
+import { useRailRefreshToken } from "../workbench/RailRefreshContext";
 import type { RunSummary } from "../api";
 import { useForest } from "../workbench/ForestContext";
 import { useRunHistory } from "../lineage/runRail/useRunHistory";
@@ -16,7 +17,14 @@ function contents(run: RunSummary): string {
 }
 
 export function RunsTable({ projectRoot }: { projectRoot: string }) {
-  const { runs, loading, error } = useRunHistory(projectRoot);
+  const { runs, loading, error, refresh } = useRunHistory(projectRoot);
+  const refreshToken = useRailRefreshToken();
+  const previousToken = useRef(refreshToken);
+  useEffect(() => {
+    if (previousToken.current === refreshToken) return;
+    previousToken.current = refreshToken;
+    refresh();
+  }, [refreshToken, refresh]);
   const activeRunId = useForest()?.activeRunId ?? null;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -41,6 +49,7 @@ export function RunsTable({ projectRoot }: { projectRoot: string }) {
 
   return (
     <div className="ws-runs">
+      <p className="ws-runs__note">All {sorted.length} {sorted.length === 1 ? "run" : "runs"}</p>
       <table className="ws-runs__table">
         <thead>
           <tr>
@@ -74,9 +83,6 @@ export function RunsTable({ projectRoot }: { projectRoot: string }) {
           })}
         </tbody>
       </table>
-      <Link className="ws-runs__all" to={`/runs?project_root=${encodeURIComponent(projectRoot)}`}>
-        View all runs
-      </Link>
     </div>
   );
 }

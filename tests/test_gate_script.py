@@ -73,7 +73,8 @@ def _run_gate(
     (worktree / "scripts").mkdir(parents=True)
     (worktree / "frontend").mkdir()
     shutil.copy2(GATE_SCRIPT, worktree / "scripts" / "gate.sh")
-    shutil.copy2(GATE_SCRIPT.with_name("gate_metrics.py"), worktree / "scripts" / "gate_metrics.py")
+    for helper_name in ("gate_metrics.py", "evidence_identity.py"):
+        shutil.copy2(GATE_SCRIPT.with_name(helper_name), worktree / "scripts" / helper_name)
     helper = GATE_SCRIPT.with_name("gate_lock.py")
     if helper.exists():
         # Patch only this isolated fixture copy, never the production entrypoint.
@@ -314,6 +315,20 @@ def test_quick_mode_verifies_formal_agent_control_files(tmp_path: Path) -> None:
     )
 
 
+def test_quick_mode_verifies_an_archived_formal_event_log(tmp_path: Path) -> None:
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        mode="--quick",
+        changed_files=(".agent/devlines/v1-9-1/events.jsonl.gz",),
+        devline_control_exit=2,
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert any(line.startswith("local:scripts/devline_control.py verify --all") for line in invocations)
+
+
 def test_quick_mode_does_not_replay_fms_history_for_product_only_change(tmp_path: Path) -> None:
     result, invocations, _ = _run_gate(
         tmp_path,
@@ -465,7 +480,8 @@ def test_gate_preserves_stage_logs_machine_timings_and_pytest_slow_items(tmp_pat
     assert summary["schema_version"] == "workbench.gate-timing/v1"
     assert summary["status"] == "passed" and summary["exit_code"] == 0
     assert summary["mode"] == "full" and summary["duration_seconds"] >= 0
-    assert len(summary["stages"]) == 5
+    assert len(summary["stages"]) == 6
+    assert summary["stages"][-1]["label"] == "FRONTEND lint (eslint --max-warnings 0)"
     assert all(stage["exit_code"] == 0 and stage["duration_seconds"] >= 0 for stage in summary["stages"])
     assert all((directories[0] / stage["log"]).is_file() for stage in summary["stages"])
     assert all((directories[0] / stage["stderr_log"]).is_file() for stage in summary["stages"])

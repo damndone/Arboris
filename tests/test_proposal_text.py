@@ -68,3 +68,21 @@ def test_the_closing_reply_uses_the_same_sentences() -> None:
     )
     assert "1. Drop rows that repeat id, keeping the first one" in text
     assert "{" not in text
+
+
+def test_experimental_fast_engine_is_visible_before_confirming_a_model_step():
+    spec = {"model_family": "iv_2sls", "covariance": "robust",
+            "branches": [{"branch_id": "iv", "outcome": "wage", "predictors": ["age"]}]}
+    default = step_sentence("model.genesis", spec, LABELS)
+    assert step_sentence("model.genesis", {**spec, "estimation_engine": "reference"}, LABELS) == default
+    fast = step_sentence("model.genesis", {**spec, "estimation_engine": "fast"}, LABELS)
+    assert fast == default + " · Experimental fast IV; resource acceptance pending"
+
+
+def test_a_single_model_proposal_does_not_hide_the_experimental_fast_engine():
+    proposal = {"operation_id": "model.genesis", "changes": {"model_params": {"model_type": "iv_2sls"}}}
+    assert proposal_lines(proposal) == ["model.genesis"]
+    proposal["changes"]["model_params"]["estimation_engine"] = "reference"
+    assert proposal_lines(proposal) == ["model.genesis"]
+    proposal["changes"]["model_params"]["estimation_engine"] = "fast"
+    assert proposal_lines(proposal) == ["model.genesis · Experimental fast IV; resource acceptance pending"]

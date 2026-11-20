@@ -21,6 +21,7 @@ from workbench.engine.packs.arma_garch.arma import (
     enumerate_arma_candidates,
 )
 from workbench.engine.packs.arma_garch.estimation import resolve_estimation_strategy
+from .completion import fitted_evidence
 from workbench.engine.packs.arma_garch.input import (
     PARSED_TIME_COLUMN,
     PARSED_VALUE_COLUMN,
@@ -643,13 +644,13 @@ def forecast_next_observation(
             variance_spec=_variance_spec(variance_candidate),
             hold_back=variance_candidate.hold_back,
             state=_SequentialState(),
-            refit=True,
+            refit=True, completion_evidence=True,
         )
     elif strategy == "joint_arma_garch":
         point = _joint_arma_point_forecast(
             values, mean_candidate=mean_candidate,
             variance_spec=_variance_spec(variance_candidate), state=_JointArmaState(),
-            refit=True, time_index_semantics=contract.time_index_semantics,
+            refit=True, completion_evidence=True, time_index_semantics=contract.time_index_semantics,
         )
     else:
         point = _joint_point_forecast(
@@ -658,7 +659,7 @@ def forecast_next_observation(
             variance_spec=_variance_spec(variance_candidate),
             hold_back=variance_candidate.hold_back,
             state=_JointState(),
-            refit=True,
+            refit=True, completion_evidence=True,
         )
     interval_tail = (1.0 - contract.forecast.interval_level) / 2.0
     lower_z, q_z, upper_z = innovation_quantiles(
@@ -843,6 +844,7 @@ def _sequential_point_forecast(
     hold_back: int,
     state: _SequentialState,
     refit: bool,
+    completion_evidence: bool = False,
 ) -> _PointForecast:
     mean_model = ARIMA(
         history,
@@ -886,6 +888,15 @@ def _sequential_point_forecast(
         distribution=variance_spec.distribution,
         warnings=captured,
         refit_summary={
+            **({'analysis_evidence': fitted_evidence(history, variance_fit.std_resid,
+                burn=max(hold_back, int(mean_fit.loglikelihood_burn)),
+                model_df=mean_candidate.p+mean_candidate.q,
+                estimates={**{f'mean:{k}': v for k,v in zip(mean_fit.param_names, mean_fit.params, strict=True)},
+                           **{f'variance:{k}': v for k,v in variance_fit.params.items()}},
+                standard_errors={**{f'mean:{k}': v for k,v in zip(mean_fit.param_names, mean_fit.bse, strict=True)},
+                                 **{f'variance:{k}': v for k,v in variance_fit.std_err.items()}},
+                variance_spec=variance_spec, variance_parameters=variance_fit.params,
+                mean_ar=mean_fit.arparams, mean_ma=mean_fit.maparams)} if completion_evidence else {}),
             "fit_scope": "all_available_observations",
             "nobs": len(history),
             "effective_sample": max(0, len(history) - hold_back),
@@ -938,6 +949,7 @@ def _joint_arma_point_forecast(
     history: np.ndarray, *, mean_candidate: ArmaCandidateResult,
     variance_spec: VarianceCandidateSpec, state: _JointArmaState,
     refit: bool, time_index_semantics: str,
+    completion_evidence: bool = False,
 ) -> _PointForecast:
     from .joint_mle import fit_joint_arma_garch, filter_joint_arma_garch
 
@@ -951,6 +963,17 @@ def _joint_arma_point_forecast(
         state.parameters = dict(fitted.parameters)
         state.presample_variance = float(fitted.presample["variance"])
         state.refit_summary = {
+            **({'analysis_evidence': fitted_evidence(history,
+                np.asarray(fitted.conditional_series['residual']) / np.sqrt(fitted.conditional_series['variance']),
+                burn=0, model_df=mean_candidate.p+mean_candidate.q,
+                estimates=fitted.parameters, standard_errors=fitted.standard_errors,
+                variance_spec=variance_spec,
+                mean_ar=[fitted.parameters[f'ar{i}'] for i in range(1, mean_candidate.p+1)],
+                mean_ma=[fitted.parameters[f'ma{i}'] for i in range(1, mean_candidate.q+1)],
+                variance_parameters={**dict(fitted.parameters),
+                    **{f'alpha[{i}]': fitted.parameters[f'arch{i}'] for i in range(1, variance_spec.p+1)},
+                    **{f'beta[{i}]': fitted.parameters[f'garch{i}'] for i in range(1, variance_spec.q+1)}})}
+               if completion_evidence else {}),
             "fit_scope": "all_available_observations", "nobs": len(history),
             "effective_sample": len(history), "converged": fitted.converged,
             "finite_parameters": True, "parameters": dict(fitted.parameters),
@@ -988,6 +1011,7 @@ def _joint_point_forecast(
     hold_back: int,
     state: _JointState,
     refit: bool,
+    completion_evidence: bool = False,
 ) -> _PointForecast:
     kwargs = {
         "hold_back": hold_back,
@@ -1024,6 +1048,11 @@ def _joint_point_forecast(
         distribution=variance_spec.distribution,
         warnings=captured,
         refit_summary={
+            **({'analysis_evidence': fitted_evidence(history, fitted.std_resid,
+                burn=hold_back, model_df=mean_candidate.p+mean_candidate.q,
+                estimates=fitted.params, standard_errors=fitted.std_err,
+                variance_spec=variance_spec, variance_parameters=fitted.params,
+                mean_ar=np.asarray(fitted.params)[int(mean_candidate.constant):int(mean_candidate.constant)+mean_candidate.p])} if completion_evidence else {}),
             "fit_scope": "all_available_observations",
             "nobs": len(history),
             "effective_sample": max(0, len(history) - hold_back),

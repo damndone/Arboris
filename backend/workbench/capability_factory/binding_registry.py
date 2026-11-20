@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterator, Mapping
 from ..custom_capability.canonical import domain_digest
 from .notebook_binding import CapabilityResolutionBinding
 from .notebook_catalog import CapabilityBindingCatalog
+from ..jsonl_store import jsonl_lines
 
 
 _JOURNAL_NAME = "capability-binding-index.jsonl"
@@ -259,7 +260,7 @@ class DurableBindingIndex:
             return ()
         records: list[DurableBindingIndexRecord] = []
         seen: set[str] = set()
-        for number, line in enumerate(raw.splitlines(), start=1):
+        for number, line in enumerate(jsonl_lines(raw), start=1):
             if not line or len(line) > _MAX_RECORD_BYTES:
                 raise DurableBindingIndexError(f"binding index journal line {number} is invalid")
             try:

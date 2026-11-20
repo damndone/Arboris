@@ -81,6 +81,14 @@ def model_genesis_parameters() -> dict[str, Any]:
             # request for a factorial ANOVA had nowhere to land -- and nothing
             # failed, because prose does not fail.
             "model_family": _workflow_executable_family_sentence(),
+            "estimation_engine": (
+                "Optional run-level engine shared by all branches: reference (default) or fast. "
+                "Fast is experimental; resource acceptance pending. It is offered for numeric "
+                "iv_2sls with robust HC0 or unadjusted covariance and is not bit-identical to "
+                "reference. Uncovered IV inputs use reference with a recorded reason. Built-engine "
+                "integrity, self-check and numerical failures are errors. Omit this field to "
+                "preserve the default execution identity."
+            ),
             "covariance": (
                 "Default covariance for every branch. panel_ols and did cluster by entity when "
                 "omitted (CR1, t(G-1), as Stata's xtreg, fe vce(robust)); to cluster at the level "
@@ -144,6 +152,7 @@ def model_genesis_parameters() -> dict[str, Any]:
         required=("model_family", "branches"),
         field_types={
             "model_family": "string",
+            "estimation_engine": "string",
             "covariance": "string",
             "model_options": "object",
             "entity_col": "string",
@@ -165,5 +174,5 @@ def model_genesis_parameters() -> dict[str, Any]:
             "by_group": "string",
         },
         field_schemas={},
-        field_enums={},
+        field_enums={"estimation_engine": ("reference", "fast")},
     )

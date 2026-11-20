@@ -930,3 +930,22 @@ def test_log_rank_matches_fixed_input_r_survdiff_oracle() -> None:
     assert payload["expected"] == pytest.approx(oracle["expected"])  # type: ignore[arg-type]
     np.testing.assert_allclose(payload["covariance"], np.asarray(oracle["variance"]).reshape(2, 2))  # type: ignore[arg-type]
     assert payload["chi_square"] == pytest.approx(oracle["chi_square"])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("delayed", [False, True])
+def test_risk_counts_match_a_scan_of_every_row(seed, delayed):
+    from workbench.engine.packs.v186_model_families.runtime import _at_risk_counts, _json_safe
+
+    rng = np.random.default_rng(seed)
+    # Rounded so that times tie, as real durations do.
+    duration = np.round(rng.exponential(5, 400) + .5, 1)
+    entry = np.round(duration * rng.uniform(0, .9, 400), 1) if delayed else None
+    if delayed:
+        entry = np.minimum(entry, duration - .1)
+    points = np.unique(np.r_[duration, duration + .05])
+    expected = [int(np.sum((duration >= t) & (entry <= t if delayed else True))) for t in points]
+    assert _at_risk_counts(points, duration, entry).tolist() == expected
+    values = np.array([1.5, np.nan, np.inf, -2.0])
+    assert _json_safe(values) == [1.5, None, None, -2.0]
+    assert _json_safe(np.array([1, 2])) == [1, 2]

@@ -21,22 +21,29 @@ from workbench.development_control.context_pack import (
     ContextPackError,
     ContextPackRequest,
     create_context_pack,
+    is_formal_line_layout,
     record_context_refresh_required,
     record_context_rescope_required,
     refresh_context_pack,
     rescope_context_pack,
     verify_context_pack,
 )
-from workbench.development_control.events import EventValidationError, append_event, validate_line_id, verify_log
+from workbench.development_control.events import (
+    ARCHIVE_NAME,
+    EventValidationError,
+    append_event,
+    archive_event_log,
+    canonical_event_bytes,
+    read_verified_events,
+    validate_line_id,
+)
 from workbench.development_control.promotion import promote
 from workbench.development_control.retrospective import (
     generate_retrospective,
-    read_verified_events,
     verify_completed_retrospective,
 )
 
 
-_FORMAL_FILES = frozenset({"RETROSPECTIVE.md", "context-pack.manifest.json", "context-pack.md", "events.jsonl", "events.jsonl.anchor"})
 _LEGACY_FILES = frozenset({"CONTEXT_PACK.md", "RETROSPECTIVE.md", "events.jsonl", "line.json"})
 
 
@@ -113,6 +120,16 @@ def main(argv: list[str] | None = None) -> int:
                 verify_completed_retrospective(root / ".agent" / "devlines", args.line)
                 output["retrospective"] = report.relative_to(root).as_posix()
             _emit(output)
+        elif args.command == "archive-events":
+            _verify_formal_line(root, args.line)
+            devlines = root / ".agent" / "devlines"
+            receipt = archive_event_log(devlines, args.line)
+            archive = (devlines / args.line / ARCHIVE_NAME).relative_to(root)
+            _emit({"line_id": args.line, "archive": archive.as_posix(), **receipt})
+        elif args.command == "read-events":
+            verify_context_pack(root, args.line)
+            for event in read_verified_events(root / ".agent" / "devlines", args.line):
+                sys.stdout.buffer.write(canonical_event_bytes(event) + b"\n")
         elif args.command == "retrospective":
             output = generate_retrospective(root / ".agent" / "devlines", args.line)
             _emit({"line_id": args.line, "retrospective": output.relative_to(root).as_posix()})
@@ -174,6 +191,10 @@ def _parser() -> argparse.ArgumentParser:
     append = commands.add_parser("append", help="append one formal event from a repository-relative JSON object")
     append.add_argument("--line", required=True)
     append.add_argument("--event-file", required=True)
+    archive = commands.add_parser("archive-events", help="losslessly compact a verified formal event log in place")
+    archive.add_argument("--line", required=True)
+    read = commands.add_parser("read-events", help="emit the full verified canonical event stream as JSONL")
+    read.add_argument("--line", required=True)
     retrospective = commands.add_parser("retrospective", help="derive a retrospective from a formal event log")
     retrospective.add_argument("--line", required=True)
     promote_parser = commands.add_parser("promote", help="apply 1/2/3 promotion to all formal verified lines")
@@ -258,10 +279,12 @@ def _formal_line_ids(root: Path) -> tuple[list[str], list[str]]:
         if stat.S_ISLNK(detail.st_mode) or not stat.S_ISDIR(detail.st_mode):
             raise ContextPackError("devlines root contains an unsafe non-directory entry")
         names = {entry.name for entry in line.iterdir()}
-        if names == _FORMAL_FILES:
+        if is_formal_line_layout(names):
             validate_line_id(line.name)
             verified.append(line.name)
-        elif _LEGACY_FILES <= names and not (names & {"context-pack.md", "context-pack.manifest.json", "events.jsonl.anchor"}):
+        elif _LEGACY_FILES <= names and not (
+            names & {"context-pack.md", "context-pack.manifest.json", "events.jsonl.anchor", ARCHIVE_NAME}
+        ):
             quarantined.append(line.name)
         else:
             raise ContextPackError(f"devline {line.name!r} is neither a formal line nor a quarantined legacy record")

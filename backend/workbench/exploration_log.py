@@ -31,7 +31,7 @@ _OPTIONAL_FIELDS = frozenset(
     {"occurred_at", "phase", "artifact_ids", "dependency_fingerprints"}
 )
 _FORBIDDEN_FIELDS = frozenset({"raw_rows", "full_artifact", "full_artifacts", "dataset"})
-_STATUSES = frozenset({"planned", "running", "completed", "failed", "blocked"})
+_STATUSES = frozenset({"planned", "running", "completed", "failed", "blocked", "cancelled"})
 
 
 def _canonical(value: Any) -> Any:

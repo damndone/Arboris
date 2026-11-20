@@ -131,6 +131,7 @@ while not Path({str(release)!r}).exists(): time.sleep(.01)
         assert holder.poll() is None
     finally:
         release.touch()
-        assert holder.wait(timeout=5) == 128 + signal.SIGTERM
+        holder_stdout, holder_stderr = holder.communicate(timeout=5)
+    assert holder.returncode == 128 + signal.SIGTERM, (holder_stdout, holder_stderr)
     next_run = start(lock, "pass", tmp_path / "three")
     assert next_run.wait(timeout=5) == 0

@@ -31,7 +31,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `model.time_series.arma_garch` | Execute time_series.arma_garch through its registered model pack. |
 | `model.time_series.ets` | Execute time_series.ets through its registered model pack. |
 
-## Statistical tests (8)
+## Statistical tests (9)
 
 | Id | What it does |
 |---|---|
@@ -40,83 +40,124 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `test.correlations` | Pearson correlation for every pair of numeric analysis columns. |
 | `test.evidence` | Advanced evidence packet: effect sizes, ANOVA post-hoc comparisons, variance tests, and paired or one-sample tests for declared targets. |
 | `test.fisher_exact` | Fisher exact test of independence, for tables too sparse for the chi-square approximation. |
-| `test.nonparametric` | Mann-Whitney U and Kruskal-Wallis rank tests, for group differences without a normality assumption. |
+| `test.nonparametric` | Mann-Whitney U and Kruskal-Wallis rank tests, for group differences without a normality assumption. Wilcoxon signed-rank for pairs is test.evidence. |
+| `test.proportions` | Two independent proportions (Stata prtest, csi): rate difference with its Wald interval and the z test, risk ratio and odds ratio with log-scale intervals. Takes one binary outcome per row, or counted rows (events with trials or non-events). |
 | `test.rank_correlations` | Spearman and Kendall rank correlation, for monotonic association that is not linear. |
-| `test.t_tests` | Welch two-sample t-test of a numeric outcome across a binary group. |
+| `test.t_tests` | Welch two-sample t-test of a numeric outcome across a binary group. Two paired measurements are test.evidence with options.paired_columns. |
 
-## Statistical packs (64)
-
-| Id | What it does |
-|---|---|
-| `categorical.cramers_v` | Run the frozen categorical statistical operation through its typed, bounded adapter. |
-| `categorical.mcnemar` | Run the frozen categorical statistical operation through its typed, bounded adapter. |
-| `diagnostics.breusch_godfrey` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `diagnostics.breusch_pagan` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `diagnostics.influence` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `diagnostics.reset` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `diagnostics.vif` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `diagnostics.white` | Run the frozen model_diagnostics statistical operation through its typed, bounded adapter. |
-| `glm.beta` | Run the frozen glm_extensions statistical operation through its typed, bounded adapter. |
-| `glm.hurdle_negative_binomial` | Run the frozen glm_extensions statistical operation through its typed, bounded adapter. |
-| `glm.hurdle_poisson` | Run the frozen glm_extensions statistical operation through its typed, bounded adapter. |
-| `glm.zero_inflated_negative_binomial` | Run the frozen glm_extensions statistical operation through its typed, bounded adapter. |
-| `glm.zero_inflated_poisson` | Run the frozen glm_extensions statistical operation through its typed, bounded adapter. |
-| `iv.gmm` | Run the frozen iv_gmm statistical operation through its typed, bounded adapter. |
-| `iv.weak_instruments` | Run the frozen iv_gmm statistical operation through its typed, bounded adapter. |
-| `matching.att` | Run the frozen matching statistical operation through its typed, bounded adapter. |
-| `matching.balance` | Run the frozen matching statistical operation through its typed, bounded adapter. |
-| `meta.combine` | Run the frozen meta_analysis statistical operation through its typed, bounded adapter. |
-| `meta.effect_size` | Run the frozen meta_analysis statistical operation through its typed, bounded adapter. |
-| `missing_data.rubin_pool` | Run the frozen missing_data statistical operation through its typed, bounded adapter. |
-| `missingness.profile` | Run the frozen missing_data statistical operation through its typed, bounded adapter. |
-| `multiple_comparisons.games_howell` | Run the frozen multiple_comparisons statistical operation through its typed, bounded adapter. |
-| `multiple_comparisons.scheffe` | Run the frozen multiple_comparisons statistical operation through its typed, bounded adapter. |
-| `multivariate.clustering` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.correspondence` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.cronbach_alpha` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.discriminant` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.efa` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.manova` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.mca` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `multivariate.pca` | Run the frozen multivariate statistical operation through its typed, bounded adapter. |
-| `nonparametric.friedman` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.kendall` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.kruskal_wallis` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.mann_whitney` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.robust_summary` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.spearman` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `nonparametric.wilcoxon_signed_rank` | Run the frozen nonparametric statistical operation through its typed, bounded adapter. |
-| `power_analysis.sensitivity_grid` | Run the frozen power_analysis statistical operation through its typed, bounded adapter. |
-| `power_analysis.solve` | Run the frozen power_analysis statistical operation through its typed, bounded adapter. |
-| `repeated_measures_anova.mixed_design` | Run the frozen repeated_measures_anova statistical operation through its typed, bounded adapter. |
-| `repeated_measures_anova.repeated_only` | Run the frozen repeated_measures_anova statistical operation through its typed, bounded adapter. |
-| `resampling.bootstrap` | Run the frozen resampling statistical operation through its typed, bounded adapter. |
-| `resampling.permutation` | Run the frozen resampling statistical operation through its typed, bounded adapter. |
-| `roc.calibration` | Run the frozen roc_diagnostics statistical operation through its typed, bounded adapter. |
-| `roc.curve` | Run the frozen roc_diagnostics statistical operation through its typed, bounded adapter. |
-| `spatial.geary_c` | Run the frozen spatial_statistics statistical operation through its typed, bounded adapter. |
-| `spatial.getis_ord_g` | Run the frozen spatial_statistics statistical operation through its typed, bounded adapter. |
-| `spatial.moran_i` | Run the frozen spatial_statistics statistical operation through its typed, bounded adapter. |
-| `survival.kaplan_meier` | Run the frozen survival_analysis statistical operation through its typed, bounded adapter. |
-| `survival.log_rank` | Run the frozen survival_analysis statistical operation through its typed, bounded adapter. |
-| `survival.rmst` | Run the frozen survival_analysis statistical operation through its typed, bounded adapter. |
-| `synthetic_control.fit` | Run the frozen synthetic_control statistical operation through its typed, bounded adapter. |
-| `synthetic_control.placebo` | Run the frozen synthetic_control statistical operation through its typed, bounded adapter. |
-| `time_series.acf` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.adf` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.arima` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.cointegration` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.granger` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.irf` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.kpss` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.pacf` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.var` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-| `time_series.vecm` | Run the frozen time_series statistical operation through its typed, bounded adapter. |
-
-## Prediction models (3)
+## Statistical packs (95)
 
 | Id | What it does |
 |---|---|
+| `categorical.cramers_v` | Categorical method (typed adapter). |
+| `categorical.mcnemar` | Categorical method (typed adapter). |
+| `diagnostics.breusch_godfrey` | Model diagnostics method (typed adapter). |
+| `diagnostics.breusch_pagan` | Model diagnostics method (typed adapter). |
+| `diagnostics.influence` | Model diagnostics method (typed adapter). |
+| `diagnostics.reset` | Model diagnostics method (typed adapter). |
+| `diagnostics.vif` | Model diagnostics method (typed adapter). |
+| `diagnostics.white` | Model diagnostics method (typed adapter). |
+| `glm.beta` | Glm extensions method (typed adapter). |
+| `glm.hurdle_negative_binomial` | Glm extensions method (typed adapter). |
+| `glm.hurdle_poisson` | Glm extensions method (typed adapter). |
+| `glm.zero_inflated_negative_binomial` | Glm extensions method (typed adapter). |
+| `glm.zero_inflated_poisson` | Glm extensions method (typed adapter). |
+| `iv.gmm` | Iv gmm method (typed adapter). |
+| `iv.weak_instruments` | Iv gmm method (typed adapter). |
+| `matching.att` | Matching method (typed adapter). |
+| `matching.balance` | Matching method (typed adapter). |
+| `meta.combine` | Meta analysis method (typed adapter). |
+| `meta.effect_size` | Meta analysis method (typed adapter). |
+| `missing_data.rubin_pool` | Missing data method (typed adapter). |
+| `missingness.profile` | Missing data method (typed adapter). |
+| `multiple_comparisons.games_howell` | Multiple comparisons method (typed adapter). |
+| `multiple_comparisons.scheffe` | Multiple comparisons method (typed adapter). |
+| `multivariate.clustering` | Multivariate method (typed adapter). |
+| `multivariate.correspondence` | Multivariate method (typed adapter). |
+| `multivariate.cronbach_alpha` | Multivariate method (typed adapter). |
+| `multivariate.discriminant` | Multivariate method (typed adapter). |
+| `multivariate.efa` | Multivariate method (typed adapter). |
+| `multivariate.manova` | Multivariate method (typed adapter). |
+| `multivariate.mca` | Multivariate method (typed adapter). |
+| `multivariate.pca` | Multivariate method (typed adapter). |
+| `nonparametric.friedman` | Nonparametric method (typed adapter). |
+| `nonparametric.kendall` | Nonparametric method (typed adapter). |
+| `nonparametric.kruskal_wallis` | Nonparametric method (typed adapter). |
+| `nonparametric.mann_whitney` | Nonparametric method (typed adapter). |
+| `nonparametric.robust_summary` | Nonparametric method (typed adapter). |
+| `nonparametric.spearman` | Nonparametric method (typed adapter). |
+| `nonparametric.wilcoxon_signed_rank` | Nonparametric method (typed adapter). |
+| `power_analysis.sensitivity_grid` | Power analysis method (typed adapter). |
+| `power_analysis.solve` | Power analysis method (typed adapter). |
+| `quant.min_variance` | Estimate historical long-only weights using a completed trailing covariance window and an explicit shrinkage choice. |
+| `quant.min_variance_walk_forward` | Evaluate a fixed rolling minimum-variance policy and an equal-weight benchmark with the same fees. |
+| `quant.replay` | Replay a simulated long-only allocation in Rust with explicit signal timing and trading costs. |
+| `quant.replay_fee_comparison` | Compare two one-way fees on identical simulated targets, returns, and execution times. |
+| `quant.replay_tail_risk` | Measure realized historical VaR and expected shortfall from fee-inclusive simulated returns. |
+| `quant.rolling_risk` | Calculate native rolling volatility and latest-window covariance from aligned dated returns. |
+| `repeated_measures_anova.mixed_design` | Repeated measures anova method (typed adapter). |
+| `repeated_measures_anova.repeated_only` | Repeated measures anova method (typed adapter). |
+| `resampling.bootstrap` | Resampling method (typed adapter). |
+| `resampling.permutation` | Resampling method (typed adapter). |
+| `roc.calibration` | Roc diagnostics method (typed adapter). |
+| `roc.curve` | Roc diagnostics method (typed adapter). |
+| `spatial.geary_c` | Spatial statistics method (typed adapter). |
+| `spatial.getis_ord_g` | Spatial statistics method (typed adapter). |
+| `spatial.moran_i` | Spatial statistics method (typed adapter). |
+| `survival.kaplan_meier` | Survival analysis method (typed adapter). |
+| `survival.log_rank` | Survival analysis method (typed adapter). |
+| `survival.rmst` | Survival analysis method (typed adapter). |
+| `synthetic_control.fit` | Synthetic control method (typed adapter). |
+| `synthetic_control.placebo` | Synthetic control method (typed adapter). |
+| `time_series.acf` | Time series method (typed adapter). |
+| `time_series.adf` | Time series method (typed adapter). |
+| `time_series.arima` | Time series method (typed adapter). |
+| `time_series.arima_residual_check` | Fit nonseasonal ARIMA with an explicit Ljung–Box check on the full fit's standardized innovations. |
+| `time_series.cointegration` | Time series method (typed adapter). |
+| `time_series.correlogram` | Inspect native sample autocorrelation and partial autocorrelation before choosing lag orders. |
+| `time_series.ets_trend` | Forecast additive errors and trend with optional damping at supplied smoothing coefficients. |
+| `time_series.ets_trend_estimate` | Estimate one or both additive trend smoothing coefficients at a declared damping factor. |
+| `time_series.figarch_fixed` | Filter fractional conditional variance and forecast with supplied coefficients and a finite lag window. |
+| `time_series.granger` | Time series method (typed adapter). |
+| `time_series.holt_winters_additive` | Forecast a regular seasonal series with additive Holt-Winters at supplied smoothing parameters. |
+| `time_series.holt_winters_fit_alpha` | Select additive Holt-Winters level smoothing on the training prefix, then score the untouched holdout. |
+| `time_series.holt_winters_fit_joint` | Jointly fit the level, trend and seasonal smoothing coefficients for an additive seasonal forecast. |
+| `time_series.irf` | Time series method (typed adapter). |
+| `time_series.johansen_rank` | Compute Johansen trace and maximum-eigenvalue statistics for each candidate rank. |
+| `time_series.kpss` | Time series method (typed adapter). |
+| `time_series.local_level` | Filter a regular series and forecast with a Rust local-level Gaussian model. |
+| `time_series.local_level_fit` | Estimate the common noise scale of a local-level Gaussian model in Rust at a declared Q/R ratio. |
+| `time_series.markov_switching` | Estimate two Gaussian mean regimes with a shared variance and forecast their mixture distribution. |
+| `time_series.native_arfima` | Fit or fix fractional differencing in an exact finite-sample Gaussian model. |
+| `time_series.native_arima` | Fit a nonseasonal Gaussian AR, MA, ARMA or ARIMA and check forecasts against an optional held-out suffix. |
+| `time_series.native_arimax` | Estimate regression with nonseasonal ARIMA errors and predict under supplied future predictors. |
+| `time_series.native_egarch` | Fit asymmetric Gaussian log variance with a single future conditional variance forecast. |
+| `time_series.native_igarch` | Fit an integrated Gaussian variance model and report finite-horizon conditional variances. |
+| `time_series.native_sarima` | Fit a Gaussian multiplicative seasonal ARIMA with residual checks and an optional fixed-origin holdout. |
+| `time_series.native_sarimax` | Estimate regression with seasonal ARIMA errors and predict under supplied future predictors. |
+| `time_series.native_var` | Fit a joint VAR, predict each series and optionally inspect Granger tests or reduced-form innovation responses. |
+| `time_series.native_vecm` | Fit a bivariate Johansen VECM at a declared cointegration rank of one and forecast both levels. |
+| `time_series.native_volatility` | Fit ARCH(1), GARCH(1,1), or GJR-GARCH(1,1,1) and forecast conditional innovation variance. |
+| `time_series.pacf` | Time series method (typed adapter). |
+| `time_series.stationarity_statistic` | Compute a fixed-lag ADF unit root statistic or KPSS level stationarity statistic on one complete regular series. |
+| `time_series.var` | Time series method (typed adapter). |
+| `time_series.varma11_fixed_ma` | Estimate the bivariate AR matrix with a supplied shared diagonal MA coefficient. |
+| `time_series.vecm` | Time series method (typed adapter). |
+| `treatment_effects.estimate` | Treatment effects method (typed adapter). |
+
+## Prediction models (12)
+
+| Id | What it does |
+|---|---|
+| `prediction.native_cart` | Fit a bounded C++ CART classifier and compare held-out probabilities with training prevalence. |
+| `prediction.native_cart_regression` | Fit a C++ squared-error CART tree and score its held-out predictions against the training mean. |
+| `prediction.native_elastic_net` | Fit C++ Elastic Net with a certified first-order convergence check and a reserved test suffix. |
+| `prediction.native_forest_apply` | Apply a saved C++ regression or binary forest to new data without refitting. Classifiers add probability and 0/1 labels at probability >= 0.5. |
+| `prediction.native_logistic` | Fit native L2-penalized binary probabilities and evaluate them against the training prevalence. |
+| `prediction.native_random_forest_classification` | Fit a seeded C++ binary classification forest and evaluate held-out probabilities. |
+| `prediction.native_random_forest_regression` | Fit a seeded C++ regression forest and compare held-out predictions with the training mean. |
+| `prediction.native_ridge` | Fit C++ Ridge with an unpenalized intercept and evaluate a reserved suffix against a mean baseline. |
+| `prediction.native_ridge_selection` | Choose the ridge penalty on a validation block, then refit and score on a separate holdout. |
 | `prediction.prediction_lasso` | L1-regularized linear prediction. Execute the bounded out-of-sample prediction protocol. |
 | `prediction.prediction_random_forest` | Tree-ensemble prediction. Execute the bounded out-of-sample prediction protocol. |
 | `prediction.prediction_ridge` | L2-regularized linear prediction. Execute the bounded out-of-sample prediction protocol. |
@@ -130,7 +171,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `resample.smote` | Resample prediction-training data with SMOTE. |
 | `resample.undersample` | Resample prediction-training data with Undersample. |
 
-## Operations (34)
+## Operations (37)
 
 | Id | What it does |
 |---|---|
@@ -147,9 +188,12 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `data.recode` | Recode one variable into a NEW variable by ordered rules (SPSS RECODE INTO): single values, closed numeric ranges {low, high}, "missing", and a final "else". First matching rule wins; to: a code, null (missing) or "copy". Values no rule covers are refused unless an else rule exists. Example spec: {"column": "age", "output": "age_group", "rules": [{"from": {"high": 39, "low": 18}, "to": 1}, {"from": {"high": 120, "low": 40}, "to": 2}, {"from": "missing", "to": 9}]} |
 | `data.rename` | Rename existing columns with collision-checked mapping. Example spec: {"mapping": {"inc": "income"}} |
 | `data.reshape` | Reshape the current dataset with an explicitly declared direction. Example spec: {"direction": "wide_to_long", "id_columns": ["id"], "value_columns": ["y2020", "y2021"], "value_name": "income", "var_name": "year"} |
+| `data.row_index` | Add a column holding each row's position in the dataset's current order (1, 2, ..., n). When the rows are already in time order and the data has no time column, use it as the time column of a time-series operation, and say in the answer that row order was taken as time. Example spec: {"output": "period"} |
 | `data.subset` | Subset rows and columns with closed comparison operators. Example spec: {"columns": ["id", "age"], "filters": [{"column": "age", "op": "between", "value": [25, 55]}]} |
 | `data.tsset` | Declare and stably order a time or panel-time index. Example spec: {"frequency": "Y", "time_column": "year"} |
+| `external.query` | Send reviewed query arguments to an admitted endpoint; never send data automatically. |
 | `graph.fork` | Create a new Chain branch from the current verified node. |
+| `iv.ar_confidence` | Compute the 95% Anderson-Rubin confidence set for a fixed native IV model. |
 | `metadata.edit` | Declare or change variable labels, value labels, measurement levels or missing-value codes for any column. Never changes which variables are in the model; the run is re-estimated with the new metadata (missing codes change the sample). |
 | `model.custom` | Run one explicitly admitted custom capability through the Proposal/Risk and containment gates. |
 | `model.genesis` | Create a first-run model Draft from a verified dataset source. |
@@ -174,4 +218,10 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | Id | What it does |
 |---|---|
 | `model.auto` | Pick the best model automatically based on y type. |
+
+## network_analysis (1)
+
+| Id | What it does |
+|---|---|
+| `network.centrality` | Node centrality of one unweighted network: degree, closeness (1 / sum of shortest-path lengths, plus normalized forms), betweenness and, undirected, eigenvector. Input is an adjacency matrix (column_bindings.matrix_columns in row order, optional label_column naming each row's node) or an edge list (source_column, target_column); options.input_form says which, options.nodes limits the reported nodes. |
 

@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
+import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +27,9 @@ from typing import Any
 import pandas as pd
 
 from ..artifacts import read_json, register_artifact, write_json
-from ..data_operations import DataColumnCastValidationError, _execute_subset, _read_frame, resolve_data_column_cast_context
+from ..egress import export_boundary
+from ..data_operations import DataColumnCastValidationError, _execute_subset
+from ..data_operations.casts import _resolve_data_column_cast_source
 from ..lineage.run_inputs import read_run_inputs
 from ..repository.run_repository import _resolve_run_root
 from ..tabular_io import (
@@ -96,12 +101,16 @@ def _slug(node_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "-", node_id).strip("-") or "dataset"
 
 
+_PUBLISH_LOCK = threading.Lock()
+
+
 def _registered(run_root: Path, artifact_id: str) -> bool:
     index = read_json(run_root / "artifacts_index.json")
     return any(record.get("artifact_id") == artifact_id for record in index.get("artifacts", []))
 
 
 def _selected(frame: pd.DataFrame, options: ExportOptions) -> pd.DataFrame:
+    # The returned projection belongs to this request's export preparation.
     columns = list(options.columns) if options.columns is not None else [str(column) for column in frame.columns]
     unknown = [column for column in columns if column not in frame.columns]
     if unknown:
@@ -129,8 +138,7 @@ def _labels_for(labels: Mapping[str, Any], columns: Sequence[str]) -> dict[str, 
 def _prepare(project_root: Path | str, run_id: str, node_id: str, options: ExportOptions):
     options.validate()
     run_root = _resolve_run_root(str(project_root), run_id)
-    context = resolve_data_column_cast_context(project_root, source_run_id=run_id, source_node_id=node_id)
-    frame = _read_frame(run_root / context["source_artifact_path"])
+    context, frame = _resolve_data_column_cast_source(project_root, source_run_id=run_id, source_node_id=node_id)
     labels = (read_run_inputs(run_root).get("form") or {}).get("labels") or {}
     selected = _selected(frame, options)
     prepared = prepare_export(
@@ -140,6 +148,7 @@ def _prepare(project_root: Path | str, run_id: str, node_id: str, options: Expor
         value_label_mode=options.value_labels,
         missing_code_mode=options.missing_codes,
         dta_version=options.dta_version,
+        take_ownership=True,
     )
     return run_root, context, frame, prepared
 
@@ -182,29 +191,45 @@ def _filename(node_id: str, options: ExportOptions, digest: str) -> str:
     return f"{_slug(node_id)}{'-' + digest if digest else ''}.{extension}"
 
 
+@export_boundary("export.dataset")
 def export_dataset(project_root: Path | str, run_id: str, node_id: str,
                    options: ExportOptions | str | Mapping[str, Any]) -> dict[str, Any]:
     options = ExportOptions.of(options)
     run_root, context, frame, prepared = _prepare(project_root, run_id, node_id, options)
     directory = run_root / "exports" / "data"
     directory.mkdir(parents=True, exist_ok=True)
-    staging = directory / f".staging-{_slug(node_id)}.{_EXTENSIONS[options.format]}"
-    report = write_prepared(prepared, staging)
-    # Content and chosen name together: the same bytes under another name are
-    # another download.
-    digest = hashlib.sha256(staging.read_bytes() + (options.filename or "").encode("utf-8")).hexdigest()[:16]
-    # A chosen file name keeps its name; the content hash names the folder,
-    # so two different exports can share a file name without colliding.
-    folder = directory / digest
-    folder.mkdir(exist_ok=True)
-    target = folder / _filename(node_id, options, digest)
-    staging.replace(target)
-    payload = _summary(run_id, node_id, context, frame, prepared, options)
-    write_json(folder / f"{target.name}.report.json", payload)
-
-    artifact_id = f"data_export_{options.format}_{digest}"
-    if not _registered(run_root, artifact_id):
-        register_artifact(run_root, artifact_id, target, "data_export", "export", [context["source_artifact_id"]])
+    # Each request writes in a folder of its own: two exports of one node at once
+    # once shared a staging file, and one published the other's columns
+    # (2026-11-06 risk review, finding 3).
+    staging_dir = Path(tempfile.mkdtemp(prefix=".staging-", dir=directory))
+    try:
+        staging = staging_dir / f"{_slug(node_id)}.{_EXTENSIONS[options.format]}"
+        report = write_prepared(prepared, staging)
+        # Content and chosen name together: the same bytes under another name are
+        # another download.
+        with staging.open("rb") as handle:
+            content_digest = hashlib.file_digest(handle, "sha256")
+        content_digest.update((options.filename or "").encode("utf-8"))
+        digest = content_digest.hexdigest()[:16]
+        # A chosen file name keeps its name; the content hash names the folder,
+        # so two different exports can share a file name without colliding.
+        folder = directory / digest
+        folder.mkdir(exist_ok=True)
+        target = folder / _filename(node_id, options, digest)
+        payload = _summary(run_id, node_id, context, frame, prepared, options)
+        report_path = staging_dir / f"{target.name}.report.json"
+        write_json(report_path, payload)
+        artifact_id = f"data_export_{options.format}_{digest}"
+        with _PUBLISH_LOCK:
+            # The digest names these exact bytes, so a concurrent identical export
+            # publishes the same file; registration happens once.
+            staging.replace(target)
+            report_path.replace(folder / report_path.name)
+            if not _registered(run_root, artifact_id):
+                register_artifact(run_root, artifact_id, target, "data_export", "export",
+                                  [context["source_artifact_id"]])
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
     return {
         "artifact_id": artifact_id,
         "filename": target.name,

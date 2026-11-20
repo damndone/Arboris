@@ -9,8 +9,12 @@
 // implicitly by App.tsx's <Route path="runs/:runId" element={<RunDetailRoute />} />
 // and by every other App.test scenario continuing to pass.
 
+import { ThemeProvider } from "./theme";
+import type { ReactNode } from "react";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as renderRaw, screen, waitFor } from "@testing-library/react";
+const render = (ui: ReactNode) => renderRaw(<ThemeProvider>{ui}</ThemeProvider>);
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { RunDetailRoute } from "./runDetail";

@@ -9,6 +9,20 @@ from ..notebook.store import NotebookStore
 from ..tools import ToolContext, ToolDefinition
 
 
+def _option_summary(revision: Any) -> dict[str, Any]:
+    """What the person is comparing, without the executable payload."""
+    summary = {}
+    for field in ("rationale", "assumptions", "risk_level", "rank"):
+        value = getattr(revision, field, None)
+        if isinstance(value, int):
+            summary[field] = value
+        elif isinstance(value, str) and value:
+            summary[field] = value[:600]
+        elif isinstance(value, (list, tuple)) and value:
+            summary[field] = [str(item)[:200] for item in value[:6]]
+    return summary
+
+
 def read_notebook_state(project_root: Path, notebook_id: str) -> dict[str, Any]:
     if not re.fullmatch(r"nb_[A-Za-z0-9_-]{1,160}", notebook_id):
         raise ValueError("Invalid notebook identifier")
@@ -30,6 +44,7 @@ def read_notebook_state(project_root: Path, notebook_id: str) -> dict[str, Any]:
             "option_id": option.option_id,
             "revision": option.current_revision.option_revision,
             "lifecycle_status": option.lifecycle_status,
+            **_option_summary(option.current_revision),
         })
     return {
         "notebook_id": notebook.notebook_id,

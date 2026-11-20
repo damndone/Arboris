@@ -19,6 +19,20 @@ import typer.main
 from .cli_commands import CommandError
 
 
+_TERMINAL_FAILURES = {"failed", "stale", "cancelled"}
+
+
+def _exit_with_operation_error(result: dict[str, Any]) -> None:
+    status = result["status"]
+    step_error = next((step["error"] for step in result["steps"] if step.get("error")), None)
+    message = step_error or (result.get("error") or {}).get("message")
+    detail = f": {message}" if message else ""
+    typer.echo(f"error: operation {status}{detail}", err=True)
+    if status in _TERMINAL_FAILURES:
+        typer.echo("To retry, rerun workbench analyze run with a new --request-id, then confirm the new preview.", err=True)
+    raise typer.Exit(code=1)
+
+
 def _catalog() -> list[dict[str, Any]]:
     from .http.operation_routes import _dedicated_operations
     from .services.operation_catalog import operation_catalog
@@ -105,6 +119,8 @@ def build_analyze_group(json_value: Callable, fail: Callable) -> Any:
             fail(exc)
             return
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] in _TERMINAL_FAILURES:
+            _exit_with_operation_error(result)
 
     @group.command("confirm")
     def confirm(
@@ -123,7 +139,6 @@ def build_analyze_group(json_value: Callable, fail: Callable) -> Any:
             return
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
         if result["status"] != "completed":
-            typer.echo(f"error: operation {result['status']}: {result.get('error') or 'see step errors'}", err=True)
-            raise typer.Exit(code=1)
+            _exit_with_operation_error(result)
 
     return typer.main.get_command(group)

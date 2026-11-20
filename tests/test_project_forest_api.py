@@ -8,10 +8,12 @@ through the same adapter (adaptHeadSet).
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.artifacts import register_artifact
+from workbench.lineage.project_forest import build_project_forest
 
 # Shared genesis-run helpers (upload / draft / configure / validate / wait).
 from test_pipeline_drafts_genesis import (
@@ -102,6 +104,75 @@ def test_project_forest_two_roots_no_cross_family_edges(tmp_path):
     assert len(body["heads"]) == len({h["run_id"] for h in body["heads"]})
     roots = sorted(f["family_root"] for f in body["families"])
     assert roots == sorted([run_a, run_b])
+
+
+def _write_role_graph(runs_dir, run_id, *, data_hash, index_variable=False, rerun_of=None):
+    run_dir = runs_dir / run_id
+    run_dir.mkdir(parents=True)
+    cleaned, variable, model = "stage:cleaned", "var:z:cleaned", "model:iv_1"
+    graph = {
+        "schema_version": 3,
+        "run_id": run_id,
+        "nodes": {
+            node_id: {
+                "id": node_id,
+                "kind": kind,
+                "display_label": node_id,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "parent_stage_id": cleaned if node_id == variable else None,
+            }
+            for node_id, kind in ((cleaned, "dataset_stage"), (variable, "variable"), (model, "model"))
+        },
+        "edges": {
+            "role:z": {
+                "id": "role:z", "source_id": variable, "target_id": model,
+                "op": "role:instrument", "params": {"role": "instrument"},
+            }
+        },
+    }
+    index = {model: {"node_hash": f"model-{run_id}"}}
+    if data_hash:
+        index[cleaned] = {"node_hash": data_hash}
+    if index_variable:
+        index[variable] = {"node_hash": data_hash}
+    for filename, content in (
+        ("graph.json", graph), ("node_index.json", index),
+        ("run_manifest.json", {"status": "completed"}), ("run_inputs.json", {"rerun_of": rerun_of}),
+    ):
+        (run_dir / filename).write_text(json.dumps(content), encoding="utf-8")
+
+
+@pytest.mark.parametrize("data_hashes", [("clean-a", "clean-b"), (None, None)])
+@pytest.mark.parametrize("rerun", [False, True])
+def test_unindexed_role_variables_follow_their_own_dataset(tmp_path, data_hashes, rerun):
+    _write_role_graph(tmp_path, "first", data_hash=data_hashes[0])
+    _write_role_graph(
+        tmp_path, "second", data_hash=data_hashes[1], rerun_of="first" if rerun else None,
+    )
+    forest = build_project_forest(tmp_path)
+    nodes = forest["nodes"]
+
+    for edge in forest["edges"]:
+        model = nodes[edge["target"]]
+        variable = nodes[edge["source"]]
+        dataset = nodes[variable["parent_stage_id"]]
+        assert variable["runs"] == dataset["runs"] == model["runs"]
+        assert variable["id"] == "var:z:cleaned"
+        assert edge["params"] == {"role": "instrument"}
+    assert len(forest["edges"]) == 2
+
+
+def test_role_variable_dedups_with_indexed_variable_on_same_dataset(tmp_path):
+    _write_role_graph(tmp_path, "first", data_hash="shared-clean")
+    _write_role_graph(tmp_path, "second", data_hash="shared-clean", index_variable=True)
+    forest = build_project_forest(tmp_path)
+    sources = {edge["source"] for edge in forest["edges"]}
+
+    assert len(forest["edges"]) == 2
+    assert len(sources) == 1
+    variable = forest["nodes"][sources.pop()]
+    assert variable["runs"] == ["first", "second"]
+    assert forest["nodes"][variable["parent_stage_id"]]["runs"] == variable["runs"]
 
 
 def test_project_forest_uses_newest_presentation_for_shared_result_node(tmp_path):
@@ -202,6 +273,9 @@ def test_forest_dataset_nodes_carry_profile_artifacts(tmp_path):
 
     raw_nodes = [n for k, n in body["nodes"].items() if k.endswith("::stage:raw") or k == "stage:raw"]
     assert raw_nodes, f"no raw node in forest keys: {list(body['nodes'])[:8]}"
+    run_root = Path(root) / "runs" / run_id
+    inputs = json.loads((run_root / "run_inputs.json").read_text())
+    assert raw_nodes[0]["card_preview"]["title"] == inputs["upload"]["filename"]
     artifacts = raw_nodes[0].get("artifacts")
     assert artifacts and artifacts[0]["name"] == "data_profile.json"
     preview = artifacts[0]["preview"]
@@ -214,11 +288,17 @@ def test_forest_dataset_nodes_carry_profile_artifacts(tmp_path):
     cleaned = [n for k, n in body["nodes"].items() if k.endswith("::stage:cleaned")]
     assert cleaned and cleaned[0].get("artifacts"), "cleaned node missing artifacts"
     assert cleaned[0]["artifacts"][0]["name"] == "cleaning_actions.json"
+    assert cleaned[0]["card_preview"]["lines"]
+    report = next(n for n in body["nodes"].values() if n["id"] == "report:html")
+    # The fixture is an exact fit: the stored slope is defined, but inference is withheld.
+    assert any("x 2" in line and "p unavailable" in line for line in report["card_preview"]["lines"])
+    assert "CI unavailable" in report["card_preview"]["lines"]
 
     # decorate-only: on-disk graph.json has no artifacts field
     graph = json.loads(
         (Path(root) / "runs" / run_id / "graph.json").read_text()
     )
+    assert all("card_preview" not in n for n in graph["nodes"].values())
     assert all("artifacts" not in n or n["artifacts"] is None
                for n in graph["nodes"].values())
 

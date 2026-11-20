@@ -6,7 +6,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 describe("AppearanceSettings", () => {
   beforeEach(() => localStorage.clear());
 
-  test("chooses the theme and the workspace, and remembers both", () => {
+  test("keeps theme controls and retires the Classic layout switch", () => {
     render(
       <ThemeProvider>
         <AppearanceSettings />
@@ -17,13 +17,7 @@ describe("AppearanceSettings", () => {
     expect(within(theme).getByRole("radio", { name: "Dark" })).toBeChecked();
     expect(document.documentElement.dataset.theme).toBe("dark");
 
-    const workspace = screen.getByRole("radiogroup", { name: "Workspace" });
-    expect(within(workspace).getByRole("radio", { name: /New workspace/ })).toBeChecked();
-    fireEvent.click(within(workspace).getByRole("radio", { name: /Classic/ }));
-    expect(within(workspace).getByRole("radio", { name: /Classic/ })).toBeChecked();
-    expect(localStorage.getItem("workbench:workspace")).toBe("classic");
-    fireEvent.click(within(workspace).getByRole("radio", { name: /New workspace/ }));
-    expect(within(workspace).getByRole("radio", { name: /New workspace/ })).toBeChecked();
-    expect(localStorage.getItem("workbench:workspace")).toBe("new");
+    expect(screen.queryByRole("radiogroup", { name: "Workspace" })).toBeNull();
+    expect(screen.queryByText("Classic")).toBeNull();
   });
 });

@@ -46,6 +46,40 @@ const provider: LlmProvider = {
 const savedProvider = { ...provider, name: "Saved provider" };
 
 describe("LlmProviderEditor", () => {
+  it("keeps model ID editing focused and saves the full eighteen-model mapping", async () => {
+    const models = Array.from({ length: 18 }, (_, index) => llmModelFixture({
+      display_name: `Model ${index}`,
+      request_model: `nvidia/${"long-model-name-".repeat(12)}${index}`,
+      context_window_tokens: 1_048_576,
+      supports_1m: true,
+      reasoning_efforts: ["none", "high"],
+      reasoning_effort: "none",
+      context_limit_tokens: 512_000,
+    }));
+    render(<LlmProviderEditor provider={{ ...provider, models, model: models[0].request_model }} onSaved={vi.fn()} onBack={vi.fn()} />);
+    const last = screen.getByLabelText(`request model ${models[17].request_model}`);
+    last.focus();
+    fireEvent.change(last, { target: { value: "nvidia/renamed-model" } });
+    expect(screen.getByLabelText("request model nvidia/renamed-model")).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith(provider.id, expect.objectContaining({
+      models: models.map((entry, index) => index === 17 ? { ...entry, request_model: "nvidia/renamed-model" } : entry),
+    })));
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
+    expect(discoverLlmProviderModels).not.toHaveBeenCalled();
+  });
+
+  it("defaults loopback gateways to remote and saves explicit local inference", async () => {
+    render(<LlmProviderEditor provider={{ ...provider, base_url: "http://127.0.0.1:3425/v1" }} onSaved={vi.fn()} onBack={vi.fn()} />);
+    const location = screen.getByLabelText("Data processing location");
+    expect(location).toHaveValue("remote");
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith("openai", expect.objectContaining({ data_location: "remote" })));
+    fireEvent.change(location, { target: { value: "local" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenLastCalledWith("openai", expect.objectContaining({ data_location: "local" })));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider);
@@ -157,6 +191,21 @@ describe("LlmProviderEditor", () => {
     expect(screen.getByLabelText(/provider name/i)).toHaveValue("DeepSeek");
     expect(screen.getByLabelText(/base url/i)).toHaveValue("https://api.deepseek.com");
     expect(screen.getByLabelText(/default model/i)).toHaveValue("");
+  });
+
+  it("offers NVIDIA NIM as a remote provider without replacing the person's model or key", () => {
+    render(<LlmProviderEditor provider={provider} onSaved={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByRole("option", { name: "NVIDIA NIM" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("api key", { exact: true }), { target: { value: "local-test-key" } });
+    fireEvent.change(screen.getByLabelText("Data processing location"), { target: { value: "local" } });
+    fireEvent.change(screen.getByLabelText(/provider preset/i), { target: { value: "NVIDIA NIM" } });
+    expect(screen.getByLabelText(/provider name/i)).toHaveValue("NVIDIA NIM");
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("https://integrate.api.nvidia.com/v1");
+    expect(screen.getByLabelText("Data processing location")).toHaveValue("remote");
+    expect(screen.getByLabelText(/default model/i)).toHaveValue(provider.model);
+    expect(screen.getByLabelText("api key", { exact: true })).toHaveValue("local-test-key");
+    expect(discoverLlmProviderModels).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
   });
 
   it("refreshes actual DeepSeek mappings without versioned built-in presets", async () => {

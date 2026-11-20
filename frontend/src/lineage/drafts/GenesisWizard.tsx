@@ -208,6 +208,7 @@ export function GenesisWizard({
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  const [estimationEngine, setEstimationEngine] = useState("reference");
   const [lmmValue, setLmmValue] = useState<LmmControlValue>({
     subject_id: "",
     time: "",
@@ -275,6 +276,11 @@ export function GenesisWizard({
   const [x, setX] = useState("");
   const [focal, setFocal] = useState<string[]>([]);
   const [validation, setValidation] = useState<DraftValidationResult | null>(null);
+
+  const estimationEngineControl = capabilities?.model_types
+    ?.find((entry) => entry.key === "iv_2sls")?.params
+    ?.find((control) => control.key === "estimation_engine");
+  const estimationEngineOptions = estimationEngineControl?.options ?? [];
 
   const xColumns = useMemo(() => parseColumns(x), [x]);
   const columnNames = useMemo(() => {
@@ -372,6 +378,7 @@ export function GenesisWizard({
     // never reset absent fields, because adoptDraft also runs after table-only
     // patches while the user is still mid-edit.
     const savedCovariance = firstString(modelParams.covariance);
+    setEstimationEngine(firstString(modelParams.estimation_engine) || "reference");
     if (savedCovariance) setCovariance(savedCovariance);
     if (savedType === "linear_mixed_effects") {
       const savedOptions = savedModelOptions;
@@ -733,6 +740,13 @@ export function GenesisWizard({
     if (!isRecipeModel && isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
       if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
+      if (estimationEngine !== "reference") {
+        params.estimation_engine = estimationEngine;
+      } else if (findNode(draft, "model")?.params.estimation_engine !== undefined) {
+        // Draft edits merge keys: explicitly selecting reference must clear a
+        // saved fast choice. A first default save keeps its original payload.
+        params.estimation_engine = "reference";
+      }
     }
     if (!isRecipeModel && usesDidRoles) {
       if (didRole.entity) params.entity_col = didRole.entity;
@@ -1207,6 +1221,32 @@ export function GenesisWizard({
                 value={covariance}
                 onChange={setCovariance}
               />
+              {estimationEngineOptions.length > 0 && (
+                <>
+                  <label className="ios-field">
+                    <span>{estimationEngineControl?.label}</span>
+                    <select
+                      aria-label="estimation engine"
+                      value={estimationEngine}
+                      onChange={(event) => setEstimationEngine(event.target.value)}
+                    >
+                      {estimationEngineOptions.map((option) => {
+                        const value = typeof option === "string" ? option : String(option.value);
+                        const label = typeof option === "string"
+                          ? option === "fast" ? "Fast IV (experimental)" : "Reference (default)"
+                          : option.label;
+                        return <option key={value} value={value}>{label}</option>;
+                      })}
+                    </select>
+                  </label>
+                  {estimationEngine === "fast" && (
+                    <p className="ios-hint" role="status">
+                      Fast IV is experimental; resource acceptance has not passed. Results are not bit-identical
+                      to the reference engine. If unavailable for the input, the result names the reference engine and reason.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           )}
           {(modelType === "did" ||

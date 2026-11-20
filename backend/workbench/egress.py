@@ -12,7 +12,8 @@ and the server's instructions are sent as written.
 
 The policy decides, per provider, which classes may be sent. Remote providers
 by default receive dataset structure, labels, aggregates and model results --
-never row-level records. Local providers (localhost) receive everything.
+never row-level records. Explicitly configured local inference receives everything.
+Loopback addresses may proxy a cloud service and do not grant local privileges.
 A project may override both, and may declare column sensitivity: values of a
 ``sensitive`` column are withheld from remote providers, values of a
 ``restricted`` column from every provider. The column's name stays visible so
@@ -28,11 +29,12 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
-import ipaddress
 import json
 import os
 import re
 import threading
+from functools import wraps
+from inspect import signature
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -52,6 +54,8 @@ ContentClass = Literal[
     "aggregate",  # summary statistics, frequency tables, test statistics
     "model_result",  # coefficients, standard errors, fit statistics
     "rows",  # row-level records
+    "skill",  # arbitrary personal/project skill metadata and reference text; opt in remotely
+    "extension",  # admitted external metadata, requests and responses; explicit sharing only
     "unclassified",  # not declared: handled as the most restrictive class
 ]
 CONTENT_CLASSES: tuple[ContentClass, ...] = get_args(ContentClass)
@@ -66,12 +70,21 @@ LOCAL_DEFAULT_ALLOW = frozenset(CONTENT_CLASSES)
 # tests/test_egress.py fails when a registered tool is missing from this table.
 TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     # Agent (main and chain sessions)
-    "propose_analysis_loop": "workbench_state",
     "calculate": "workbench_state",
     # What the person and the Agent said earlier; tool results are excluded.
     "search_project_conversations": "workbench_state",
     "read_project_conversation": "workbench_state",
-    "propose_operation": "workbench_state",
+    "run_operation": "workbench_state",
+    "plan_analysis": "workbench_state",
+    "update_plan": "workbench_state",
+    "inspect_builtin_skills": "workbench_state",
+    "inspect_custom_skills": "skill",
+    "inspect_extensions": "extension",
+    "check_model_claims": "model_result",
+    "show_chart": "model_result",
+    "read_reports": "model_result",
+    "save_report_version": "workbench_state",
+    "inspect_analysis_completion": "model_result",
     "submit_analysis_loop_intent": "workbench_state",
     "inspect_completed_operations": "workbench_state",
     "inspect_operation_contract": "workbench_state",
@@ -109,11 +122,17 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
 # Server-built evidence records travel inside user and system messages too
 # (Notebook planning puts its evidence pack in the user turn), so they are
 # classified by protocol wherever they appear.
+_INITIAL_PLAN_FACTS_PROTOCOL = "initial-plan-facts/v1"
 EVIDENCE_PROTOCOL_CLASSES: Mapping[str, str] = {
+    _INITIAL_PLAN_FACTS_PROTOCOL: "metadata",
+    "research-review/v1": "model_result",
+    "external-tool/v1": "extension",
     "profile/v1": "aggregate",
     "quality/v1": "aggregate",
     "time-index/v1": "aggregate",
     "sample/v1": "rows",
+    "figure-series-summary/v1": "aggregate",
+    "figure-rows/v1": "rows",
     "inspection-error/v1": "workbench_state",
 }
 
@@ -141,23 +160,20 @@ _COLUMN_ENTRY_SAFE_KEYS = frozenset(
     {"name", "column", "variable", "dtype", "type", "variable_label", "label", "measurement_level",
      "missing_rate", "missing_count", "unique_count", "n", "count", "role", "sensitivity"}
 )
+_INITIAL_PLAN_COLUMN_SAFE_KEYS = _COLUMN_ENTRY_SAFE_KEYS - {"unique_count", "missing_rate"}
 _COLUMN_ENTRY_NAME_KEYS = ("name", "column", "variable")
+# A result that names its column beside the column's values: a frequency entry
+# {variable, value}, a filter {column, operator, value}, a grouped result
+# {group_by, groups: [{value}]}, a by-group test {by_group: {column, groups:
+# [{key}]}, results: [{group}]}. "name" is not one: in a row record it is data.
+_ATTRIBUTION_KEYS = ("variable", "column", "group_by")
+_LEVEL_KEYS = frozenset({"value", "values", "level", "levels", "key", "group", "category", "empty_group_values"})
 
 
 def suggested_sensitivity(column: str) -> str:
     """The heuristic default level for a column name."""
 
     return "sensitive" if _PERSONAL_NAME_RE.match(column.strip()) else "internal"
-
-
-def provider_locality(base_url: str) -> str:
-    host = (urlparse(base_url).hostname or "").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        return "local"
-    try:
-        return "local" if ipaddress.ip_address(host).is_loopback else "remote"
-    except ValueError:
-        return "remote"
 
 
 @dataclass(frozen=True)
@@ -295,8 +311,15 @@ def current_project() -> Path | None:
     return _PROJECT_SCOPE.get()
 
 
+# Retired names are data compatibility only; never publish them as callable tools.
+RETIRED_TOOL_CONTENT_CLASSES: Mapping[str, str] = {
+    "propose_operation": "workbench_state",
+    "propose_analysis_loop": "workbench_state",
+}
+
+
 def tool_content_class(tool_id: str | None) -> str:
-    return TOOL_CONTENT_CLASSES.get(tool_id or "", "unclassified")
+    return TOOL_CONTENT_CLASSES.get(tool_id or "", RETIRED_TOOL_CONTENT_CLASSES.get(tool_id or "", "unclassified"))
 
 
 def _tool_names_by_call_id(messages: Sequence[Mapping[str, Any]]) -> dict[str, str]:
@@ -416,22 +439,28 @@ class _Redactor:
 
         return _TERM_RE.sub(replace, text)
 
-    def walk(self, value: Any) -> Any:
+    def walk(self, value: Any, *, column_safe_keys: frozenset[str] = _COLUMN_ENTRY_SAFE_KEYS) -> Any:
         if isinstance(value, str):
             return self.term(value)
         if isinstance(value, list):
-            return [self.walk(item) for item in value]
+            return [self.walk(item, column_safe_keys=column_safe_keys) for item in value]
         if not isinstance(value, Mapping):
             return value
+        if value.get("protocol_version") == _INITIAL_PLAN_FACTS_PROTOCOL:
+            column_safe_keys = _INITIAL_PLAN_COLUMN_SAFE_KEYS
         entry_name = _column_entry_name(value)
         if entry_name is not None:
             if entry_name in self.protected:
                 # Keep what the column is; drop what it contains.
                 self.redacted.add(entry_name)
-                kept = {key: item for key, item in value.items() if key in _COLUMN_ENTRY_SAFE_KEYS}
+                kept = {key: item for key, item in value.items() if key in column_safe_keys}
                 kept["values_withheld"] = True
                 return kept
-            return {key: self.walk(item) for key, item in value.items()}
+            return {key: self.walk(item, column_safe_keys=column_safe_keys) for key, item in value.items()}
+        attributed = self._attributed_column(value)
+        if attributed is not None:
+            self.redacted.add(attributed)
+            value = _without_levels(value)
         result: dict[str, Any] = {}
         for key, item in value.items():
             if key in self.protected:
@@ -440,8 +469,27 @@ class _Redactor:
                 self.redacted.add(key)
                 result[key] = WITHHELD
             else:
-                result[self.term(key) if isinstance(key, str) else key] = self.walk(item)
+                result[self.term(key) if isinstance(key, str) else key] = self.walk(
+                    item, column_safe_keys=column_safe_keys)
         return result
+
+
+    def _attributed_column(self, value: Mapping[str, Any]) -> str | None:
+        by_group = value.get("by_group")
+        named = [value.get(key) for key in _ATTRIBUTION_KEYS]
+        if isinstance(by_group, Mapping):
+            named.append(by_group.get("column"))
+        return next((column for column in named if isinstance(column, str) and column in self.protected), None)
+
+
+def _without_levels(value: Any) -> Any:
+    """The structure with every level field withheld, at any depth."""
+
+    if isinstance(value, list):
+        return [_without_levels(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: WITHHELD if key in _LEVEL_KEYS else _without_levels(item) for key, item in value.items()}
+    return value
 
 
 # A categorical level, quoted (`C(Q('name'))[T.Alice]`, in either quote style,
@@ -479,6 +527,12 @@ class _Decision:
 
 _AUDIT_LOCK = threading.Lock()
 
+# A message may carry its server-built JSON context beside its prose instead of
+# inside it (``{"role": "system", "content": "...Context packet:\n",
+# "context_packet": {...}}``). The checkpoint filters the packet as structure,
+# then sends prose and packet as one content string; the key never leaves.
+CONTEXT_PACKET_KEY = "context_packet"
+
 
 def guard_outgoing_messages(
     messages: Sequence[Mapping[str, Any]],
@@ -486,15 +540,17 @@ def guard_outgoing_messages(
     base_url: str,
     provider_id: str = "",
     model: str = "",
+    data_location: Literal["local", "remote"] = "remote",
 ) -> list[dict[str, Any]]:
     """Return the messages as they may be sent, and audit the send."""
 
     project = current_project()
     policy = load_policy(project)
-    locality = provider_locality(base_url)
+    locality = data_location
     allowed = policy.allowed_classes(provider_id=provider_id, locality=locality)
     tool_names = _tool_names_by_call_id(messages)
-    parsed = [_parse_json(message.get("content")) for message in messages]
+    parsed = [_expanded(message[CONTEXT_PACKET_KEY]) if message.get(CONTEXT_PACKET_KEY) is not None
+              else _expanded(_parse_json(message.get("content"))) for message in messages]
     observed: set[str] = set(policy.columns)
     for payload in parsed:
         _observed_columns(payload, observed)
@@ -524,7 +580,23 @@ def guard_outgoing_messages(
             # Server-built JSON in them (Workbench context, Notebook evidence)
             # is still filtered below.
             content_class = "conversation" if role in {"user", "assistant"} else "workbench_state"
-        outgoing["content"], columns, protocols = _filter(content, payload, protected, allowed)
+        packet = outgoing.pop(CONTEXT_PACKET_KEY, None)
+        if packet is not None:
+            prose, prose_columns, _ = _filter(content, None, protected, allowed)
+            packet_text, columns, protocols = _filter(
+                json.dumps(packet, ensure_ascii=False), payload, protected, allowed)
+            outgoing["content"] = (prose or "") + packet_text
+            columns = tuple(sorted({*prose_columns, *columns}))
+        else:
+            outgoing["content"], columns, protocols = _filter(content, payload, protected, allowed)
+        reasoning = message.get("reasoning_content")
+        if role == "assistant" and isinstance(reasoning, str):
+            # The model's private reasoning goes back to the provider that wrote
+            # it, and is filtered exactly like its reply.
+            outgoing["reasoning_content"], reasoning_columns, reasoning_protocols = _filter(
+                reasoning, _parse_json(reasoning), protected, allowed)
+            columns = tuple(sorted({*columns, *reasoning_columns}))
+            protocols = tuple(sorted({*protocols, *reasoning_protocols}))
         decision = "withheld_in_part" if protocols else "redacted" if columns else "sent"
         decisions.append(_Decision(index, role, content_class, decision, tool_id, columns, protocols))
         guarded.append(outgoing)
@@ -542,6 +614,24 @@ def _parse_json(content: Any) -> Any:
         return json.loads(content)
     except json.JSONDecodeError:
         return None
+
+
+def _expanded(value: Any) -> Any:
+    """The payload with JSON text inside it decoded, so a value cannot hide in a string.
+
+    A chart's numeric source travels as ``preview_json``, a JSON document inside
+    the JSON packet; the redactor must see the columns in it.
+    """
+
+    if isinstance(value, list):
+        return [_expanded(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: _expanded(item) for key, item in value.items()}
+    if isinstance(value, str):
+        inner = _parse_json(value)
+        if isinstance(inner, (Mapping, list)):
+            return _expanded(inner)
+    return value
 
 
 def _withhold_evidence(value: Any, allowed: frozenset[str], withheld: set[str]) -> Any:
@@ -638,8 +728,44 @@ def _append_audit_line(path: Path, record: Mapping[str, Any]) -> None:
             handle.write(line)
 
 
+_EXPORT_ACTIVE = contextvars.ContextVar("workbench_export_active", default=False)
+
+
+def authorize_export(project_root: Path | str, operation_id: str) -> None:
+    """The actor-independent hook decision for export creation and delivery."""
+    from uuid import uuid4
+    from .agent.extension_runtime import dispatch_hooks
+    from .agent.extensions import ExtensionError
+    if _EXPORT_ACTIVE.get():
+        return
+    try:
+        dispatch_hooks(Path(project_root), "before_operation", {"operation_ids": ["export", operation_id]},
+                       key="export:" + uuid4().hex)
+    except ExtensionError as exc:
+        raise EgressPolicyError(str(exc)) from exc
+
+
+def export_boundary(operation_id: str, *, run_root: bool = False):
+    """Guard shared service effects once, including nested/pinned renderers."""
+    def decorate(function):
+        first = next(iter(signature(function).parameters))
+        @wraps(function)
+        def guarded(*args, **kwargs):
+            root = Path(args[0] if args else kwargs[first])
+            project = root.parent.parent if run_root else root
+            authorize_export(project, operation_id)
+            token = _EXPORT_ACTIVE.set(True)
+            try:
+                return function(*args, **kwargs)
+            finally:
+                _EXPORT_ACTIVE.reset(token)
+        return guarded
+    return decorate
+
+
 def authorize_local_artifact_export(project_root: Path, *, columns: Sequence[str], content_classes: Sequence[str]) -> None:
     """Audit and enforce local export policy before a bundle is persisted."""
+    authorize_export(project_root, "script.export")
     policy = load_policy(project_root)
     allowed = policy.allowed_classes(provider_id="script-export", locality="local")
     blocked = sorted(set(content_classes) - set(allowed))

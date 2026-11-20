@@ -12,6 +12,7 @@ from typing import Any
 from .bundle_assembler import BundleCandidate
 from .contracts import _digest
 from .dependency_contract import BundleAdmission, DependencyLock, DependencyRequirement
+from ..jsonl_store import jsonl_lines
 
 
 class DependencyStoreError(ValueError):
@@ -577,7 +578,7 @@ class DependencyStore:
         except UnicodeDecodeError as error:
             raise DependencyStoreError("dependency store contains invalid UTF-8") from error
         records: list[dict[str, Any]] = []
-        lines = text.splitlines(keepends=True)
+        lines = jsonl_lines(text, keepends=True)
         for index, line in enumerate(lines):
             if not line.strip():
                 continue

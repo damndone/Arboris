@@ -85,7 +85,7 @@ class Shape:
 def load(directory: Path) -> dict[tuple[str, str], Shape]:
     shapes: dict[tuple[str, str], Shape] = {}
     for path in sorted(directory.glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").split("\n"):
             record = json.loads(line)
             shapes.setdefault((record["method"], record["route"]), Shape()).add(record["body"])
     return shapes

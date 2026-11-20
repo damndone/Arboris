@@ -9,7 +9,9 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
+from workbench import native_kernels
 from workbench.contracts.model.replicate_combine import ReplicatePlan
+from workbench.engine.replicate_combine.runner import _derive_seed as derive_seed
 from workbench.engine.replicate_combine import (
     ReplicateAdapter,
     ReplicateCombiner,
@@ -35,6 +37,9 @@ from workbench.contracts.model.resampling import BOOTSTRAP_INTERVAL_METHODS
 
 
 
+_UNSET = object()
+
+
 def _reject(reason_code: str, message: str) -> None:
     raise ResamplingPackError(reason_code, message)
 
@@ -45,6 +50,7 @@ class _BootstrapStrategy(ReplicateStrategy):
     def __init__(self, values: np.ndarray, statistic_id: str) -> None:
         self._values = values.copy()
         self._statistic_id = statistic_id
+        self._batch = _UNSET
 
     def generate(
         self,
@@ -53,6 +59,11 @@ class _BootstrapStrategy(ReplicateStrategy):
         replicate_index: int,
         seed: int,
     ) -> ReplicateEvidence:
+        if self._batch is _UNSET:
+            seeds = [derive_seed(plan.seed, index) for index in range(plan.requested_replicates)]
+            self._batch = native_kernels.bootstrap_statistics(self._values, seeds, self._statistic_id)
+        if self._batch is not None and math.isfinite(self._batch[replicate_index]):
+            return ReplicateEvidence(scalars={"statistic": float(self._batch[replicate_index])})
         generator = np.random.default_rng(seed)
         indices = generator.integers(0, len(self._values), size=len(self._values))
         statistic = statistic_value(self._statistic_id, self._values[indices])

@@ -2,19 +2,18 @@
 
 Rows are served as stored, including declared missing codes, so the grid shows
 what the file holds; each variable reports how many values its declared codes
-match. Frames are cached by file identity so paging does not re-read the file.
+match. Frames are cached by verified content so paging does not re-read the file.
 """
 
 from __future__ import annotations
 
-import functools
 import math
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from ..data_operations import _read_frame, resolve_data_column_cast_context
+from ..data_operations.casts import _resolve_data_column_cast_source
 from ..egress import EgressPolicyError, load_policy, suggested_sensitivity
 from ..graph_model import NodeKind
 from ..graph_store import GraphStore
@@ -70,19 +69,9 @@ def list_dataset_nodes(project_root: Path | str, run_id: str) -> list[dict[str, 
     return sorted(nodes, key=lambda item: (order.get(item["node_id"], 2), item["node_id"]))
 
 
-@functools.lru_cache(maxsize=8)
-def _cached_frame(path: str, _mtime_ns: int, _size: int) -> pd.DataFrame:
-    return _read_frame(Path(path))
-
-
 def load_dataset(project_root: Path | str, run_id: str, node_id: str) -> tuple[dict[str, Any], pd.DataFrame]:
-    context = resolve_data_column_cast_context(
-        project_root, source_run_id=run_id, source_node_id=node_id
-    )
-    run_root = _resolve_run_root(str(project_root), run_id)
-    path = run_root / context["source_artifact_path"]
-    stat = path.stat()
-    return context, _cached_frame(str(path), stat.st_mtime_ns, stat.st_size)
+    """The validated source and its table: one hash per file state, one decode per content."""
+    return _resolve_data_column_cast_source(project_root, source_run_id=run_id, source_node_id=node_id, cached=True)
 
 
 def run_labels(project_root: Path | str, run_id: str) -> dict[str, Any]:

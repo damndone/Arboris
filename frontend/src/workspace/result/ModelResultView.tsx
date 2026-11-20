@@ -25,6 +25,8 @@ import {ResultSelection} from "./ResultSelection";
 import {ResultActions} from "./ResultActions";
 import {modelTests} from "./PostEstimationResults";
 import {useCompletedOperation} from "../../workbench/agent/useCompletedOperation";
+import {EngineProvenanceNotice} from "../../runResult/EngineProvenanceNotice";
+import {ModelIVDiagnostics} from "./ModelIVDiagnostics";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; detail: RunDetail };
 
@@ -87,6 +89,8 @@ export function ModelResultView({ projectRoot, runId, node, onRefresh }: { proje
           </button>
         )}
       </div>
+
+      <EngineProvenanceNotice modelId={result.model_id} value={result.engine_provenance}/>
 
       {key && (
         <div className="ws-result__lead">
@@ -161,6 +165,8 @@ export function ModelResultView({ projectRoot, runId, node, onRefresh }: { proje
           )}
         </section>
       )}
+      {result.model_type === "iv_2sls" && <ModelIVDiagnostics key={JSON.stringify([projectRoot, runId, result.model_id])}
+        projectRoot={projectRoot} runId={runId} modelId={result.model_id}/>}
     </article></ResultSelection><ResultActions projectRoot={projectRoot} runId={runId} modelId={modelIdOf(node)!} label={node.title}
       entries={modelTests(detail.post_estimation_results ?? [], runId, modelIdOf(node)!)}
       onRefresh={() => {setRevision(value => value + 1);onRefresh?.();}}/></>

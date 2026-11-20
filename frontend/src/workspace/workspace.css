@@ -125,6 +125,8 @@
 }
 
 .ws-agent {
+  /* The width handle is positioned against the panel, not the page. */
+  position: relative;
   grid-column: 3;
   grid-row: 2 / 4;
   min-width: 0;
@@ -647,3 +649,14 @@
   background: var(--bg-card-2);
   outline: none;
 }
+
+.ws-document-inspector { display: flex; min-width: 0; min-height: 0; height: 100%; }
+/* Not enough width for a document and a panel side by side: the panel goes below, so neither is crushed. */
+@container stage (max-width: 820px) {
+  .ws-document-inspector { flex-direction: column; }
+  .ws-document-inspector > [data-testid="panel-host"]:not([data-active-kind="none"]):not([data-collapsed="true"]) {
+    flex: 0 0 50% !important; width: 100% !important; max-width: none !important;
+    border-left: 0 !important; border-top: 1px solid var(--separator);
+  }
+}
+.ws-document-inspector__main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; }

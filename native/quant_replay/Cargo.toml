@@ -1,0 +1,16 @@
+[package]
+name = "arboris-quant-replay"
+version = "0.1.0"
+edition = "2021"
+description = "Offline long-only portfolio research replay."
+
+[lib]
+name = "arboris_quant_replay"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

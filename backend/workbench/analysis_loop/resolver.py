@@ -157,7 +157,9 @@ def resolve_analysis_loop_run(
     )
 
 
-def _read_source_contract(project_root: Path | str, run_id: str) -> tuple[Path, SourceRunContract, dict[str, Any]]:
+def _read_source_contract(
+    project_root: Path | str, run_id: str,
+) -> tuple[ResolvedAnalysisLoopRun, SourceRunContract]:
     run_root = _run_root(project_root, run_id)
     try:
         manifest = read_json(run_root / "run_manifest.json")
@@ -222,7 +224,14 @@ def _read_source_contract(project_root: Path | str, run_id: str) -> tuple[Path, 
         },
         analysis_row_ids=tuple(row_order),
     )
-    return run_root, source, result
+    source_run = ResolvedAnalysisLoopRun(
+        run_id=run_id,
+        run_root=run_root,
+        manifest=manifest,
+        run_inputs=run_inputs,
+        result=result,
+    )
+    return source_run, source
 
 
 def _model_input_path(run_root: Path, result: dict[str, Any]) -> tuple[str, Path]:
@@ -278,14 +287,28 @@ def resolve_analysis_loop_inputs(
     cluster_variable: str,
 ) -> ResolvedAnalysisLoopInputs:
     """Resolve source, analysis rows and exact cluster values without writes."""
+    inputs, _ = resolve_analysis_loop_source(
+        project_root, run_id=run_id, cluster_variable=cluster_variable,
+    )
+    return inputs
+
+
+def resolve_analysis_loop_source(
+    project_root: Path | str,
+    *,
+    run_id: str,
+    cluster_variable: str,
+) -> tuple[ResolvedAnalysisLoopInputs, ResolvedAnalysisLoopRun]:
+    """Resolve cluster inputs and terminal source facts from one result read."""
 
     if type(cluster_variable) is not str or not cluster_variable:
         raise AnalysisLoopSourceResolutionError(
             "cluster_variable must be a non-empty exact string",
             code="CLUSTER_VARIABLE_REQUIRED",
         )
-    run_root, source, result = _read_source_contract(project_root, run_id)
-    artifact_id, path = _model_input_path(run_root, result)
+    source_run, source = _read_source_contract(project_root, run_id)
+    assert source_run.result is not None  # Source resolution requires a validated result.
+    artifact_id, path = _model_input_path(source_run.run_root, source_run.result)
     try:
         frame = pd.read_parquet(path)
     except (OSError, ValueError, ImportError) as exc:
@@ -337,12 +360,13 @@ def resolve_analysis_loop_inputs(
             "cluster vector is not aligned to the source analysis rows",
             code="CLUSTER_ROW_ALIGNMENT_INVALID",
         )
-    return ResolvedAnalysisLoopInputs(
+    inputs = ResolvedAnalysisLoopInputs(
         source=source,
         model_row_ids=source.analysis_row_ids,
         cluster_values=values,
         model_input_artifact=artifact_id,
     )
+    return inputs, source_run
 
 
 __all__ = [
@@ -351,4 +375,5 @@ __all__ = [
     "ResolvedAnalysisLoopRun",
     "resolve_analysis_loop_run",
     "resolve_analysis_loop_inputs",
+    "resolve_analysis_loop_source",
 ]

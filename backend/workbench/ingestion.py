@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -42,6 +43,41 @@ def _coerce_datetime_to_numeric(frame: pd.DataFrame) -> None:
             frame[col] = numeric
 
 
+# An .xlsx is a zip of XML. Spreadsheet XML deflates about 5-30x; a decompression
+# bomb reaches 1000x. Checked before any parser opens the archive (2026-11-06 risk
+# review, finding 4).
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 4 * 1024**3
+MAX_COMPRESSION_RATIO = 250
+_RATIO_CHECKED_FROM_BYTES = 1024**2
+
+
+def check_spreadsheet_archive(path: Path) -> None:
+    """Refuse an .xlsx whose archive could exhaust memory when parsed."""
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"not a readable .xlsx archive: {path.name}") from exc
+    if len(members) > MAX_ARCHIVE_MEMBERS:
+        raise ValueError(f"excel archive has too many parts: {path.name}")
+    if sum(member.file_size for member in members) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+        raise ValueError(f"excel archive expands beyond the size limit: {path.name}")
+    for member in members:
+        if (member.file_size >= _RATIO_CHECKED_FROM_BYTES
+                and member.file_size > MAX_COMPRESSION_RATIO * max(member.compress_size, 1)):
+            raise ValueError(f"excel archive part {member.filename} exceeds the compression ratio limit: {path.name}")
+
+
+def transposed_upload(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rows become columns; the first column's values name them."""
+
+    frame = frame.transpose()
+    frame.columns = frame.iloc[0]
+    return frame.iloc[1:].reset_index(drop=True)
+
+
 def _read_frame(
     path: Path,
     config: WorkbenchConfig,
@@ -56,11 +92,7 @@ def _read_frame(
     )
     if truncated:
         raise ValueError(f"row count exceeds limit: {path.name}")
-    if transpose:
-        frame = frame.transpose()
-        frame.columns = frame.iloc[0]
-        frame = frame.iloc[1:].reset_index(drop=True)
-    return frame
+    return transposed_upload(frame) if transpose else frame
 
 
 def read_frame_bounded(
@@ -86,6 +118,8 @@ def read_frame_bounded(
     if suffix == ".csv":
         frame = pd.read_csv(path, nrows=max_rows + 1)
     elif suffix in {".xlsx", ".xls"}:
+        if suffix == ".xlsx":
+            check_spreadsheet_archive(path)
         with pd.ExcelFile(path) as excel:
             if len(excel.sheet_names) > max_excel_sheets:
                 raise ValueError(f"excel sheet count exceeds limit: {path.name}")

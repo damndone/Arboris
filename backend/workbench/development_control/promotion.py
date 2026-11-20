@@ -19,6 +19,7 @@ import tempfile
 from typing import Any, Literal
 
 from .events import EventValidationError, validate_event
+from ..jsonl_store import jsonl_lines
 
 
 PROMOTABLE_EVENT_TYPES = frozenset({"FAILURE", "ERROR", "GAP", "GATE"})
@@ -603,7 +604,7 @@ def _read_jsonl(path: Path, validator: Any) -> list[dict[str, Any]]:
     if not raw.endswith(b"\n"):
         raise PromotionError(f"{path.name} must end in a newline")
     records: list[dict[str, Any]] = []
-    for index, line in enumerate(raw.splitlines(), start=1):
+    for index, line in enumerate(jsonl_lines(raw), start=1):
         if not line:
             raise PromotionError(f"{path.name} line {index} is empty")
         try:

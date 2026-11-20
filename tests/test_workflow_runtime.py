@@ -1698,7 +1698,7 @@ def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
         if step.operation_id != "report.compose"
     }
 
-    result = _execute_workflow_report(project, draft, previous)
+    result = _execute_workflow_report(project, draft, previous, source_rows=len(frame))
 
     assert {
         f"workflow_report_{draft.workflow_id}_{suffix}"
@@ -1728,7 +1728,7 @@ def test_report_collection_uses_the_declared_report_step_id(tmp_path) -> None:
         if step.operation_id != "report.compose"
     }
 
-    result = _execute_workflow_report(project, renamed, previous, renamed_report)
+    result = _execute_workflow_report(project, renamed, previous, renamed_report, source_rows=len(frame))
 
     assert result.payload["collection_id"]
     collection = json.loads(
@@ -1825,3 +1825,44 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
     assert state.status == "completed"
     assert state.steps["custom_capability"].artifact_ids == ("custom-result",)
     assert calls and calls[0][1:3] == ("wf-custom-gateway", "custom_capability")
+
+
+@pytest.mark.parametrize("columns", [{"entity_col": "school"}, {"time_col": "year"}])
+def test_panel_genesis_step_runs_one_way_fixed_effects(tmp_path, columns) -> None:
+    """The family contract accepts entity or time; the paid fix2 round failed after
+    confirmation because the absent column reached the draft as None."""
+
+    pytest.importorskip("linearmodels")
+    frame = _panel_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="panel_fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "panel_fixture.csv"},
+        rerun_of=None, from_node=None, rerun_reason="initial", override_hash=None,
+        dag_hash="panel-fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-panel-one-way",
+        steps=[{"step_id": "estimate_panel", "operation_id": "model.genesis", "spec": {
+            "model_family": "panel_ols", "covariance": "robust", **columns,
+            "branches": [{"branch_id": "one_way", "outcome": "outcome", "predictors": ["exposure"]}]}}],
+    )
+
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+
+    assert state.status == "completed", state.steps["estimate_panel"].error
+
+
+def test_a_failed_branch_names_the_runs_recorded_reason(tmp_path) -> None:
+    from workbench.agent.workflow_runtime_parts.models import _recorded_run_error
+
+    (tmp_path / "errors.json").write_text(json.dumps({"issues": [
+        {"severity": "BLOCKER", "code": "WORKFLOW_FAILED", "message": "cannot include dtype 'M' in a buffer"}]}))
+    assert _recorded_run_error(tmp_path) == ": cannot include dtype 'M' in a buffer"
+    assert _recorded_run_error(tmp_path / "missing") == ""

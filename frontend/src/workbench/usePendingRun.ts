@@ -32,15 +32,18 @@
 // render).
 
 import { useEffect, useRef } from "react";
-import { fetchRunDetail } from "../api";
+import { fetchRunDetail, type RunDetail } from "../api";
 
 const PENDING_RUN_RETRY_LIMIT = 30;
 const PENDING_RUN_RETRY_DELAY_MS = 1000;
 
 export interface PendingRun {
   runId: string;
-  draftId: string;
+  draftId?: string;
   attempts: number;
+  /** Manual reruns need a successful terminal receipt before focusing an indexed child. */
+  confirmTerminal?: boolean;
+  lastError?: string;
 }
 
 interface ForestLike {
@@ -54,6 +57,8 @@ export function usePendingRun({
   refetch,
   onIndexed,
   onFailed,
+  onStatus,
+  onUnconfirmed,
   setPending,
 }: {
   pending: PendingRun | null;
@@ -62,6 +67,8 @@ export function usePendingRun({
   refetch: () => void;
   onIndexed: (runId: string) => void;
   onFailed: (draftId: string) => void;
+  onStatus?: (detail: RunDetail) => void;
+  onUnconfirmed?: (message: string) => void;
   setPending: (
     updater: (current: PendingRun | null) => PendingRun | null,
   ) => void;
@@ -78,11 +85,17 @@ export function usePendingRun({
   onFailedRef.current = onFailed;
   const setPendingRef = useRef(setPending);
   setPendingRef.current = setPending;
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+  const onUnconfirmedRef = useRef(onUnconfirmed);
+  onUnconfirmedRef.current = onUnconfirmed;
 
   useEffect(() => {
     if (!pending || !forest) return undefined;
-    const { runId, draftId, attempts } = pending;
-    if (forest.heads.some((h) => h.runId === runId)) {
+    const { runId, draftId, attempts, confirmTerminal } = pending;
+    const indexed = forest.heads.some((h) => h.runId === runId);
+    const clearPending = () => setPendingRef.current(current => current?.runId === runId ? null : current);
+    if (!confirmTerminal && indexed) {
       onIndexedRef.current(runId);
       return undefined;
     }
@@ -92,27 +105,52 @@ export function usePendingRun({
     // without burning attempts — otherwise every slow run used to exhaust the
     // budget in 15s and silently strand the draft on the canvas.
     if (attempts >= PENDING_RUN_RETRY_LIMIT) {
-      console.warn(
+      if (confirmTerminal) {
+        onUnconfirmedRef.current?.(pending.lastError
+          ? `Unable to confirm the child run: ${pending.lastError}`
+          : "The child run status or forest indexing could not be confirmed within the observation budget. Open the child run to inspect it.");
+      } else console.warn(
         `run ${runId} reached a terminal state but never appeared in the forest index; giving up polling`,
       );
-      setPendingRef.current(() => null);
+      clearPending();
       return undefined;
     }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       let burnAttempt = true;
+      let lastError: string | undefined;
       try {
         const detail = await fetchRunDetail(projectRoot, runId);
         if (cancelled) return;
-        if (detail.status === "failed" || detail.status === "blocked") {
+        if (confirmTerminal) {
+          const live = detail.status === "running" || detail.status === "queued" || detail.status === "cancelling";
+          const unsuccessful = ["failed", "blocked", "cancelled", "interrupted", "partial"].includes(detail.status ?? "");
+          if (!live && !unsuccessful && detail.status !== "completed") {
+            onUnconfirmedRef.current?.(`Unable to confirm the child run: unknown status ${JSON.stringify(detail.status)}.`);
+            clearPending();
+            return;
+          }
+          onStatusRef.current?.(detail);
+          if (unsuccessful) {
+            clearPending();
+            refetchRef.current();
+            return;
+          }
+          if (detail.status === "completed" && indexed) {
+            onIndexedRef.current(runId);
+            clearPending();
+            return;
+          }
+          burnAttempt = !live;
+        } else if (detail.status === "failed" || detail.status === "blocked") {
           // Terminal failure: the run will never be indexed. Surface it on the
           // draft node instead of polling forever / vanishing silently.
-          onFailedRef.current(draftId);
-          setPendingRef.current(() => null);
+          if (draftId !== undefined) onFailedRef.current(draftId);
+          clearPending();
           return;
-        }
-        burnAttempt = detail.status !== "running";
-      } catch {
+        } else burnAttempt = detail.status !== "running";
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
         /* transient status-poll failure — spend an attempt and retry */
       }
       if (cancelled) return;
@@ -122,6 +160,7 @@ export function usePendingRun({
           : {
               ...current,
               attempts: burnAttempt ? current.attempts + 1 : current.attempts,
+              ...(confirmTerminal ? {lastError} : {}),
             },
       );
       refetchRef.current();

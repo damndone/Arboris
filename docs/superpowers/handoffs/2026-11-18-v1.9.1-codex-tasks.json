@@ -1,0 +1,304 @@
+{
+ "handoff_id": "2026-11-18-v1.9.1-codex",
+ "worktree": ".worktrees/workbench-v1.9.1",
+ "readme": "docs/superpowers/handoffs/2026-11-18-v1.9.1-codex-handoff.md",
+ "forbidden_paths": [
+  "AGENTS.md",
+  "backend/workbench/contracts/model/*",
+  "backend/workbench/econometrics/*",
+  "scripts/agent_eval/tasks.py",
+  "scripts/agent_eval/dgps.py",
+  "scripts/agent_eval/heldout.py",
+  "scripts/agent_eval/external.py",
+  "scripts/agent_eval/judge.py",
+  "scripts/agent_eval/runner.py",
+  "pyproject.toml",
+  "constraints/*",
+  "frontend/package.json",
+  "frontend/package-lock.json",
+  "scripts/handoff_check.py",
+  "tests/test_handoff_check.py",
+  "docs/superpowers/handoffs/2026-11-18-v1.9.1-codex-handoff.md"
+ ],
+ "always_allowed": [
+  ".agent/devlines/v1-9-1/*"
+ ],
+ "evidence_only_paths": [
+  "docs/*",
+  ".agent/devlines/*"
+ ],
+ "tasks": [
+  {
+   "id": "C1",
+   "priority": "P0",
+   "title": "Verify the current candidate end to end (record, do not fix)",
+   "allowed_paths": [
+    "docs/superpowers/evaluations/2026-11-17-v1.9.1-candidate-verification.md"
+   ],
+   "done_when": [
+    {
+     "kind": "log",
+     "name": "backend-full",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    },
+    {
+     "kind": "log",
+     "name": "frontend-vitest",
+     "suggested_command": "npm --prefix frontend run test",
+     "must_match": "Tests\\s+\\d+ passed",
+     "must_not_match": "\\b\\d+ failed\\b"
+    },
+    {
+     "kind": "log",
+     "name": "frontend-tsc",
+     "suggested_command": "npm --prefix frontend run typecheck"
+    },
+    {
+     "kind": "log",
+     "name": "frontend-eslint",
+     "suggested_command": "npm --prefix frontend run lint"
+    },
+    {
+     "kind": "log",
+     "name": "lint",
+     "suggested_command": ".venv/bin/python scripts/lint_rules.py",
+     "must_match": "\\b0 violations"
+    },
+    {
+     "kind": "log",
+     "name": "structure",
+     "suggested_command": "sh -c 'PYTHONPATH=backend:scripts .venv/bin/python scripts/build_native.py --check && PYTHONPATH=backend:scripts .venv/bin/python scripts/generate_api_types.py --check && PYTHONPATH=backend:scripts .venv/bin/python scripts/generate_manual_reference.py && git diff --exit-code -- docs/manual && .venv/bin/python scripts/repo_evidence_budget.py'"
+    },
+    {
+     "kind": "log",
+     "name": "devline",
+     "suggested_command": ".venv/bin/python scripts/devline_control.py verify --line v1-9-1",
+     "must_match": "manifest_sha256"
+    },
+    {
+     "kind": "log",
+     "name": "host-gate",
+     "suggested_command": "scripts/gate.sh --full   # host terminal only, nothing else running"
+    },
+    {
+     "kind": "command",
+     "run": "test -s docs/superpowers/evaluations/2026-11-17-v1.9.1-candidate-verification.md",
+     "why": "the verification note exists"
+    }
+   ]
+  },
+  {
+   "id": "C2",
+   "priority": "P1",
+   "title": "Turn the recorded v1.9.1 mistakes into lint rules",
+   "allowed_paths": [
+    "scripts/lint_rules.py",
+    "scripts/lint_baselines/*",
+    "tests/*",
+    "scripts/agent_eval_run.py",
+    "frontend/src/importBoundaries.test.ts",
+    "frontend/eslint.config.js"
+   ],
+   "done_when": [
+    {
+     "kind": "command",
+     "run": "{python} scripts/lint_rules.py",
+     "why": "the tree has no lint violations"
+    },
+    {
+     "kind": "command",
+     "run": "{python} -c \"import sys; sys.path.insert(0,'scripts'); import lint_rules as l; need={'monkeypatch-stub-signature','private-cross-package-imports','agents-md-pinned'}; ids={r.rule_id for r in l.RULES}; sys.exit(f'missing rules {sorted(need-ids)}' if need-ids else 0)\"",
+     "why": "the three named rules are registered"
+    },
+    {
+     "kind": "command",
+     "run": "test -f tests/test_agent_eval_replay_deny_policy.py",
+     "why": "the replay guard has its own test file"
+    },
+    {
+     "kind": "log",
+     "name": "rule-tests",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests/test_lint_rules.py tests/test_agent_eval_replay_deny_policy.py tests/test_jsonl_line_splitting_guard.py -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    },
+    {
+     "kind": "log",
+     "name": "backend-full",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    },
+    {
+     "kind": "devline",
+     "path": ".agent/devlines/v1-9-1/events.jsonl"
+    }
+   ]
+  },
+  {
+   "id": "C3",
+   "priority": "P1",
+   "title": "Independent review of Claude's fixes (P2 package, 3f7f7ea6, handoff and lint tooling)",
+   "allowed_paths": [
+    "docs/superpowers/evaluations/2026-11-17-v1.9.1-claude-fixes-codex-review.md"
+   ],
+   "done_when": [
+    {
+     "kind": "command",
+     "run": "{python} -c \"import re,sys; t=open('docs/superpowers/evaluations/2026-11-17-v1.9.1-claude-fixes-codex-review.md',encoding='utf-8').read(); heads=['Finding 5', 'Finding 6', 'Finding 7', 'Finding 8', 'Finding 9', 'Finding 10', 'Finding 11', '3f7f7ea6', 'Handoff tooling']; parts=re.split(r'^## ', t, flags=re.M); found={p.split(chr(10),1)[0].strip(): p for p in parts}; missing=[h for h in heads if h not in found]; bad=[h for h in heads if h in found and not re.search(r'^Verdict: (accept|accept-with-notes|reject|open)\\b', found[h], re.M)]; sys.exit(f'missing {missing} / no Verdict line in {bad}' if missing or bad else 0)\"",
+     "why": "docs/superpowers/evaluations/2026-11-17-v1.9.1-claude-fixes-codex-review.md has every required section, each with a 'Verdict:' line"
+    },
+    {
+     "kind": "log",
+     "name": "rerun-tests",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests/test_native_io_wide_tables.py tests/test_dataset_source_cache.py tests/test_agent_event_incremental_replay.py tests/predictive_research/test_prediction_identity_specification.py tests/predictive_research/test_negative_control_isolation.py tests/test_agent_multi_target_completion.py tests/test_evidence_identity.py tests/test_agent_focused_contract_recovery.py tests/test_agent_protocol_inline_signatures.py tests/test_agent_request_budget.py tests/test_lint_rules.py tests/test_handoff_check.py -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    },
+    {
+     "kind": "devline",
+     "path": ".agent/devlines/v1-9-1/events.jsonl"
+    }
+   ]
+  },
+  {
+   "id": "C4",
+   "priority": "P1",
+   "title": "Audit structure guards and M1 leftovers (report only)",
+   "allowed_paths": [
+    "docs/superpowers/evaluations/2026-11-17-v1.9.1-structure-audit.md"
+   ],
+   "done_when": [
+    {
+     "kind": "command",
+     "run": "{python} -c \"import re,sys; t=open('docs/superpowers/evaluations/2026-11-17-v1.9.1-structure-audit.md',encoding='utf-8').read(); heads=['Temporary forwarders', 'Old proposal routes', 'Agent file reads', 'Egress registration', 'Frontend ratchet', 'Unreviewed Codex commits']; parts=re.split(r'^## ', t, flags=re.M); found={p.split(chr(10),1)[0].strip(): p for p in parts}; missing=[h for h in heads if h not in found]; bad=[h for h in heads if h in found and not re.search(r'^Verdict: (accept|accept-with-notes|reject|open)\\b', found[h], re.M)]; sys.exit(f'missing {missing} / no Verdict line in {bad}' if missing or bad else 0)\"",
+     "why": "docs/superpowers/evaluations/2026-11-17-v1.9.1-structure-audit.md has every required section, each with a 'Verdict:' line"
+    }
+   ]
+  },
+  {
+   "id": "C5",
+   "priority": "P2",
+   "title": "A malformed stored note is a request error, not a 500",
+   "allowed_paths": [
+    "backend/workbench/agent/notebook/notes.py",
+    "backend/workbench/http/notebook_routes.py",
+    "tests/test_notebook_notes_malformed.py"
+   ],
+   "done_when": [
+    {
+     "kind": "command",
+     "run": "test -f tests/test_notebook_notes_malformed.py",
+     "why": "the regression test exists"
+    },
+    {
+     "kind": "log",
+     "name": "notes-tests",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests/test_notebook_notes_malformed.py tests/test_agent_notebook_state.py -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    }
+   ]
+  },
+  {
+   "id": "C6",
+   "priority": "P2",
+   "title": "Fix two test-isolation defects",
+   "allowed_paths": [
+    "tests/test_agent_iv_ar_operation.py",
+    "tests/test_cli_agent.py",
+    "tests/conftest.py",
+    "backend/workbench/cli_agent.py"
+   ],
+   "done_when": [
+    {
+     "kind": "log",
+     "name": "ar-alone",
+     "suggested_command": "PYTHONPATH=backend:scripts .venv/bin/python -m pytest 'tests/test_agent_iv_ar_operation.py::test_stale_foreign_or_uncertified_ar_cannot_open_the_completion_gate' -q -p no:cacheprovider",
+     "must_match": "^\\d+ passed",
+     "must_not_match": "\\b\\d+ (failed|errors?)\\b"
+    },
+    {
+     "kind": "log",
+     "name": "event-sink-repeat",
+     "suggested_command": "sh -c 'for i in $(seq 1 30); do PYTHONPATH=backend:scripts .venv/bin/python -m pytest tests/test_cli_agent.py -q -p no:cacheprovider -k broken_event_sink || exit 1; done; echo all-30-passed'",
+     "must_match": "^all-30-passed$"
+    }
+   ]
+  }
+ ],
+ "progress": {
+  "C1": {
+   "status": "done",
+   "notes": "On fc5a72e6 under en_US.UTF-8, all eight logs passed. Standalone and host backend 14,097; host golden 23 and frontend 2,322. Original failure evidence archived byte-for-byte.",
+   "commits": [
+    "fc5a72e6"
+   ]
+  },
+  "C2": {
+   "status": "done",
+   "notes": "On fc5a72e6 under en_US.UTF-8, the shared standalone backend run passed 14,097 tests, 25 rule tests passed, and 10 lint rules reported zero violations. Repository evidence budget passed; 548 private import occurrences frozen.",
+   "test_changes": [
+    {
+     "path": "tests/test_config_and_domain.py",
+     "reason": "Match the TCP probe stub to its three optional positional parameters without changing probe outcomes."
+    },
+    {
+     "path": "tests/test_default_path_speedups.py",
+     "reason": "Keep the rank instrumentation while matching the keyword-only check_cancel parameter."
+    },
+    {
+     "path": "tests/test_iv_wu_definition.py",
+     "reason": "Match the zero-argument self-check fixture while returning the current frame."
+    },
+    {
+     "path": "tests/test_workflow_capability_runtime.py",
+     "reason": "Match the keyword-only native_operation parameter while preserving the overflow scenario."
+    }
+   ],
+   "commits": [
+    "6df96437"
+   ]
+  },
+  "C3": {
+   "status": "done",
+   "commits": [
+    "a779a3c2"
+   ],
+   "notes": "124 tests passed; nine verdicts and independent probes are recorded."
+  },
+  "C4": {
+   "status": "done",
+   "commits": [
+    "29f6016c"
+   ],
+   "notes": "Six verdicts; 61 existing backend guard tests and 9 frontend ratchet tests passed."
+  },
+  "C5": {
+   "status": "done",
+   "commits": [
+    "119c94fa"
+   ],
+   "notes": "Missing, extra and wrong-type fields return the existing 422 Notebook error without exposing note content. Required log passed; expanded notes suite 14 passed."
+  },
+  "C6": {
+   "status": "done",
+   "notes": "AR-alone: 4 passed; report mutation also passed alone. The existing sink cases passed all 30 rounds (120 cases); the forced pre-block replay was first verified red in all four variants.",
+   "test_changes": [
+    {
+     "path": "tests/test_agent_iv_ar_operation.py",
+     "reason": "Use separate fixture copies and prepare the AR/report artifacts explicitly instead of relying on earlier test side effects. Existing completion and integrity assertions remain."
+    },
+    {
+     "path": "tests/test_cli_agent.py",
+     "reason": "Synchronize on an explicit fixture event after the fake provider or tool enters its blocking state. Keep the original timeout, exception and cleanup assertions."
+    }
+   ],
+   "commits": [
+    "c171f52b"
+   ]
+  }
+ }
+}

@@ -1,0 +1,792 @@
+{
+  "backend/workbench/agent/adapter_control.py": {
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/agent/admission_control.py": {
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/agent/capability_authoring.py": {
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/agent/completion_sensitivity.py": {
+    "workbench.data_operations._read_frame": 1
+  },
+  "backend/workbench/agent/context_tools_support/coefficients.py": {
+    "workbench.services.lmm_coefficients._kernel_fixed_effects": 1,
+    "workbench.services.lmm_coefficients._lmm_published_results": 1
+  },
+  "backend/workbench/agent/context_tools_support/datasets.py": {
+    "workbench.data_operations._read_frame": 1
+  },
+  "backend/workbench/agent/context_tools_support/node_tools.py": {
+    "workbench.lineage.node_write_validation._read_indexed_node_hash": 1,
+    "workbench.model_options._resolve_model_options_handler": 1
+  },
+  "backend/workbench/agent/dependency_control.py": {
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._sequence": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/agent/events.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/notebook/materialization.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/notebook/recommendation.py": {
+    "workbench.contracts.agent.notebook_option._candidate_cohort_hash": 1
+  },
+  "backend/workbench/agent/notebook/service.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/notebook/service_capabilities.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/notebook/service_preparation.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/operation_request_refs.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/orchestration_proposals.py": {
+    "workbench.data_operations.frames._read_frame": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/plan_criteria.py": {
+    "workbench.native_time_series._interval_forecast": 1,
+    "workbench.native_time_series._prediction_level": 1
+  },
+  "backend/workbench/agent/plan_model_inputs.py": {
+    "workbench.econometrics.fit_support._ensure_numeric_x": 1,
+    "workbench.econometrics.fit_support._ensure_numeric_y": 1,
+    "workbench.econometrics.panel_iv._all_numeric": 1,
+    "workbench.econometrics.panel_iv._iv_2sls_without_incomplete_rows": 1
+  },
+  "backend/workbench/agent/plan_preflight.py": {
+    "workbench.data_operations.frames._schema_sidecar_path": 1
+  },
+  "backend/workbench/agent/planning/factory.py": {
+    "workbench.repository.run_repository._resolve_run_root": 3
+  },
+  "backend/workbench/agent/plans.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/proposals.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/report_tools.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/agent/session.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/tool_receipts.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/agent/workflow_capability_adapters.py": {
+    "workbench.native_quant_replay._replay_ledger": 1,
+    "workbench.native_quant_replay._replay_result": 1,
+    "workbench.native_quant_replay._verified_replay": 1,
+    "workbench.prediction._make_v186_estimator_factory": 1,
+    "workbench.prediction._validate_sampling_target": 1
+  },
+  "backend/workbench/agent/workflow_runtime_parts/artifacts.py": {
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/agent/workflow_runtime_parts/models.py": {
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/agent/workflow_runtime_parts/operations.py": {
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/agent/workflow_runtime_parts/postestimation.py": {
+    "workbench.data_operations.frames._write_frame_artifact": 1,
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/agent/workflow_runtime_parts/projection.py": {
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/analysis_ledger.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/api.py": {
+    "workbench.http.drafts_routes._inject_focal_x_control": 1,
+    "workbench.repository.run_repository._read_artifacts_index": 1,
+    "workbench.repository.run_repository._resolve_artifact_path": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1,
+    "workbench.services.run_service._STRUCTURAL_FOCAL_FAMILIES": 1,
+    "workbench.services.run_service._parse_focal_x": 1,
+    "workbench.services.run_service._parse_json_str_array": 1
+  },
+  "backend/workbench/app.py": {
+    "workbench.domain_memory.trace_contracts._DOMAIN_EVENT_FIELDS": 1,
+    "workbench.domain_memory.trace_contracts._EVENT_FIELDS": 1,
+    "workbench.native_containment.trace_contracts._EVENT_FIELDS": 1
+  },
+  "backend/workbench/cli_analyze.py": {
+    "workbench.http.operation_routes._dedicated_operations": 1
+  },
+  "backend/workbench/cli_commands.py": {
+    "workbench.orchestrator._errors": 1,
+    "workbench.orchestrator._model_types": 1,
+    "workbench.orchestrator._model_types._validate_requested_model_type": 1,
+    "workbench.services.run_service._submit_run": 1
+  },
+  "backend/workbench/code_execution.py": {
+    "workbench.data_operations._ensure_node_index_entry": 1,
+    "workbench.data_operations._ensure_registered_artifact": 1,
+    "workbench.data_operations._frame_dtypes": 1,
+    "workbench.data_operations._graph_store_for": 1,
+    "workbench.data_operations._mark_downstream_invalidation": 1,
+    "workbench.data_operations._read_frame": 1,
+    "workbench.data_operations._resolve_source": 1,
+    "workbench.data_operations._schema_fingerprint": 1,
+    "workbench.data_operations._write_frame_artifact": 1
+  },
+  "backend/workbench/contracts/model/presentation.py": {
+    "workbench.services.lmm_coefficients._lmm_published_results": 1
+  },
+  "backend/workbench/contracts/model/script_results.py": {
+    "workbench.econometrics.normalize._public_term": 1,
+    "workbench.engine.did_spec._coerce_cohort_value": 1,
+    "workbench.engine.packs.ets.estimation._result_identity": 1,
+    "workbench.engine.packs.linear_mixed_effects.result._interaction_term": 1
+  },
+  "backend/workbench/dev_fixtures/agent_navigation.py": {
+    "workbench.services.run_service._submit_run": 1
+  },
+  "backend/workbench/econometrics/runner.py": {
+    "workbench.engine.cs_aggregate._se": 2
+  },
+  "backend/workbench/engine/fit_support.py": {
+    "workbench.econometrics.normalize._public_term": 1
+  },
+  "backend/workbench/engine/packs/binary_models/runner.py": {
+    "workbench.econometrics.fit_support._add_engine": 1,
+    "workbench.econometrics.fit_support._attach_average_marginal_effects": 1,
+    "workbench.econometrics.fit_support._ensure_numeric_x": 1,
+    "workbench.econometrics.fit_support._ensure_numeric_y": 1,
+    "workbench.econometrics.fit_support._formula_term": 1,
+    "workbench.econometrics.fit_support._ols_formula": 1,
+    "workbench.econometrics.fit_support._root_cause_suffix": 1
+  },
+  "backend/workbench/engine/packs/count_regression/runner.py": {
+    "workbench.econometrics.fit_support._add_engine": 1,
+    "workbench.econometrics.fit_support._attach_average_marginal_effects": 1,
+    "workbench.econometrics.fit_support._ensure_numeric_x": 1,
+    "workbench.econometrics.fit_support._ensure_numeric_y": 1,
+    "workbench.econometrics.fit_support._formula_term": 1,
+    "workbench.econometrics.fit_support._ols_formula": 1,
+    "workbench.econometrics.fit_support._root_cause_suffix": 1
+  },
+  "backend/workbench/engine/packs/linear_mixed_effects/postestimation.py": {
+    "workbench.postestimation.comparison_data._bound_bytes": 1,
+    "workbench.postestimation.estimation_data._dataset_path": 1
+  },
+  "backend/workbench/engine/packs/linear_mixed_effects/runner.py": {
+    "workbench.econometrics.normalize._public_term": 1,
+    "workbench.services.pinned_run_directory._commit_lmm_execution_admission": 2,
+    "workbench.services.pinned_run_directory._consume_lmm_execution_admission": 2,
+    "workbench.services.pinned_run_directory._consume_lmm_provisional_admission_for_preflight": 2,
+    "workbench.services.pinned_run_directory._invalidate_lmm_execution_admission": 2,
+    "workbench.services.pinned_run_directory._persist_lmm_analysis_evidence": 1,
+    "workbench.services.pinned_run_directory._persist_lmm_diagnostic_packet": 1,
+    "workbench.services.pinned_run_directory._persist_lmm_input_blocked_diagnostic": 2,
+    "workbench.services.pinned_run_directory._persist_lmm_recovery_packet": 1,
+    "workbench.services.pinned_run_directory._persist_lmm_terminal_packet": 1
+  },
+  "backend/workbench/engine/stages/by_group_fit.py": {
+    "workbench.orchestrator._write_inference_kernel": 1
+  },
+  "backend/workbench/engine/stages/diagnostics.py": {
+    "workbench.orchestrator._PREDICTION_MODEL_TYPES": 1,
+    "workbench.orchestrator._check_model_validity": 1,
+    "workbench.orchestrator._diagnostic_family": 1,
+    "workbench.orchestrator._model_failure_details": 1
+  },
+  "backend/workbench/engine/stages/estimation.py": {
+    "workbench.econometrics.normalize._public_term": 1,
+    "workbench.orchestrator._Y_TYPE_TO_ATTEMPTED_MODEL": 1,
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._model_failure_details": 1,
+    "workbench.orchestrator._safe_flush_recorder": 1,
+    "workbench.orchestrator._write_inference_kernel": 1,
+    "workbench.orchestrator._write_manifest": 1,
+    "workbench.orchestrator._write_model_result": 1
+  },
+  "backend/workbench/engine/stages/estimation_fits.py": {
+    "workbench.econometrics.normalize._public_term": 1
+  },
+  "backend/workbench/engine/stages/estimation_survey.py": {
+    "workbench.orchestrator._errors": 1
+  },
+  "backend/workbench/engine/stages/exposure.py": {
+    "workbench.orchestrator._detect_exposure_candidates": 1,
+    "workbench.orchestrator._select_valid_exposure_col": 1
+  },
+  "backend/workbench/engine/stages/imputation.py": {
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._safe_flush_recorder": 1,
+    "workbench.orchestrator._write_manifest": 1
+  },
+  "backend/workbench/engine/stages/pre_estimation_checks.py": {
+    "workbench.orchestrator._coerce_x_columns_to_numeric": 1,
+    "workbench.orchestrator._detect_categorical_x_vars": 1,
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._model_column_issue": 1,
+    "workbench.orchestrator._safe_flush_recorder": 1,
+    "workbench.orchestrator._write_manifest": 1
+  },
+  "backend/workbench/engine/stages/recording.py": {
+    "workbench.orchestrator._check_dropped_variables": 1,
+    "workbench.orchestrator._model_summary": 1,
+    "workbench.orchestrator._variable_summary": 1
+  },
+  "backend/workbench/engine/stages/reliability.py": {
+    "workbench.orchestrator._check_binary_correlations": 1,
+    "workbench.orchestrator._check_categorical_candidates": 1,
+    "workbench.orchestrator._check_rare_event": 1,
+    "workbench.orchestrator._check_suspicious_dtypes": 1,
+    "workbench.orchestrator._check_treatment_proxy_correlations": 1,
+    "workbench.orchestrator._detect_binary_vars": 1,
+    "workbench.orchestrator._detect_suspicious_vars": 1
+  },
+  "backend/workbench/engine/stages/report.py": {
+    "workbench.orchestrator._build_descriptive_stats": 1,
+    "workbench.orchestrator._build_model_routing_summary": 1,
+    "workbench.orchestrator._build_variable_importance": 1,
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._mice_imputation_fact": 1,
+    "workbench.orchestrator._safe_flush_recorder": 1,
+    "workbench.orchestrator._write_manifest": 1
+  },
+  "backend/workbench/engine/stages/routing.py": {
+    "workbench.orchestrator._normalized_existing": 1
+  },
+  "backend/workbench/engine/stages/statistical_tests.py": {
+    "workbench.orchestrator._errors": 1
+  },
+  "backend/workbench/engine/stages/validation.py": {
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._safe_flush_recorder": 1,
+    "workbench.orchestrator._write_manifest": 1
+  },
+  "backend/workbench/engine/stages/ytype.py": {
+    "workbench.orchestrator._map_model_type": 1,
+    "workbench.orchestrator._validate_requested_model_type": 1
+  },
+  "backend/workbench/estimation_engine/iv.py": {
+    "workbench.engine.iv_diagnostics._wu_control_projection": 1
+  },
+  "backend/workbench/http/_deps.py": {
+    "workbench.services.draft_materialization._backfill_schema_values": 1
+  },
+  "backend/workbench/http/data_operation_routes.py": {
+    "workbench.data_operations._read_frame": 1,
+    "workbench.data_operations._resolve_source": 1,
+    "workbench.services.run_service._submit_run": 1
+  },
+  "backend/workbench/http/drafts_routes.py": {
+    "workbench.services.draft_materialization._inject_focal_x_control": 1
+  },
+  "backend/workbench/http/graph_routes.py": {
+    "workbench.repository.run_repository._read_manifest": 1,
+    "workbench.repository.run_repository._resolve_project_runs_dir": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/http/manual_report_routes.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/http/notebook_routes.py": {
+    "workbench.agent.planning.factory._baseline_planning_evidence": 1,
+    "workbench.agent.planning.factory._no_eligible_capability_message": 1,
+    "workbench.agent.planning.factory._supports_rerun_model_options": 1
+  },
+  "backend/workbench/http/projects_routes.py": {
+    "workbench.repository.run_repository._resolve_project_runs_dir": 1,
+    "workbench.services.run_service._read_upload_bytes": 1
+  },
+  "backend/workbench/http/rerun_routes.py": {
+    "workbench.repository.run_repository._read_manifest": 1,
+    "workbench.repository.run_repository._resolve_project_runs_dir": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1,
+    "workbench.services.run_service._submit_run": 1
+  },
+  "backend/workbench/http/runs_routes.py": {
+    "workbench.ingestion._read_frame": 1,
+    "workbench.repository.run_repository._artifact_counts": 1,
+    "workbench.repository.run_repository._detect_failed_stage": 1,
+    "workbench.repository.run_repository._group_artifacts": 1,
+    "workbench.repository.run_repository._list_existing_artifacts": 1,
+    "workbench.repository.run_repository._read_artifact_records": 1,
+    "workbench.repository.run_repository._read_errors": 1,
+    "workbench.repository.run_repository._read_manifest": 1,
+    "workbench.repository.run_repository._resolve_artifact_path": 1,
+    "workbench.repository.run_repository._resolve_project_runs_dir": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1,
+    "workbench.repository.run_repository._summarize_manifest": 1,
+    "workbench.services.results_service._model_results": 1,
+    "workbench.services.results_service._normalize_issue_stream": 1,
+    "workbench.services.run_service._mark_interrupted_if_dead": 1,
+    "workbench.services.run_service._parse_json_str_array": 1,
+    "workbench.services.run_service._read_upload_bytes": 1,
+    "workbench.services.run_service._sse_frame": 1,
+    "workbench.services.run_service._submit_run": 1,
+    "workbench.services.run_service._write_upload": 1
+  },
+  "backend/workbench/http/statistical_exploration_routes.py": {
+    "workbench.data_operations._ensure_registered_artifact": 1,
+    "workbench.data_operations._write_frame_artifact": 1,
+    "workbench.statistical_exploration._apply_filters": 1
+  },
+  "backend/workbench/lineage/pipeline_drafts.py": {
+    "workbench.services.draft_materialization._genesis_model_editor_schema": 2
+  },
+  "backend/workbench/native_ar.py": {
+    "workbench.checks.ar_confidence._inverse_integer": 2,
+    "workbench.checks.ar_confidence._robust_polynomial_determinants": 2
+  },
+  "backend/workbench/native_cart.py": {
+    "workbench.native_ridge._classification_metrics": 1,
+    "workbench.native_ridge._columns": 1,
+    "workbench.native_ridge._holdout": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._sample_values": 1,
+    "workbench.native_ridge._split": 1
+  },
+  "backend/workbench/native_cart_regression.py": {
+    "workbench.native_ridge._binary64_arithmetic": 1,
+    "workbench.native_ridge._columns": 1,
+    "workbench.native_ridge._holdout": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._metrics": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._sample_values": 1,
+    "workbench.native_ridge._split": 1
+  },
+  "backend/workbench/native_containment/broker.py": {
+    "workbench.capability_factory.contracts._digest": 1
+  },
+  "backend/workbench/native_containment/contracts.py": {
+    "workbench.capability_factory.contracts._content_digest": 1,
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._positive_int": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/native_containment/host.py": {
+    "workbench.capability_factory.contracts._content_digest": 1,
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._positive_int": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/native_containment/policy.py": {
+    "workbench.capability_factory.contracts._content_digest": 1,
+    "workbench.capability_factory.contracts._freeze": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/native_containment/trace_contracts.py": {
+    "workbench.capability_factory.contracts._digest": 1,
+    "workbench.capability_factory.contracts._text": 1
+  },
+  "backend/workbench/native_egarch.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prepare_series": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_figarch.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._option_number": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prepare_series": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_igarch.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prepare_series": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_io.py": {
+    "workbench.canonical._canonical_float": 1,
+    "workbench.canonical._encode_numbers": 1
+  },
+  "backend/workbench/native_johansen.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._numeric_design": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_portfolio.py": {
+    "workbench.native_quant_replay._DOUBLE": 1,
+    "workbench.native_quant_replay._I64": 1,
+    "workbench.native_quant_replay._NO_ROW": 1,
+    "workbench.native_quant_replay._SIZE": 1,
+    "workbench.native_quant_replay._loaded": 1,
+    "workbench.native_quant_replay._numeric_matrix": 1,
+    "workbench.native_quant_replay._time_label": 1,
+    "workbench.native_quant_replay._time_matrix": 1,
+    "workbench.native_quant_replay._valid_name": 1,
+    "workbench.native_time_series._native_checkpoint": 1
+  },
+  "backend/workbench/native_prediction_apply.py": {
+    "workbench.native_cart._INT_FIELDS": 1,
+    "workbench.native_cart._NODE_FIELDS": 1,
+    "workbench.native_cart_regression._INT_FIELDS": 1,
+    "workbench.native_cart_regression._NODE_FIELDS": 1,
+    "workbench.native_random_forest._HEADER_WIDTH": 1,
+    "workbench.native_random_forest._MAX_NODES": 1,
+    "workbench.native_random_forest_classification._HEADER_WIDTH": 1,
+    "workbench.native_random_forest_classification._TAG": 1,
+    "workbench.native_ridge._column_name": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._numeric": 1
+  },
+  "backend/workbench/native_quant_fee_comparison.py": {
+    "workbench.native_time_series._native_checkpoint": 1
+  },
+  "backend/workbench/native_random_forest.py": {
+    "workbench.native_cart_regression._INT_FIELDS": 1,
+    "workbench.native_cart_regression._NODE_FIELDS": 1,
+    "workbench.native_cart_regression._holdout_errors": 1,
+    "workbench.native_ridge._columns": 1,
+    "workbench.native_ridge._holdout": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._sample_values": 1,
+    "workbench.native_ridge._split": 1
+  },
+  "backend/workbench/native_random_forest_classification.py": {
+    "workbench.native_cart._INT_FIELDS": 1,
+    "workbench.native_cart._NODE_FIELDS": 1,
+    "workbench.native_random_forest._MAX_NODES": 1,
+    "workbench.native_ridge._classification_metrics": 1,
+    "workbench.native_ridge._columns": 1,
+    "workbench.native_ridge._holdout": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._sample_values": 1,
+    "workbench.native_ridge._split": 1
+  },
+  "backend/workbench/native_research.py": {
+    "workbench.lineage.node_write_validation._read_indexed_node_hash": 1,
+    "workbench.native_research_declarations._ARIMA_ORDER": 1,
+    "workbench.native_research_declarations._SEASONAL_ORDER": 1
+  },
+  "backend/workbench/native_ridge_selection.py": {
+    "workbench.native_ridge._MAX_FEATURES": 1,
+    "workbench.native_ridge._MAX_WORK": 1,
+    "workbench.native_ridge._binary64_arithmetic": 1,
+    "workbench.native_ridge._columns": 1,
+    "workbench.native_ridge._holdout": 1,
+    "workbench.native_ridge._keep_time_ties": 1,
+    "workbench.native_ridge._loaded": 1,
+    "workbench.native_ridge._native_vector": 1,
+    "workbench.native_ridge._number": 1,
+    "workbench.native_ridge._ridge_from_sample": 1,
+    "workbench.native_ridge._sample_values": 1,
+    "workbench.native_ridge._scale": 1,
+    "workbench.native_ridge._split": 1,
+    "workbench.native_ridge._time_order": 1
+  },
+  "backend/workbench/native_stationarity.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._numeric_buffer": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1
+  },
+  "backend/workbench/native_time_series_ets.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._holdout_metrics": 1,
+    "workbench.native_time_series._interval_forecast": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._option_number": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prediction_level": 1,
+    "workbench.native_time_series._prepare_series": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_time_series_xreg.py": {
+    "workbench.native_time_series._arima_fit": 1,
+    "workbench.native_time_series._holdout_metrics": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._numeric_buffer": 1,
+    "workbench.native_time_series._numeric_design": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prediction_level": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_var.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._holdout_metrics": 1,
+    "workbench.native_time_series._interval_forecast": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._numeric_design": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prediction_level": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_varma.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._holdout_metrics": 1,
+    "workbench.native_time_series._interval_forecast": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._numeric_design": 1,
+    "workbench.native_time_series._option_number": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prediction_level": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_vecm.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._holdout_metrics": 1,
+    "workbench.native_time_series._interval_forecast": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._numeric_design": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prediction_level": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_grid": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_volatility.py": {
+    "workbench.native_time_series._DOUBLE": 1,
+    "workbench.native_time_series._SIZE": 1,
+    "workbench.native_time_series._loaded": 1,
+    "workbench.native_time_series._native_checkpoint": 1,
+    "workbench.native_time_series._option_periods": 1,
+    "workbench.native_time_series._prepare_series": 1,
+    "workbench.native_time_series._series_columns": 1,
+    "workbench.native_time_series._time_label": 1
+  },
+  "backend/workbench/native_walk_forward.py": {
+    "workbench.native_quant_replay._ACCOUNTING_RTOL": 1,
+    "workbench.native_quant_replay._BASIS_POINTS": 1,
+    "workbench.native_quant_replay._DOUBLE": 1,
+    "workbench.native_quant_replay._I64": 1,
+    "workbench.native_quant_replay._NO_ROW": 1,
+    "workbench.native_quant_replay._OUTPUT_COLUMNS": 1,
+    "workbench.native_quant_replay._REPLAY_ASSUMPTIONS": 1,
+    "workbench.native_quant_replay._REPLAY_ERRORS": 1,
+    "workbench.native_quant_replay._RETURN": 1,
+    "workbench.native_quant_replay._SIZE": 1,
+    "workbench.native_quant_replay._loaded": 1,
+    "workbench.native_quant_replay._number": 1,
+    "workbench.native_quant_replay._numeric_matrix": 1,
+    "workbench.native_quant_replay._summarize": 1,
+    "workbench.native_quant_replay._time_label": 1,
+    "workbench.native_quant_replay._time_matrix": 1,
+    "workbench.native_quant_replay._valid_name": 1,
+    "workbench.native_time_series._native_checkpoint": 1
+  },
+  "backend/workbench/orchestrator/__init__.py": {
+    "workbench.report_view_model._mice_imputation_fact": 1,
+    "workbench.services.run_service._normalize_labels": 2
+  },
+  "backend/workbench/report_quality.py": {
+    "workbench.report_contract._CITE_MARKER": 1,
+    "workbench.report_contract._FIGURE_MARKER": 1,
+    "workbench.report_contract._SAFE_ID": 1,
+    "workbench.report_contract._validate_capability_manifest": 1
+  },
+  "backend/workbench/research_specifications.py": {
+    "workbench.jsonl_store._exclusive_jsonl_lock": 1
+  },
+  "backend/workbench/run_request.py": {
+    "workbench.services.run_service._normalize_labels": 1
+  },
+  "backend/workbench/script_export/builder.py": {
+    "workbench.agent.postestimation_steps._resolve_model_binding": 1,
+    "workbench.data_operations._coerce_to_dtype": 1,
+    "workbench.data_operations._schema_fingerprint": 1,
+    "workbench.data_operations._schema_sidecar_path": 1,
+    "workbench.ingestion._read_frame": 1,
+    "workbench.postestimation.comparison_data._bound_bytes": 1
+  },
+  "backend/workbench/services/data_export.py": {
+    "workbench.data_operations._execute_subset": 1,
+    "workbench.data_operations.casts._resolve_data_column_cast_source": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/dataset_view.py": {
+    "workbench.data_operations.casts._resolve_data_column_cast_source": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/draft_materialization.py": {
+    "workbench.repository.run_repository._read_manifest": 1,
+    "workbench.repository.run_repository._resolve_project_runs_dir": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/draft_service.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/iv_ar.py": {
+    "workbench.checks.iv_checks._ar_region_owned": 1,
+    "workbench.postestimation.comparison_data._bound_bytes": 1
+  },
+  "backend/workbench/services/manual_operations.py": {
+    "workbench.cli_commands._model_source": 1
+  },
+  "backend/workbench/services/manual_reports.py": {
+    "workbench.repository.run_repository._read_artifacts_index": 1
+  },
+  "backend/workbench/services/native_prediction_apply.py": {
+    "workbench.lineage.node_write_validation._is_simple_run_id": 1,
+    "workbench.repository.run_repository._read_artifacts_index": 1,
+    "workbench.repository.run_repository._resolve_artifact_path": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/operation_catalog.py": {
+    "workbench.agent.postestimation_steps._load_kernel": 1,
+    "workbench.postestimation.core._require_interface": 1
+  },
+  "backend/workbench/services/rerun_service.py": {
+    "workbench.repository.run_repository._read_manifest": 1,
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/run_deletion.py": {
+    "workbench.repository.run_repository._resolve_run_root": 1
+  },
+  "backend/workbench/services/run_service.py": {
+    "workbench.orchestrator._lineage": 1,
+    "workbench.orchestrator._run_workflow": 1,
+    "workbench.orchestrator._write_manifest": 1,
+    "workbench.repository.run_repository._resolve_project_root": 1
+  },
+  "backend/workbench/services/script_export.py": {
+    "workbench.postestimation.comparison_data._bound_bytes": 1
+  },
+  "backend/workbench/services/server_run_artifacts.py": {
+    "workbench.repository.run_repository._read_artifact_records": 1
+  },
+  "backend/workbench/statistical_exploration.py": {
+    "workbench.statistical_exploration_compute._apply_filters": 1,
+    "workbench.statistical_exploration_compute._correlation_result": 1,
+    "workbench.statistical_exploration_compute._derived_boolean_result": 1,
+    "workbench.statistical_exploration_compute._derived_boolean_series": 1,
+    "workbench.statistical_exploration_compute._derived_definition": 1,
+    "workbench.statistical_exploration_compute._detail_variables": 1,
+    "workbench.statistical_exploration_compute._frequency_tables": 1,
+    "workbench.statistical_exploration_compute._numeric_columns": 1,
+    "workbench.statistical_exploration_compute._quantile_method": 1,
+    "workbench.statistical_exploration_compute._require_column": 1,
+    "workbench.statistical_exploration_compute._safe_number": 1,
+    "workbench.statistical_exploration_compute._scatter_columns": 1,
+    "workbench.statistical_exploration_compute._selected_columns": 1,
+    "workbench.statistical_exploration_compute._split_numeric": 1,
+    "workbench.statistical_exploration_compute._stata_moments": 1,
+    "workbench.statistical_exploration_compute._stata_percentile": 1,
+    "workbench.statistical_exploration_compute._summarize_groups": 1,
+    "workbench.statistical_exploration_compute._summary_variables": 1,
+    "workbench.statistical_exploration_compute._validate_filter_value": 1,
+    "workbench.statistical_exploration_compute._validate_frame": 1,
+    "workbench.statistical_exploration_persist._artifact_is_registered": 1,
+    "workbench.statistical_exploration_persist._correlation_table_rows": 1,
+    "workbench.statistical_exploration_persist._ensure_exploration_artifact": 1,
+    "workbench.statistical_exploration_persist._exploration_descriptive_rows": 1,
+    "workbench.statistical_exploration_persist._exploration_report": 1,
+    "workbench.statistical_exploration_persist._exploration_tables": 1,
+    "workbench.statistical_exploration_persist._persist_derived_boolean": 1,
+    "workbench.statistical_exploration_persist._persist_exploration_exports": 1,
+    "workbench.statistical_exploration_persist._persist_statistical_scatter": 1,
+    "workbench.statistical_exploration_persist._result_table_rows": 1,
+    "workbench.statistical_exploration_persist._table_cell": 1,
+    "workbench.statistical_exploration_spec._FILTER_SPELLINGS": 1,
+    "workbench.statistical_exploration_spec._canonical_value": 1
+  },
+  "backend/workbench/statistical_exploration_persist.py": {
+    "workbench.data_operations._ensure_node_index_entry": 1,
+    "workbench.data_operations._ensure_registered_artifact": 1,
+    "workbench.data_operations._graph_store_for": 1,
+    "workbench.data_operations._mark_downstream_invalidation": 1,
+    "workbench.data_operations._write_frame_artifact": 1,
+    "workbench.data_operations.casts._resolve_data_column_cast_source": 1,
+    "workbench.statistical_exploration_compute._apply_filters": 1,
+    "workbench.statistical_exploration_compute._derived_boolean_series": 1,
+    "workbench.statistical_exploration_compute._scatter_columns": 1
+  },
+  "backend/workbench/statistical_test_evidence.py": {
+    "workbench.statistical_test_kernels._GroupSummary": 1,
+    "workbench.statistical_test_kernels._cohens_d_from": 1,
+    "workbench.statistical_test_kernels._evidence_result": 1,
+    "workbench.statistical_test_kernels._welch_from": 1,
+    "workbench.statistical_test_kernels._welch_t_statistics": 1,
+    "workbench.statistical_test_pairs._PreparedGroups": 1,
+    "workbench.statistical_test_pairs._anova": 1,
+    "workbench.statistical_test_pairs._pairwise": 1
+  },
+  "backend/workbench/statistical_test_kernels.py": {
+    "workbench.statistical_test_values._safe_float": 1
+  },
+  "backend/workbench/statistical_test_pairs.py": {
+    "workbench.statistical_test_kernels._welch_t_statistics": 1,
+    "workbench.statistical_test_values._safe_float": 1
+  },
+  "backend/workbench/statistical_test_proportions.py": {
+    "workbench.statistical_test_values._safe_float": 1
+  },
+  "backend/workbench/statistical_tests.py": {
+    "workbench.statistical_test_evidence._build_advanced_evidence_results": 1,
+    "workbench.statistical_test_evidence._cohens_d_evidence": 1,
+    "workbench.statistical_test_evidence._statistics_evidence_payload": 1,
+    "workbench.statistical_test_kernels._GroupSummary": 1,
+    "workbench.statistical_test_pairs._PreparedGroups": 1,
+    "workbench.statistical_test_pairs._anova": 1,
+    "workbench.statistical_test_pairs._apply_multiple_testing_correction": 1,
+    "workbench.statistical_test_pairs._categorical_cardinality": 1,
+    "workbench.statistical_test_pairs._chi_square": 1,
+    "workbench.statistical_test_pairs._fisher_exact": 1,
+    "workbench.statistical_test_pairs._involves_variable": 1,
+    "workbench.statistical_test_pairs._is_numeric": 1,
+    "workbench.statistical_test_pairs._kruskal_wallis": 1,
+    "workbench.statistical_test_pairs._mann_whitney_u": 1,
+    "workbench.statistical_test_pairs._p_value_sort_key": 1,
+    "workbench.statistical_test_pairs._pearson": 1,
+    "workbench.statistical_test_pairs._prepare_contingency_table": 1,
+    "workbench.statistical_test_pairs._prepare_correlation_pair": 1,
+    "workbench.statistical_test_pairs._rank_correlations": 1,
+    "workbench.statistical_test_pairs._summary_row": 1,
+    "workbench.statistical_test_pairs._welch_t_test": 1
+  }
+}

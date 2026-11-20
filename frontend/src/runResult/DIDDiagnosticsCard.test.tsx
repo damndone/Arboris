@@ -20,6 +20,21 @@ const diag: DIDDiagnostics = {
 };
 
 describe("DIDDiagnosticsCard", () => {
+  it("does not label a missing pre-trend test as rejected or not rejected", () => {
+    const unavailable: DIDDiagnostics = { ...diag, parallel_trends: { test: "joint_pre_leads_f",
+      statistic: null, pvalue: null, n_pre_leads: 0, verdict: "unavailable", message: "No estimable pre-period leads." } };
+    render(<DIDDiagnosticsCard diagnostics={unavailable} />);
+    expect(screen.getByText(/not testable/)).toBeInTheDocument();
+    expect(screen.queryByText(/^not rejected$/)).not.toBeInTheDocument();
+  });
+
+  it("shows chi-square for a Wald test without a finite denominator df", () => {
+    render(<DIDDiagnosticsCard diagnostics={{ ...diag, parallel_trends: { ...diag.parallel_trends,
+      statistic: 2, distribution: "chi2", statistic_definition: "wald_chi_square", df_num: 2, df_den: null } }} />);
+    expect(screen.getByText(/χ²\(2\) = 2.00/)).toBeInTheDocument();
+    expect(screen.queryByText(/F\(2/)).not.toBeInTheDocument();
+  });
+
   it("shows ATT headline and verdict pill collapsed", () => {
     render(<DIDDiagnosticsCard diagnostics={diag} />);
     expect(screen.getByText(/2\.13/)).toBeInTheDocument();

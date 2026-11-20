@@ -4,7 +4,7 @@ export type JsonSchema = {
   default?: unknown; const?: unknown; properties?: Record<string, JsonSchema>;
   required?: string[]; items?: JsonSchema; additionalProperties?: boolean | JsonSchema;
   anyOf?: JsonSchema[]; oneOf?: JsonSchema[]; nullable?: boolean;
-  minimum?: number; maximum?: number; exclusiveMinimum?: number;
+  minimum?: number; maximum?: number; exclusiveMinimum?: number; exclusiveMaximum?: number;
   minLength?: number; maxLength?: number; minItems?: number; maxItems?: number;
   uniqueItems?: boolean; minProperties?: number; $ref?: string; $defs?: Record<string, JsonSchema>;
 };
@@ -63,6 +63,7 @@ export function validateValue(schema: JsonSchema, value: unknown, root = schema,
     if (!Number.isFinite(value)) errors.push(`${path}: enter a finite number.`);
     if (s.minimum !== undefined && value < s.minimum) errors.push(`${path}: minimum ${s.minimum}.`);
     if (s.exclusiveMinimum !== undefined && value <= s.exclusiveMinimum) errors.push(`${path}: must exceed ${s.exclusiveMinimum}.`);
+    if (s.exclusiveMaximum !== undefined && value >= s.exclusiveMaximum) errors.push(`${path}: must be below ${s.exclusiveMaximum}.`);
     if (s.maximum !== undefined && value > s.maximum) errors.push(`${path}: maximum ${s.maximum}.`);
   }
   if (typeof value === 'string') {

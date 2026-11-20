@@ -236,6 +236,7 @@ export interface ReportWorkspaceContextValue {
   cancelEditing: () => void;
   resetEditor: () => void;
   saveRevision: () => Promise<void>;
+  restoreReport: (record: ReportRecord) => Promise<void>;
   startNewReport: () => void;
   openReport: (record: ReportRecord) => void;
   deleteReport: (record: ReportRecord) => void;
@@ -717,6 +718,7 @@ export function ReportWorkspaceProvider({
         requiredCapabilities,
         capabilityManifest,
         excludedFactIds: evidence.excludedFactIds,
+        projectRoot: projectRootRef.current,
       });
       const baseRecord: ReportRecord = {
         id: makeRecordId(),
@@ -884,7 +886,7 @@ export function ReportWorkspaceProvider({
   function beginEditing(): void {
     if (!current) return;
     markReportInteraction();
-    setEditorText(current.revision?.markdown ?? current.text);
+    setEditorText(readEditDraft(historyRoot, current.id) ?? current.revision?.markdown ?? current.text);
     setError(null);
     setEditing(true);
   }
@@ -921,10 +923,20 @@ export function ReportWorkspaceProvider({
       }
       setCurrent(persistedRecord);
       setHistory(reportsForRun(saveReportRecord(historyRoot, persistedRecord), persistedRecord.scope.run_id));
+      writeEditDraft(historyRoot, current.id, null);
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Report revision could not be saved");
     }
+  }
+
+  /** An earlier version comes back as the newest: same words and evidence, a new revision. */
+  async function restoreReport(record: ReportRecord): Promise<void> {
+    const revision = editReportRevision(current?.revision ?? createReportRevision(current ?? record), record.text);
+    const restored: ReportRecord = { ...record, id: makeRecordId(), generatedAt: new Date().toISOString(), revision };
+    const persisted = projectRoot ? { ...restored, ...(await saveAiReport({ projectRoot, runId: record.scope.run_id, record: restored })) } : restored;
+    setCurrent(persisted);
+    setHistory(reportsForRun(saveReportRecord(historyRoot, persisted), persisted.scope.run_id));
   }
 
   const currentFactsById = new Map((current?.facts ?? allFacts).map((fact) => [fact.id, fact]));
@@ -977,7 +989,10 @@ export function ReportWorkspaceProvider({
       markReportInteraction();
       setRevisionInstruction(value);
     },
-    onEditorTextChange: setEditorText,
+    onEditorTextChange: (value) => {
+      setEditorText(value);
+      if (current) writeEditDraft(historyRoot, current.id, value);
+    },
     toggleFact,
     toggleFigure,
     useRecommendedFigures,
@@ -988,9 +1003,13 @@ export function ReportWorkspaceProvider({
     exportReport: handleExport,
     exportResultTable: handleResultTableExport,
     beginEditing,
-    cancelEditing: () => setEditing(false),
+    cancelEditing: () => {
+      if (current) writeEditDraft(historyRoot, current.id, null);
+      setEditing(false);
+    },
     resetEditor,
     saveRevision,
+    restoreReport,
     startNewReport,
     openReport: (record) => {
       markReportInteraction();
@@ -1004,6 +1023,25 @@ export function ReportWorkspaceProvider({
   };
 
   return <ReportWorkspaceContext.Provider value={value}>{children}</ReportWorkspaceContext.Provider>;
+}
+
+/** An edit not yet saved as a version outlives a reload and a closed tab. */
+function readEditDraft(root: string, recordId: string): string | null {
+  try {
+    return window.localStorage.getItem(`workbench:report-edit:${root}:${recordId}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeEditDraft(root: string, recordId: string, text: string | null): void {
+  try {
+    const key = `workbench:report-edit:${root}:${recordId}`;
+    if (text === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, text);
+  } catch {
+    /* quota/private-mode: the edit still lives in this page */
+  }
 }
 
 function downloadBlob(blob: Blob, filename: string): void {

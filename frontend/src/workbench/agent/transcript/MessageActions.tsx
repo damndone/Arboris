@@ -5,6 +5,7 @@
 import { useState } from "react";
 import type { AgentMessage } from "../agentTypes";
 import { chapterTitle, messageTime } from "./turns";
+import { confirmAgentRewind } from "../rewindConfirmation";
 
 const Icon = ({ d }: { d: string }) => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -24,11 +25,13 @@ export interface MessageActionsProps {
   busy: boolean;
   onRewind?: (entryId: string) => void;
   onFork?: (entryId: string) => void;
+  onForkContext?: (entryId: string) => void;
+  forkContextDisabledReason?: string;
   onPin?: (entryId: string, title: string) => void;
   onUnpin?: (entryId: string) => void;
 }
 
-export function MessageActions({ message, pinned, busy, onRewind, onFork, onPin, onUnpin }: MessageActionsProps) {
+export function MessageActions({ message, pinned, busy, onRewind, onFork, onForkContext, forkContextDisabledReason, onPin, onUnpin }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   // An optimistic entry is not on the server yet; only copying applies.
   const saved = !message.entry_id.startsWith("local-");
@@ -55,9 +58,9 @@ export function MessageActions({ message, pinned, busy, onRewind, onFork, onPin,
         <button
           type="button"
           aria-label="Rewind to here"
-          title="Go back to before this message; its text returns to the input. Later turns stay in the log."
+          title="Restore the conversation and analysis head before this message on a new branch. Original evidence is retained; external actions are not reversed."
           disabled={busy}
-          onClick={() => onRewind(message.entry_id)}
+          onClick={() => { if (confirmAgentRewind()) onRewind(message.entry_id); }}
         >
           <Icon d={REWIND} />
         </button>
@@ -69,6 +72,17 @@ export function MessageActions({ message, pinned, busy, onRewind, onFork, onPin,
           title="Continue in a new conversation from this point; this one stays as it is"
           disabled={busy}
           onClick={() => onFork(message.entry_id)}
+        >
+          <Icon d={FORK} />
+        </button>
+      )}
+      {saved && onForkContext && (
+        <button
+          type="button"
+          aria-label={`Fork from Agent message ${message.entry_id}`}
+          title={forkContextDisabledReason ?? (busy ? "Wait for the current Agent request to finish" : "Fork the analysis from this message's source node")}
+          disabled={busy || Boolean(forkContextDisabledReason)}
+          onClick={() => onForkContext(message.entry_id)}
         >
           <Icon d={FORK} />
         </button>

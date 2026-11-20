@@ -8,21 +8,28 @@ fsynced tail anchor.  A missing or mismatched anchor fails closed.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 import fcntl
+import gzip
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import re
 import stat
-import tempfile
 from typing import Any
 import uuid
+import zlib
 
 
 MAX_EVENT_BYTES = 16 * 1024
+ARCHIVE_NAME = "events.jsonl.gz"
+_MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+_EVENTS_NAME = "events.jsonl"
+_ANCHOR_NAME = "events.jsonl.anchor"
 ZERO_SHA256 = "0" * 64
 EVENT_TYPES = frozenset({"FAILURE", "ERROR", "GAP", "WASTE", "REVIEW", "GATE", "STATE_CHANGE"})
 CAUSE_STATUSES = frozenset({"known", "suspected", "unknown", "external", "not_applicable"})
@@ -148,56 +155,71 @@ def validate_event(event: Mapping[str, Any], *, previous_sha256: str) -> dict[st
 def append_event(devlines_root: Path, line_id: str, event: Mapping[str, Any]) -> dict[str, Any]:
     """Append one validated event under a checked devlines root and fsync it."""
 
-    validate_line_id(line_id)
-    root_fd = _open_directory(devlines_root, "devlines root")
-    try:
-        line_fd = _open_child_directory(root_fd, line_id, "devline directory")
-        try:
-            event_fd = _open_event_for_append(line_fd)
-            try:
-                fcntl.flock(event_fd, fcntl.LOCK_EX)
-                existing = _read_events_from_locked_fd(line_fd, event_fd)
-                _verify_events(existing)
-                duplicate_ids = {row["event_id"] for row in existing}
-                source_event_id = event.get("event_id") if isinstance(event, Mapping) else None
-                if source_event_id in duplicate_ids:
-                    raise EventValidationError("duplicate event_id")
-                previous_sha256 = existing[-1]["event_sha256"] if existing else ZERO_SHA256
-                appended = validate_event(event, previous_sha256=previous_sha256)
-                encoded = canonical_event_bytes(appended) + b"\n"
-                _write_all(event_fd, encoded)
-                os.fsync(event_fd)
-                all_events = _read_events_from_locked_fd(line_fd, event_fd)
-                _verify_events(all_events)
-                _write_anchor(line_fd, len(all_events), all_events[-1]["event_sha256"])
-                _verify_anchor(line_fd, all_events)
-                return appended
-            finally:
-                fcntl.flock(event_fd, fcntl.LOCK_UN)
-                os.close(event_fd)
-        finally:
-            os.close(line_fd)
-    finally:
-        os.close(root_fd)
+    with _locked_log(devlines_root, line_id, write=True, create=True) as (line_fd, event_fd):
+        live = _read_live(line_fd, event_fd)
+        _, archived = _read_archive(line_fd)
+        history = _combine_history(archived, live)
+        existing = _parse_event_lines(history)
+        _verify_events(existing)
+        _verify_anchor(line_fd, existing, allow_uninitialized=not history)
+        source_event_id = event.get("event_id") if isinstance(event, Mapping) else None
+        if any(row["event_id"] == source_event_id for row in existing):
+            raise EventValidationError("duplicate event_id")
+        appended = validate_event(event, previous_sha256=_tail_sha256(existing))
+        if live and history == archived:
+            _clear_live_suffix(line_fd, event_fd)
+        _write_all(event_fd, canonical_event_bytes(appended) + b"\n")
+        os.fsync(event_fd)
+        all_events = _parse_event_lines(archived + _read_live(line_fd, event_fd))
+        _verify_events(all_events)
+        _write_anchor(devlines_root, line_fd, len(all_events), appended["event_sha256"])
+        _verify_anchor(line_fd, all_events)
+        return appended
 
 
 def verify_log(devlines_root: Path, line_id: str) -> dict[str, Any]:
     """Fail closed unless the chain and its separately durable tail anchor agree."""
 
-    validate_line_id(line_id)
-    root_fd = _open_directory(devlines_root, "devlines root")
-    try:
-        line_fd = _open_child_directory(root_fd, line_id, "devline directory")
-        try:
-            events = _read_events(line_fd)
-            _verify_events(events)
-            _verify_anchor(line_fd, events)
-            tail = events[-1]["event_sha256"] if events else ZERO_SHA256
-            return {"event_count": len(events), "tail_event_sha256": tail}
-        finally:
-            os.close(line_fd)
-    finally:
-        os.close(root_fd)
+    events = read_verified_events(devlines_root, line_id)
+    return {"event_count": len(events), "tail_event_sha256": _tail_sha256(events)}
+
+
+def read_verified_events(devlines_root: Path, line_id: str) -> list[dict[str, Any]]:
+    """Read the complete anchored history, including any archived prefix."""
+
+    with _locked_log(devlines_root, line_id) as (line_fd, event_fd):
+        _, archived = _read_archive(line_fd)
+        return _verified_history(line_fd, _combine_history(archived, _read_live(line_fd, event_fd)))
+
+
+def archive_event_log(devlines_root: Path, line_id: str) -> dict[str, Any]:
+    """Losslessly compact a verified history and keep its live append file."""
+
+    with _locked_log(devlines_root, line_id, write=True) as (line_fd, event_fd):
+        live = _read_live(line_fd, event_fd)
+        compressed, archived = _read_archive(line_fd)
+        history = _combine_history(archived, live)
+        events = _verified_history(line_fd, history)
+        if not history or len(history) > _MAX_ARCHIVE_BYTES:
+            raise EventValidationError("event history must contain between 1 byte and 16 MiB to archive")
+        if history != archived:
+            compressed = gzip.compress(history, mtime=0)
+            if _decompress_archive(compressed) != history:
+                raise EventValidationError("event archive failed byte-for-byte verification")
+            _publish_log_file(devlines_root, line_fd, ARCHIVE_NAME, compressed)
+            on_disk, restored = _read_archive(line_fd)
+            if on_disk != compressed or restored != history:
+                raise EventValidationError("stored event archive failed byte-for-byte verification")
+        if live:
+            _clear_live_suffix(line_fd, event_fd)
+        return {
+            "event_count": len(events),
+            "tail_event_sha256": _tail_sha256(events),
+            "raw_bytes": len(history),
+            "raw_sha256": hashlib.sha256(history).hexdigest(),
+            "archive_bytes": len(compressed),
+            "archive_sha256": hashlib.sha256(compressed).hexdigest(),
+        }
 
 
 def _validate_contract(event: dict[str, Any]) -> None:
@@ -337,54 +359,108 @@ def _open_child_directory(parent_fd: int, name: str, label: str) -> int:
         raise EventValidationError(f"{label} must exist and must not be a symlink") from error
 
 
-def _open_event_for_append(line_fd: int) -> int:
-    flags = os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+@contextmanager
+def _locked_log(
+    devlines_root: Path, line_id: str, *, write: bool = False, create: bool = False
+) -> Iterator[tuple[int, int]]:
+    validate_line_id(line_id)
+    root_fd = _open_directory(devlines_root, "devlines root")
     try:
-        return os.open("events.jsonl", flags, dir_fd=line_fd)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        raise EventValidationError("events.jsonl could not be safely opened for append") from error
-    try:
-        return os.open("events.jsonl", flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=line_fd)
-    except FileExistsError:
+        line_fd = _open_child_directory(root_fd, line_id, "devline directory")
         try:
-            return os.open("events.jsonl", flags, dir_fd=line_fd)
-        except OSError as error:
-            raise EventValidationError("events.jsonl could not be safely opened for append") from error
-    except OSError as error:
-        raise EventValidationError("events.jsonl could not be safely opened for append") from error
+            event_fd = _open_live(line_fd, write=write, create=create)
+            try:
+                if not stat.S_ISREG(os.fstat(event_fd).st_mode):
+                    raise EventValidationError("events.jsonl must be a regular file")
+                fcntl.flock(event_fd, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
+                yield line_fd, event_fd
+            finally:
+                os.close(event_fd)
+        finally:
+            os.close(line_fd)
+    finally:
+        os.close(root_fd)
 
 
-def _read_events(line_fd: int) -> list[dict[str, Any]]:
+def _open_live(line_fd: int, *, write: bool, create: bool) -> int:
+    flags = (os.O_RDWR | os.O_APPEND if write else os.O_RDONLY) | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
-        fd = os.open("events.jsonl", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=line_fd)
+        try:
+            return os.open(_EVENTS_NAME, flags, dir_fd=line_fd)
+        except FileNotFoundError:
+            if not create:
+                raise
+        try:
+            return os.open(_EVENTS_NAME, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=line_fd)
+        except FileExistsError:
+            return os.open(_EVENTS_NAME, flags, dir_fd=line_fd)
+    except OSError as error:
+        raise EventValidationError("events.jsonl could not be safely opened") from error
+
+
+def _read_live(line_fd: int, event_fd: int) -> bytes:
+    info = os.fstat(event_fd)
+    path_info = os.stat(_EVENTS_NAME, dir_fd=line_fd, follow_symlinks=False)
+    if (info.st_dev, info.st_ino) != (path_info.st_dev, path_info.st_ino):
+        raise EventValidationError("events.jsonl identity changed while locked")
+    os.lseek(event_fd, 0, os.SEEK_SET)
+    content = _read_all(event_fd)
+    if len(content) != info.st_size:
+        raise EventValidationError("events.jsonl changed while locked")
+    return content
+
+
+def _read_archive(line_fd: int) -> tuple[bytes, bytes]:
+    try:
+        fd = os.open(ARCHIVE_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=line_fd)
     except FileNotFoundError:
-        return []
+        return b"", b""
     except OSError as error:
-        raise EventValidationError("events.jsonl could not be safely opened for reading") from error
+        raise EventValidationError("event archive could not be safely opened") from error
     try:
-        return _parse_event_lines(_read_all(fd))
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_ARCHIVE_BYTES:
+            raise EventValidationError("event archive must be a regular file no larger than 16 MiB")
+        compressed = _read_all(fd)
     finally:
         os.close(fd)
+    return compressed, _decompress_archive(compressed)
 
 
-def _read_events_from_locked_fd(line_fd: int, event_fd: int) -> list[dict[str, Any]]:
-    writer_info = os.fstat(event_fd)
+def _decompress_archive(compressed: bytes) -> bytes:
+    if len(compressed) > _MAX_ARCHIVE_BYTES:
+        raise EventValidationError("event archive exceeds 16 MiB")
     try:
-        read_fd = os.open("events.jsonl", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=line_fd)
-    except OSError as error:
-        raise EventValidationError("events.jsonl could not be read while locked") from error
-    try:
-        reader_info = os.fstat(read_fd)
-        if (reader_info.st_dev, reader_info.st_ino) != (writer_info.st_dev, writer_info.st_ino):
-            raise EventValidationError("events.jsonl identity changed while locked")
-        content = _read_all(read_fd)
-        if len(content) != reader_info.st_size:
-            raise EventValidationError("events.jsonl changed while locked")
-        return _parse_event_lines(content)
-    finally:
-        os.close(read_fd)
+        with gzip.GzipFile(fileobj=BytesIO(compressed)) as stream:
+            raw = stream.read(_MAX_ARCHIVE_BYTES + 1)
+    except (OSError, EOFError, zlib.error) as error:
+        raise EventValidationError("event archive is not valid gzip") from error
+    if not raw or len(raw) > _MAX_ARCHIVE_BYTES or not raw.endswith(b"\n"):
+        raise EventValidationError("event archive has an invalid uncompressed size or missing trailing newline")
+    return raw
+
+
+def _combine_history(archived: bytes, live: bytes) -> bytes:
+    # Publication can finish before the old live suffix is truncated. Its
+    # exact bytes are already part of the archive in that recoverable state.
+    return archived if archived.endswith(live) else archived + live
+
+
+def _verified_history(line_fd: int, content: bytes) -> list[dict[str, Any]]:
+    events = _parse_event_lines(content)
+    _verify_events(events)
+    _verify_anchor(line_fd, events)
+    return events
+
+
+def _clear_live_suffix(line_fd: int, event_fd: int) -> None:
+    os.fsync(line_fd)
+    os.ftruncate(event_fd, 0)
+    os.fsync(event_fd)
+
+
+def _tail_sha256(events: list[dict[str, Any]]) -> str:
+    return events[-1]["event_sha256"] if events else ZERO_SHA256
 
 
 def _read_all(fd: int) -> bytes:
@@ -402,7 +478,7 @@ def _parse_event_lines(content: bytes) -> list[dict[str, Any]]:
     if not content.endswith(b"\n"):
         raise EventValidationError("events.jsonl is truncated: missing trailing newline")
     rows: list[dict[str, Any]] = []
-    for index, line in enumerate(content.splitlines(), start=1):
+    for index, line in enumerate(content[:-1].split(b"\n"), start=1):
         if not line or len(line) > MAX_EVENT_BYTES:
             raise EventValidationError(f"events.jsonl line {index} is invalid or exceeds 16 KiB")
         try:
@@ -431,10 +507,10 @@ def _verify_events(events: list[dict[str, Any]]) -> None:
     seen_ids: set[str] = set()
     previous_sha256 = ZERO_SHA256
     for index, event in enumerate(events, start=1):
-        event_id = event.get("event_id")
+        validated = validate_event(event, previous_sha256=previous_sha256)
+        event_id = validated["event_id"]
         if event_id in seen_ids:
             raise EventValidationError(f"duplicate event_id at line {index}")
-        validated = validate_event(event, previous_sha256=previous_sha256)
         if validated != event:
             raise EventValidationError(f"events.jsonl line {index} changed during validation")
         seen_ids.add(event_id)
@@ -450,37 +526,57 @@ def _write_all(fd: int, content: bytes) -> None:
         offset += written
 
 
-def _write_anchor(line_fd: int, count: int, tail_sha256: str) -> None:
+def _write_anchor(devlines_root: Path, line_fd: int, count: int, tail_sha256: str) -> None:
     anchor = canonical_event_bytes({"event_count": count, "tail_event_sha256": tail_sha256}) + b"\n"
-    temporary = f".events-anchor-{os.getpid()}-{uuid.uuid4().hex}.tmp"
+    _publish_log_file(devlines_root, line_fd, _ANCHOR_NAME, anchor)
+
+
+def _publish_log_file(devlines_root: Path, line_fd: int, name: str, content: bytes) -> None:
+    # Stage outside the formal line directory so a verifier sees only
+    # published files, even if the writer stops before the atomic rename.
+    staging_fd = _open_directory(devlines_root.parent, "event staging directory")
+    temporary = f".devline-{name}-{uuid.uuid4().hex}.tmp"
     fd = -1
     try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=line_fd)
-        _write_all(fd, anchor)
+        fd = os.open(temporary, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging_fd)
+        _write_all(fd, content)
         os.fsync(fd)
+        os.lseek(fd, 0, os.SEEK_SET)
+        if _read_all(fd) != content:
+            raise EventValidationError(f"staged {name} failed byte-for-byte verification")
         os.close(fd)
         fd = -1
-        os.replace(temporary, "events.jsonl.anchor", src_dir_fd=line_fd, dst_dir_fd=line_fd)
+        os.replace(temporary, name, src_dir_fd=staging_fd, dst_dir_fd=line_fd)
         os.fsync(line_fd)
+        os.fsync(staging_fd)
     except OSError as error:
-        raise EventValidationError("could not durably update events tail anchor") from error
+        raise EventValidationError(f"could not durably publish {name}") from error
     finally:
         if fd >= 0:
             os.close(fd)
         try:
-            os.unlink(temporary, dir_fd=line_fd)
+            os.unlink(temporary, dir_fd=staging_fd)
         except FileNotFoundError:
             pass
+        finally:
+            os.close(staging_fd)
 
 
-def _verify_anchor(line_fd: int, events: list[dict[str, Any]]) -> None:
+def _verify_anchor(line_fd: int, events: list[dict[str, Any]], *, allow_uninitialized: bool = False) -> None:
     try:
-        fd = os.open("events.jsonl.anchor", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=line_fd)
+        fd = os.open(_ANCHOR_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=line_fd)
     except FileNotFoundError as error:
+        if allow_uninitialized:
+            try:
+                os.stat("context-pack.manifest.json", dir_fd=line_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
         raise EventValidationError("events tail anchor is missing") from error
     except OSError as error:
         raise EventValidationError("events tail anchor could not be safely opened") from error
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise EventValidationError("events tail anchor must be a regular file")
         try:
             anchor = json.loads(_read_all(fd).decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
         except (UnicodeDecodeError, json.JSONDecodeError, EventValidationError) as error:
@@ -489,7 +585,7 @@ def _verify_anchor(line_fd: int, events: list[dict[str, Any]]) -> None:
         os.close(fd)
     expected = {
         "event_count": len(events),
-        "tail_event_sha256": events[-1]["event_sha256"] if events else ZERO_SHA256,
+        "tail_event_sha256": _tail_sha256(events),
     }
     if anchor != expected:
         raise EventValidationError("events tail anchor detects truncation, reordering, or replacement")

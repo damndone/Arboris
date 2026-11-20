@@ -1,4 +1,10 @@
-"""Stdlib-only durable gate timings; does not choose or omit any tests."""
+"""Stdlib-only durable gate timings and evidence key; does not choose or omit any tests.
+
+The summary binds its verdict to the tree that was tested (2026-11-06 risk review, finding 11):
+``init`` digests the working tree, ``finish`` digests it again and records the full evidence key
+(scripts/evidence_identity.py). A tree that changed during the run fails the gate; an identity
+that could not be read leaves the verdict alone and marks the evidence incomplete.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -11,6 +17,9 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import evidence_identity  # noqa: E402
 
 
 def _write(path: Path, value: dict | list) -> None:
@@ -48,6 +57,7 @@ def collect_tests(directory: Path) -> tuple[list[dict], list[str]]:
 #: Passed gate runs kept in local/gate (the user's evidence rule, 2026-10-07:
 #: keep the last 3 of each kind, always keep a failed one).
 KEEP_PASSED = 3
+GATE_OUTPUT = ("local/gate/",)  # the gate's own logs never count as the tested tree
 _RUN_NAME = re.compile(r"^\d{8}T\d{6}-[A-Za-z0-9_]+$")
 
 
@@ -82,11 +92,15 @@ def main(arguments: list[str]) -> None:
         now = datetime.now(timezone.utc)
         directory = Path(tempfile.mkdtemp(prefix=now.strftime("%Y%m%dT%H%M%S-"), dir=parent))
         git = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+        try:
+            tree = evidence_identity.source_tree(Path.cwd(), GATE_OUTPUT)
+        except (OSError, subprocess.CalledProcessError, UnicodeError) as exc:
+            tree = {"error": f"{type(exc).__name__}: {exc}"}
         _write(directory / "summary.json", {
             "schema_version": "workbench.gate-timing/v1", "mode": args[0], "status": "running",
             "started_at": now.isoformat(), "started_monotonic": time.monotonic(),
             "cwd": str(Path.cwd()), "head": git.stdout.strip() if git.returncode == 0 else None,
-            "stages": [],
+            "source_tree_at_start": tree, "stages": [],
         })
         print(directory)
         return
@@ -109,11 +123,39 @@ def main(arguments: list[str]) -> None:
         summary["slow_tests"] = sorted(tests, key=lambda test: test["duration_seconds"], reverse=True)[:25]
         summary["slow_stages"] = sorted(summary["stages"], key=lambda stage: stage["duration_seconds"], reverse=True)
         summary["report_errors"] = errors
+        record_evidence(summary, tests, python=args[2] if len(args) > 2 else None)
     else:
         raise ValueError(f"unknown timing operation: {operation}")
     _write(path, summary)
     if operation == "finish":
         prune(directory.parent)
+        if summary.get("evidence_status") == "invalidated":
+            raise SystemExit("gate evidence invalidated: the source tree changed during the run")
+
+
+def record_evidence(summary: dict, tests: list[dict], *, python: str | None) -> None:
+    """Attach the evidence key; a tree changed since ``init`` invalidates the run."""
+    names = sorted(f"{test['runner']}:{test['name']}" for test in tests)
+    selection = {"mode": summary["mode"], "stages": [stage["label"] for stage in summary["stages"]],
+                 "tests": len(names), "tests_sha256": evidence_identity.canonical_sha256(names)}
+    try:
+        key = evidence_identity.evidence_key(Path(summary["cwd"]), python=python or None,
+                                             scope=f"gate:{summary['mode']}", test_selection=selection,
+                                             exclude=GATE_OUTPUT)
+    except (OSError, ValueError, subprocess.CalledProcessError, UnicodeError) as exc:
+        summary.update(evidence_status="incomplete", evidence_key={"error": f"{type(exc).__name__}: {exc}"})
+        return
+    summary["evidence_key"] = key
+    start = summary.get("source_tree_at_start", {})
+    if start.get("sha256") != key["source_tree"]["sha256"] or "error" in start:
+        summary.update(evidence_status="invalidated" if "error" not in start else "incomplete")
+        if "error" not in start:
+            summary.update(status="failed", exit_code=summary["exit_code"] or 1,
+                           invalidated_reason="source_tree_changed_during_run")
+        return
+    parts = (key["environment"], key["native_builds"])
+    complete = not any("error" in part for part in parts) and key["environment"]["lock"].get("matches")
+    summary["evidence_status"] = "complete" if complete else "incomplete"
 
 
 if __name__ == "__main__":

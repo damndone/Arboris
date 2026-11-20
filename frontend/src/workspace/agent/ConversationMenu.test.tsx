@@ -37,6 +37,39 @@ beforeEach(() => {
 });
 
 describe("conversation picker", () => {
+  it("keeps Mac notifications off until the user explicitly saves the preference", async () => {
+    vi.mocked(api.updateAgentConversation).mockClear();
+    renderMenu({ sessionId: "s1", openConversation: vi.fn(), newConversation: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: /Is the effect robust\?/ }));
+    const toggle = screen.getByRole("checkbox", { name: "Notify on this Mac" });
+    expect(toggle).not.toBeChecked();
+    expect(api.updateAgentConversation).not.toHaveBeenCalled();
+    expect(screen.getByText(/backend keeps running/i)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(api.updateAgentConversation).toHaveBeenCalledWith("/p", "s1", { desktop_notifications: true }));
+  });
+
+  it("shows a failed notification without claiming delivery or retrying", async () => {
+    vi.mocked(api.listAgentConversations).mockResolvedValue({ conversations: [conversation("s1", "Question", {
+      desktop_notifications: true, desktop_notification_status: "failed",
+    })] });
+    vi.mocked(api.updateAgentConversation).mockClear();
+    renderMenu({ sessionId: "s1", openConversation: vi.fn(), newConversation: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: /Question/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/failed.*no automatic retry/i);
+    expect(api.updateAgentConversation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the preference off when saving it fails", async () => {
+    vi.mocked(api.updateAgentConversation).mockRejectedValueOnce(new Error("Notification preference could not be saved"));
+    renderMenu({ sessionId: "s1", openConversation: vi.fn(), newConversation: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: /Is the effect robust\?/ }));
+    const toggle = screen.getByRole("checkbox", { name: "Notify on this Mac" });
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Notification preference could not be saved");
+    expect(toggle).not.toBeChecked();
+  });
+
   it("shows the current conversation's title, switches and starts new ones", async () => {
     const openConversation = vi.fn();
     const newConversation = vi.fn();

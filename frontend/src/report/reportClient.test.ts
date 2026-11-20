@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { generateReport, ReportGenerationError, saveAiReport } from "./reportClient";
 
+describe("generateReport project scope", () => {
+  it("names the project whose data-sharing policy governs the send", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: "ok" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { facts: [], scope: { run_id: "run-1", node_count: 1, node_keys: [] }, fingerprints: [] };
+    await generateReport({ ...input, projectRoot: "/proj" });
+    await generateReport(input);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).project_root).toBe("/proj");
+    expect("project_root" in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("generateReport error boundary", () => {
   it("aborts a network request that outlives the server Report deadline", async () => {
     const fetchMock = vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {

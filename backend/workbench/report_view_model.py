@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .artifacts import read_json
+from .artifacts import read_json, read_model_result_without_sample_rows
 from .narrative.render import render_template
 
 
@@ -391,7 +391,7 @@ def _survey_design_facts(run_root: Path) -> list[str]:
         if path.name.startswith("diagnostics_"):
             continue
         try:
-            payload = read_json(path)
+            payload = read_model_result_without_sample_rows(path)
         except (OSError, ValueError):
             continue
         design = payload.get("survey_design") if isinstance(payload, dict) else None

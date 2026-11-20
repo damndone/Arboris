@@ -2,108 +2,237 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from copy import deepcopy
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from threading import RLock
-from typing import Any, Callable
+import re
+from typing import Any
 
-from .proposals import ProposalConfirmation
-from ..contracts.common.errors import OperationValidationError
-from ..jsonl_store import append_jsonl_atomic, read_jsonl
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class OperationRecordTransitionError(RuntimeError):
-    """Raised when an operation record attempts an invalid state transition."""
-
-
-class UnknownOperationError(RuntimeError):
-    """Raised when an agent proposes an operation that is not registered."""
-
-
-OperationValidator = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], None]
-
-
-@dataclass(frozen=True)
-class OperationDefinition:
-    operation_id: str
-    operation_version: str = "v1"
-    effect_level: str = "mutation"
-    scope_requirements: tuple[str, ...] = ()
-    scope: str = ""
-    risk_level: str = "mutating"
-    confirmation_policy: str = "required"
-    proposal_schema: dict[str, Any] = field(default_factory=dict)
-    editable_schema: dict[str, Any] = field(default_factory=dict)
-    # Who answers `inspect_operation_contract` for this operation. "lineage"
-    # means the node's own pack publishes the editable shape; "operation_
-    # registry" means this definition is the contract, because the operation
-    # does not act on a single node's editable surface. An operation an agent
-    # may propose must be able to state its own contract, so this is declared
-    # rather than inferred from scope_requirements.
-    contract_owner: str = "lineage"
-    # Optional extra vocabulary published alongside the contract: closed value
-    # sets, field meanings, composition rules. A schema says `spec: object`;
-    # this is what says what may go inside it.
-    vocabulary_builder: Callable[[], dict[str, Any]] | None = None
-    executor_key: str = ""
-    reconciler_key: str = ""
-    diff_builder_key: str = ""
-    verification_builder_key: str = ""
-    ui_description: str = ""
-    example_prompts: tuple[str, ...] = ()
-    natural_language_enabled: bool = False
-    validator: OperationValidator | None = None
-
-    @property
-    def risk_authorization_policy(self) -> str:
-        """Return the backend policy implied by the registry risk level."""
-
-        return "explicit_single_use" if self.risk_level == "high" else "none"
-
-    @property
-    def requires_risk_authorization(self) -> bool:
-        return self.risk_level == "high"
-
-    def validate(
-        self,
-        *,
-        target: dict[str, Any],
-        preconditions: dict[str, Any],
-        changes: dict[str, Any],
-    ) -> None:
-        if self.validator is not None:
-            self.validator(target, preconditions, changes)
+# Definitions, proposal schemas/validators and records live in operation_*;
+# the names callers import from this module are re-exported here.
+from .operation_definitions import (
+    OperationRecordTransitionError,
+    UnknownOperationError,
+    OperationDefinition,
+    RERUN_OPERATIONS,
+    is_rerun_operation,
+    is_workflow_step_only,
+)
+from .operation_schemas import (
+    _workflow_step_operation_definitions,
+    _model_rerun_change_branch,
+    _model_rerun_proposal_schema,
+    _metadata_edit_proposal_schema,
+    _validate_metadata_edit,
+    _model_genesis_proposal_schema,
+    _graph_fork_proposal_schema,
+    _data_column_cast_proposal_schema,
+    _code_execute_proposal_schema,
+    _validate_code_execute,
+    _data_columns_cast_proposal_schema,
+    _validate_data_columns_cast,
+    model_rerun_change_fields,
+    _model_rerun_editable_schema,
+    _validate_model_rerun,
+    _validate_model_genesis,
+    _model_custom_proposal_schema,
+    _validate_model_custom,
+    _validate_graph_fork,
+    _validate_data_column_cast,
+)
+from .operation_records import (  # noqa: F401  (moved; re-exported)
+    OperationRecord,
+    OperationRecordStore,
+)
 
 
-WORKFLOW_STEP_DISPATCHER_PREFIX = "workbench.agent.workflow_runtime."
+#: Node identity the backend binds from run_id + node_ref (design §5.3). Proposals
+#: may carry them (copied from a node read) but never need to: model.rerun used to
+#: require node_hash/forest_node_key while operation.multi_step refused them and
+#: required artifact_id, so a model that had done one rejected the other
+#: (free-route round, 2026-10-22: 11 of 35 refused calls).
+_BOUND_IDENTITY = ("node_hash", "forest_node_key")
+#: Operations whose canonicalization also binds the node's artifact_id.
+_ARTIFACT_BOUND = frozenset({"operation.multi_step", "data.columns.cast"})
 
-# Operations executed as a rerun of the target run: they share the rerun
-# executor, reconciliation and child-run binding.
-RERUN_OPERATIONS = frozenset({"model.rerun", "metadata.edit"})
+
+_IDENTITY_FIELDS = ("artifact_id", "node_hash", "forest_node_key")
 
 
-def is_rerun_operation(operation_id: object) -> bool:
-    return operation_id in RERUN_OPERATIONS
+def normalize_operation_target(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """Identity in a proposal target that this operation does not use is dropped, not refused.
 
-
-def is_workflow_step_only(definition: OperationDefinition) -> bool:
-    """A step identity that only a composed workflow can execute.
-
-    Such definitions carry a workflow-step dispatcher and require a workflow
-    and step id; proposed on their own they failed validation or, after the
-    user confirmed, execution. The Agent reaches them through
-    operation.multi_step (a plan may have one step), which is the one path.
+    ``node_id`` names the node the way node reads do; it means ``node_ref``.
     """
+    from .tools import tool_note
 
-    return str(definition.executor_key).startswith(WORKFLOW_STEP_DISPATCHER_PREFIX)
+    arguments = _step_as_workflow(registry, arguments)
+    target = arguments.get("target")
+    if not isinstance(target, dict):
+        return arguments
+    target = dict(target)
+    if "node_id" in target:
+        node_id = target.pop("node_id")
+        if "node_ref" not in target:
+            target["node_ref"] = node_id
+            tool_note("target.node_id is spelled node_ref; used as node_ref.")
+        elif node_id != target["node_ref"]:
+            target["node_id"] = node_id  # contradictory: leave it for validation to refuse
+        else:
+            tool_note("target.node_id duplicates node_ref; ignored.")
+    arguments = _with_known_version(registry, arguments)
+    arguments = _normalize_steps(arguments)
+    try:
+        definition = registry.require(str(arguments.get("operation_id")))
+    except Exception:
+        return {**arguments, "target": target}
+    own = set(((definition.proposal_schema or {}).get("properties", {}).get("target") or {}).get("properties") or {})
+    if definition.operation_id in _ARTIFACT_BOUND:
+        own.add("artifact_id")
+    unused = [field for field in _IDENTITY_FIELDS if field in target and field not in own]
+    for field in unused:
+        target.pop(field)
+    if unused:
+        tool_note(f"{definition.operation_id} does not use target.{', target.'.join(unused)}; ignored "
+                  "(the backend binds node identity from run_id and node_ref).")
+    return {**arguments, "target": target}
+
+
+def _with_known_version(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """An omitted operation_version is the operation's only version, when it has one."""
+    from .tools import tool_note
+
+    if arguments.get("operation_version") or not isinstance(arguments.get("operation_id"), str):
+        return arguments
+    versions = registry.versions(arguments["operation_id"])
+    if len(versions) != 1:
+        return arguments
+    (version,) = versions
+    tool_note(f"operation_version was omitted; {arguments['operation_id']} has one version, {version}.")
+    return {**arguments, "operation_version": version}
+
+
+#: Covariance names with exactly one meaning in the Workbench's vocabulary (Hy3 wrote statsmodels' nonrobust).
+COVARIANCE_ALIASES = {"nonrobust": "unadjusted"}
+
+
+def _step_as_workflow(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A workflow step named as the operation, with its spec as changes, is a workflow of that one step."""
+    from .tools import tool_note
+    from .workflow_contracts import workflow_step_vocabulary
+
+    named, changes = arguments.get("operation_id"), arguments.get("changes")
+    if (not isinstance(named, str) or not isinstance(changes, dict) or "steps" in changes
+            or named in registry.natural_language_operation_ids()
+            or named not in workflow_step_vocabulary()["step_operations"]):
+        return arguments
+    tool_note(f"{named} is a workflow step; read as operation.multi_step with this one step.")
+    step = {"step_id": re.sub(r"[^a-z0-9_]", "_", named.lower()), "operation_id": named, "spec": changes, "depends_on": []}
+    return {**{key: value for key, value in arguments.items() if key != "operation_version"},
+            "operation_id": "operation.multi_step", "changes": {"steps": [step]}}
+
+
+def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Workflow steps written in an unambiguous variant of their contract, corrected with a note.
+
+    Free-route round with Hy3 and Step-5 (2026-10-23): step-level model fields
+    written inside every branch, `columns` for statistical.explore's
+    `selected_columns`, a filter's `op` (data.subset's spelling) for explore's
+    `operator`, and a model option misspelled closely enough to match exactly
+    one accepted name (event_col: event_column). A variant that could mean two
+    things is left for validation to refuse.
+    """
+    import difflib
+
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS, MODEL_FAMILY_SPEC_FIELDS
+    from .tools import tool_note
+
+    changes = arguments.get("changes")
+    steps = changes.get("steps") if isinstance(changes, dict) else None
+    if not isinstance(steps, list):
+        return arguments
+    if "step_operation_ids" in changes:
+        # inspect_operation_contract's argument, copied into the proposal (12 refusals, NVIDIA rounds).
+        changes = {key: value for key, value in changes.items() if key != "step_operation_ids"}
+        tool_note("changes.step_operation_ids belongs to inspect_operation_contract; ignored here.")
+    # A workflow's identity is the server's, and dependencies belong to each step.
+    for field in ("workflow_id", "depends_on"):
+        if field in changes:
+            changes = {key: value for key, value in changes.items() if key != field}
+            tool_note(f"changes.{field} is not part of a workflow; ignored here.")
+    normalized = []
+    for step in steps:
+        if not isinstance(step, dict) or not isinstance(step.get("spec"), dict):
+            normalized.append(step)
+            continue
+        if "source" in step and "source" not in step["spec"]:
+            # The contract says source goes inside spec; written beside it, it can mean only that.
+            step = {**{key: value for key, value in step.items() if key != "source"}, "spec": {**step["spec"], "source": step["source"]}}
+            tool_note(f"step {step.get('step_id') or step.get('operation_id')}: source belongs inside spec; moved there.")
+        spec, label = dict(step["spec"]), step.get("step_id") or step.get("operation_id")
+        branches = spec.get("branches")
+        if isinstance(branches, list) and branches and all(isinstance(item, dict) for item in branches):
+            for field in sorted({"model_family", *MODEL_FAMILY_SPEC_FIELDS}):
+                values = [branch.get(field) for branch in branches]
+                if spec.get(field) is None and all(value is not None and value == values[0] for value in values):
+                    spec[field] = values[0]
+                    branches = [{key: value for key, value in branch.items() if key != field} for branch in branches]
+                    tool_note(f"step {label}: {field} applies to the whole model.genesis step; moved out of its branches.")
+            spec["branches"] = branches
+        if isinstance(spec.get("branches"), list):
+            spec["branches"] = [dict(branch) if isinstance(branch, dict) else branch for branch in spec["branches"]]
+        for holder, where in [(spec, ""), *((branch, f" branch {index}") for index, branch in enumerate(spec.get("branches") or [])
+                                                if isinstance(branch, dict))]:
+            alias = COVARIANCE_ALIASES.get(str(holder.get("covariance", "")).strip().lower().replace("-", "").replace("_", ""))
+            if alias:
+                tool_note(f"step {label}{where}: covariance {holder['covariance']} is called {alias} here; used as that.")
+                holder["covariance"] = alias
+        for index, branch in enumerate(spec.get("branches") or ()):
+            # An endogenous regressor is in the structural equation by definition, so listing it
+            # as a predictor as well says the same thing twice (IV_INVALID_PARTITION, 5 refusals).
+            endogenous = (branch.get("iv_endog") or spec.get("iv_endog")) if isinstance(branch, dict) else None
+            if (isinstance(endogenous, list) and isinstance(branch.get("predictors"), list)
+                    and set(map(str, endogenous)) & set(map(str, branch["predictors"]))):
+                kept = [item for item in branch["predictors"] if str(item) not in set(map(str, endogenous))]
+                spec["branches"][index] = {**branch, "predictors": kept}
+                tool_note(f"step {label} branch {index}: an endogenous regressor enters through iv_endog; "
+                          "removed it from predictors.")
+        options = spec.get("model_options")
+        family = MODEL_FAMILY_CONTRACTS.get(spec.get("model_family"))
+        if isinstance(options, dict) and family is not None:
+            accepted = list(family.model_options_fields)
+            renamed = {}
+            for key in [key for key in options if key not in accepted]:
+                close = difflib.get_close_matches(key, accepted, n=2, cutoff=0.8)
+                if len(close) == 1 and close[0] not in options and close[0] not in renamed.values():
+                    renamed[key] = close[0]
+            if renamed:
+                spec["model_options"] = {renamed.get(key, key): value for key, value in options.items()}
+                tool_note(f"step {label}: model_options " + ", ".join(f"{old} is spelled {new}" for old, new in renamed.items())
+                          + "; used as that.")
+        if step.get("operation_id") == "statistical.explore":
+            if "columns" in spec and "selected_columns" not in spec:
+                spec["selected_columns"] = spec.pop("columns")
+                tool_note(f"step {label}: statistical.explore names its columns selected_columns; used columns as that.")
+            filters = spec.get("filters")
+            if isinstance(filters, list) and any(isinstance(item, dict) and "op" in item and "operator" not in item for item in filters):
+                spec["filters"] = [{**{key: value for key, value in item.items() if key != "op"}, "operator": item["op"]}
+                                   if isinstance(item, dict) and "op" in item and "operator" not in item else item
+                                   for item in filters]
+                tool_note(f"step {label}: statistical.explore filters name the comparison operator; used op as that.")
+        normalized.append({**step, "spec": spec})
+    return {**arguments, "changes": {**changes, "steps": normalized}}
+
+
+def _accept_backend_bound_identity(schema: dict[str, Any], operation_id: str) -> None:
+    """Agent-facing target: references required, backend-bound identity optional and unused."""
+    target = schema.get("properties", {}).get("target")
+    if not isinstance(target, dict) or "properties" not in target:
+        return
+    bound = [*_BOUND_IDENTITY, *(["artifact_id"] if operation_id in _ARTIFACT_BOUND else [])]
+    target["required"] = [field for field in target.get("required", []) if field not in bound]
+    for field in bound:
+        target["properties"].setdefault(field, {"type": "string", "maxLength": 500})
+    note = ("The backend binds " + ", ".join(bound) + " from run_id and node_ref; values given here are not used.")
+    target["description"] = (target.get("description", "") + " " + note).strip()
 
 
 class OperationRegistry:
@@ -434,6 +563,10 @@ class OperationRegistry:
             raise ValueError(f"operation already registered: {definition.operation_id}")
         self._definitions[key] = definition
 
+    def versions(self, operation_id: str) -> set[str]:
+        """The registered versions of one operation."""
+        return {version for registered, version in self._definitions if registered == operation_id}
+
     def operation_ids(self) -> list[str]:
         """Registered operation identities, for tool schemas and UI enums."""
         return sorted({operation_id for operation_id, _version in self._definitions})
@@ -559,6 +692,19 @@ class OperationRegistry:
                 "type": "string",
                 "const": definition.operation_id,
             }
+            if definition.operation_id == "model.rerun":
+                # A request selector, consumed when binding the canonical PlanDiff;
+                # the durable proposal still uses the source-resolved target.
+                schema["properties"]["target"]["properties"]["result_id"] = {
+                    "type": "string", "minLength": 1, "maxLength": 500,
+                    "description": "Optional exact source result for a clustered OLS Analysis Loop; invalid for other reruns.",
+                }
+                preconditions = schema["properties"]["preconditions"]
+                preconditions["required"] = ["active_head_run_id"]
+                preconditions["description"] = (
+                    "Supply active_head_run_id. The backend binds context_version, "
+                    "context_fingerprint and owner_resolution from the selected model node."
+                )
             if definition.operation_id == "graph.fork":
                 # The source Agent entry is a backend-bound fact: requiring the
                 # model to invent it would turn a durable Chain leaf into an
@@ -595,6 +741,7 @@ class OperationRegistry:
                     "Supply active_head_run_id. The backend binds context_version, "
                     "context_fingerprint and owner_resolution from the data node."
                 )
+            _accept_backend_bound_identity(schema, definition.operation_id)
             schemas.append(schema)
         base["oneOf"] = schemas
         base["description"] = "A typed, confirmation-gated Workbench operation proposal."
@@ -604,1251 +751,11 @@ class OperationRegistry:
         try:
             return self._definitions[(operation_id, operation_version)]
         except KeyError as exc:
+            versions = sorted(version for name, version in self._definitions if name == operation_id)
             raise UnknownOperationError(
-                f"operation is not registered: {operation_id}@{operation_version}"
+                f"operation is not registered: {operation_id}@{operation_version}; "
+                f"registered versions: {', '.join(versions[:8]) or 'none'}. "
+                "Use a registered version; do not change the operation to repair a version typo."
             ) from exc
 
 
-def _workflow_step_operation_definitions() -> tuple[OperationDefinition, ...]:
-    """Project the single workflow-step contract table into the registry."""
-
-    from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
-
-    definitions: list[OperationDefinition] = []
-    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items():
-        # These two identities also have top-level operation definitions with
-        # the same operation/version. Their shared editable fields and runtime
-        # metadata are projected into those definitions during registry setup.
-        if operation_id in {"model.genesis", "model.custom"}:
-            continue
-        if not contract.dispatcher_key:
-            raise ValueError(f"workflow step {operation_id} has no dispatcher key")
-        spec_schema = contract.to_schema()
-        definitions.append(
-            OperationDefinition(
-                operation_id=operation_id,
-                operation_version="v1",
-                effect_level=contract.effect_level,
-                scope_requirements=contract.scope_requirements,
-                scope=contract.scope,
-                risk_level=contract.risk_level,
-                confirmation_policy=contract.confirmation_policy,
-                proposal_schema=_workflow_step_schema(
-                    operation_id,
-                    changes=spec_schema["properties"],
-                    required_changes=list(contract.required),
-                ),
-                editable_schema=spec_schema,
-                contract_owner="operation_registry",
-                executor_key=contract.dispatcher_key,
-                reconciler_key=contract.reconciler_key or contract.dispatcher_key,
-                diff_builder_key=contract.diff_builder_key or "",
-                verification_builder_key=contract.verification_builder_key or "",
-                ui_description=contract.ui_description,
-                example_prompts=contract.example_prompts,
-                natural_language_enabled=contract.natural_language_enabled,
-                validator=_validate_workflow_step,
-            )
-        )
-    return tuple(definitions)
-
-def _workflow_step_schema(
-    operation_id: str,
-    *,
-    changes: dict[str, Any],
-    required_changes: list[str],
-) -> dict[str, Any]:
-    return {
-        "type": "object",
-        "required": [
-            "operation_id",
-            "operation_version",
-            "target",
-            "preconditions",
-            "changes",
-            "evidence_refs",
-            "expected_effect",
-            "risks",
-        ],
-        "properties": {
-            "operation_id": {"const": operation_id},
-            "operation_version": {"const": "v1"},
-            "target": {
-                "type": "object",
-                "required": ["run_id", "node_ref", "artifact_id", "workflow_id", "step_id"],
-                "properties": {
-                    key: {"type": "string", "minLength": 1}
-                    for key in ("run_id", "node_ref", "artifact_id", "workflow_id", "step_id")
-                },
-                "additionalProperties": False,
-            },
-            "preconditions": {
-                "type": "object",
-                "required": ["source_fingerprint", "dependency_fingerprints"],
-                "properties": {
-                    "source_fingerprint": {"type": "string", "minLength": 1},
-                    "dependency_fingerprints": {"type": "array", "items": {"type": "string"}},
-                },
-                "additionalProperties": False,
-            },
-            "changes": {
-                "type": "object",
-                "required": required_changes,
-                "properties": changes,
-                "additionalProperties": False,
-            },
-            "evidence_refs": {"type": "array", "items": {"type": "string"}},
-            "expected_effect": {"type": "array", "items": {"type": "string"}},
-            "risks": {"type": "array", "items": {"type": "string"}},
-        },
-        "additionalProperties": False,
-    }
-
-
-def _validate_workflow_step(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    required_target = {"run_id", "node_ref", "artifact_id", "workflow_id", "step_id"}
-    missing_target = {key for key in required_target if not target.get(key)}
-    if missing_target:
-        raise OperationValidationError(
-            "workflow step target missing: " + ", ".join(sorted(missing_target))
-        )
-    if not preconditions.get("source_fingerprint"):
-        raise OperationValidationError("workflow step source_fingerprint is required")
-    if not isinstance(preconditions.get("dependency_fingerprints"), list):
-        raise OperationValidationError(
-            "workflow step dependency_fingerprints must be a list"
-        )
-    if not isinstance(changes, dict) or not changes:
-        raise OperationValidationError("workflow step changes must not be empty")
-
-
-def _proposal_schema(
-    *,
-    target_required: list[str],
-    changes: dict[str, Any],
-    target_properties: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build one operation's proposal schema.
-
-    Target fields default to strings because most references are ids, but any
-    field whose shape is richer (an array of casts, an enum) must declare it via
-    ``target_properties`` — a mistyped field here is unsatisfiable, and the
-    model has no way to tell that from its own mistake.
-    """
-
-    properties = {key: {"type": "string"} for key in target_required}
-    properties.update(target_properties or {})
-    return {
-        "type": "object",
-        "required": [
-            "operation_id",
-            "target",
-            "preconditions",
-            "changes",
-            "evidence_refs",
-            "expected_effect",
-            "risks",
-        ],
-        "properties": {
-            "operation_id": {"type": "string"},
-            "operation_version": {"type": "string"},
-            "target": {
-                "type": "object",
-                "required": target_required,
-                "properties": properties,
-                "additionalProperties": False,
-            },
-            "preconditions": {
-                "type": "object",
-                "required": [
-                    "context_version",
-                    "context_fingerprint",
-                    "active_head_run_id",
-                    "owner_resolution",
-                ],
-                "properties": {
-                    key: {"type": "string"}
-                    for key in (
-                        "context_version",
-                        "context_fingerprint",
-                        "active_head_run_id",
-                        "owner_resolution",
-                    )
-                },
-                "additionalProperties": True,
-            },
-            "changes": changes,
-            "evidence_refs": {"type": "array", "items": {"type": "string"}},
-            "expected_effect": {"type": "array", "items": {"type": "string"}},
-            "risks": {"type": "array", "items": {"type": "string"}},
-        },
-        "additionalProperties": False,
-    }
-
-
-def _model_rerun_change_branch() -> dict[str, Any]:
-    """The normal rerun patch, as the *model* is shown it.
-
-    Built from the same declaration as the validator. These are two different
-    schemas -- `editable_schema` describes the operation, `proposal_schema` is
-    what reaches the language model -- and aligning only one of them yields a
-    tool contract that forbids a field the validator would have accepted, so the
-    model cannot emit it at all.
-    """
-    from ..survey.fields import DESIGN_FIELD_SPECS
-
-    properties: dict[str, Any] = {
-        "model_options": {"type": "object"},
-        "labels": {
-            "type": "object",
-            "description": (
-                "Column metadata. `measurement_level` maps column names to one of "
-                "nominal / ordinal / scale / count and changes how a column that is "
-                "already in the model is treated (for example an ordinal outcome "
-                "routes to ordinal logit). It never adds a column to the model: to "
-                "add a regressor, propose model.genesis with it in predictors or "
-                "categorical. `variable_labels` and `value_labels` change how "
-                "columns and their values are displayed in tables and answers. "
-                "`user_missing_values` declares codes (e.g. -99, or a {low, high} "
-                "range) that mean no valid answer; they become missing before any "
-                "model runs, which changes the estimation sample. Declare every "
-                "column in one proposal rather than one at a time. Only columns "
-                "present in the data may be named."
-            ),
-            "properties": {
-                "measurement_level": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string",
-                        "enum": ["nominal", "ordinal", "scale", "count", "unspecified"],
-                    },
-                },
-                "variable_labels": {
-                    "type": "object",
-                    "additionalProperties": {"type": "string", "minLength": 1},
-                },
-                "value_labels": {
-                    "type": "object",
-                    "description": "Column -> {stored value as string -> label}.",
-                    "additionalProperties": {
-                        "type": "object",
-                        "additionalProperties": {"type": "string", "minLength": 1},
-                    },
-                },
-                "user_missing_values": {
-                    "type": "object",
-                    "description": "Column -> list of codes; a code is a number, a string, or {low, high}.",
-                    "additionalProperties": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "anyOf": [
-                                {"type": "number"},
-                                {"type": "string", "minLength": 1},
-                                {
-                                    "type": "object",
-                                    "required": ["low", "high"],
-                                    "properties": {"low": {"type": "number"}, "high": {"type": "number"}},
-                                    "additionalProperties": False,
-                                },
-                            ]
-                        },
-                    },
-                },
-            },
-        },
-        # No enum here on purpose: the legal families are a runtime registry, and
-        # a list frozen into this schema would drift the moment a pack is added.
-        # `inspect_operation_contract` returns the live set together with the
-        # target family's required fields, which is what a switch actually needs.
-        "model_type": {
-            "type": "string",
-            "description": (
-                "Switch the model family. This changes what the analysis means, "
-                "not just how it is estimated, so the new family's own required "
-                "fields must be supplied in the same patch. Read the legal values "
-                "and those requirements from inspect_operation_contract first."
-            ),
-        },
-    }
-    for field_name in model_rerun_change_fields():
-        if field_name.endswith("_weight"):
-            properties[field_name] = {
-                "type": "string",
-                "description": f"Column holding the {field_name.removesuffix('_weight')} weight.",
-            }
-    for spec in DESIGN_FIELD_SPECS:
-        entry: dict[str, Any] = {
-            "type": "array" if spec["kind"] == "columns" else "string",
-            "description": spec["label"],
-        }
-        if spec["kind"] == "columns":
-            entry["items"] = {"type": "string"}
-        if spec.get("options"):
-            entry["enum"] = list(spec["options"])
-        properties[spec["key"]] = entry
-    return {
-        "type": "object",
-        "description": (
-            "The normal v1 rerun patch. Use one-level model_options only; do not "
-            "use an old/new field-diff wrapper. The survey_* fields declare a "
-            "complex sampling design: setting them re-runs the model with "
-            "design-based standard errors, and they require a sampling weight."
-        ),
-        "properties": properties,
-        "additionalProperties": False,
-    }
-
-
-def _model_rerun_proposal_schema() -> dict[str, Any]:
-    return _proposal_schema(
-        target_required=["run_id", "node_ref", "node_hash", "forest_node_key"],
-        changes={
-            "oneOf": [
-                _model_rerun_change_branch(),
-                {
-                    "type": "object",
-                    "description": (
-                        "Legacy Analysis Loop compatibility patch. This is valid only "
-                        "when preconditions.analysis_loop is present."
-                    ),
-                    "properties": {
-                        "covariance": {"type": ["string", "object"]},
-                        "entity_col": {"type": ["string", "object"]},
-                    },
-                    "additionalProperties": False,
-                    "minProperties": 1,
-                },
-            ],
-        },
-    )
-
-
-def _metadata_edit_proposal_schema() -> dict[str, Any]:
-    labels = deepcopy(_model_rerun_change_branch()["properties"]["labels"])
-    labels["minProperties"] = 1
-    return _proposal_schema(
-        target_required=["run_id", "node_ref", "node_hash", "forest_node_key"],
-        changes={
-            "type": "object",
-            "description": (
-                "Only `labels`: declare metadata for any column (inside or outside "
-                "the model). To add or remove model variables use model.genesis."
-            ),
-            "required": ["labels"],
-            "properties": {"labels": labels},
-            "additionalProperties": False,
-        },
-    )
-
-
-def _validate_metadata_edit(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    if set(changes) != {"labels"} or not isinstance(changes.get("labels"), dict) or not changes["labels"]:
-        raise OperationValidationError("metadata.edit changes must be exactly a non-empty labels object")
-    _validate_model_rerun(target, preconditions, changes)
-
-
-def _model_genesis_proposal_schema() -> dict[str, Any]:
-    schema = _proposal_schema(
-        target_required=["dataset_source_id"],
-        changes={
-            "type": "object",
-            "properties": {
-                "table_params": {"type": "object"},
-                "model_params": {"type": "object"},
-                "model_options": {"type": "object"},
-            },
-            "additionalProperties": False,
-        },
-    )
-    preconditions = schema["properties"]["preconditions"]
-    preconditions["required"] = ["context_version", "context_fingerprint", "owner_resolution"]
-    return schema
-
-
-def _graph_fork_proposal_schema() -> dict[str, Any]:
-    return _proposal_schema(
-        target_required=[
-            "run_id",
-            "node_ref",
-            "node_hash",
-            "forest_node_key",
-            "source_session_entry_id",
-        ],
-        changes={
-            "type": "object",
-            "properties": {
-                "reason": {"type": "string", "maxLength": 1000},
-            },
-            "additionalProperties": False,
-        },
-    )
-
-
-def _data_column_cast_proposal_schema() -> dict[str, Any]:
-    return _proposal_schema(
-        target_required=["run_id", "node_ref", "artifact_id", "column", "target_dtype"],
-        changes={
-            "type": "object",
-            "required": ["column", "target_dtype"],
-            "properties": {
-                "column": {"type": "string"},
-                "target_dtype": {
-                    "type": "string",
-                    "enum": ["numeric", "string", "datetime"],
-                },
-            },
-            "additionalProperties": False,
-        },
-    )
-
-
-def _code_execute_proposal_schema() -> dict[str, Any]:
-    return _proposal_schema(
-        target_required=["run_id", "node_ref", "artifact_id", "code"],
-        changes={
-            "type": "object",
-            "required": ["code"],
-            "properties": {
-                "code": {"type": "string", "minLength": 1, "maxLength": 20000},
-                "language": {"type": "string", "enum": ["python"]},
-                "output_format": {"type": "string", "enum": ["csv", "xlsx"]},
-            },
-            "additionalProperties": False,
-        },
-    )
-
-
-def _validate_code_execute(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    missing_target = {
-        key for key in ("run_id", "node_ref", "artifact_id", "code") if not target.get(key)
-    }
-    if missing_target:
-        raise OperationValidationError(
-            "code.execute target missing: " + ", ".join(sorted(missing_target))
-        )
-    code = target.get("code")
-    if not isinstance(code, str) or not code.strip():
-        raise OperationValidationError("code.execute code must be a non-empty string")
-    if len(code) > 20000:
-        raise OperationValidationError("code.execute code is too long")
-    language = target.get("language", "python")
-    if language != "python":
-        raise OperationValidationError("code.execute language is unsupported")
-    output_format = target.get("output_format", "csv")
-    if output_format not in {"csv", "xlsx"}:
-        raise OperationValidationError("code.execute output_format is unsupported")
-    missing_preconditions = {
-        key
-        for key in (
-            "context_version",
-            "context_fingerprint",
-            "active_head_run_id",
-            "owner_resolution",
-        )
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "code.execute preconditions missing: " + ", ".join(sorted(missing_preconditions))
-        )
-    if changes.get("code") != code:
-        raise OperationValidationError("code.execute changes must match target code")
-    if changes.get("language", "python") != language:
-        raise OperationValidationError("code.execute changes language must match target")
-    if changes.get("output_format", "csv") != output_format:
-        raise OperationValidationError("code.execute changes output_format must match target")
-
-
-def _data_columns_cast_proposal_schema() -> dict[str, Any]:
-    cast_item = {
-        "type": "object",
-        "required": ["column", "target_dtype"],
-        "properties": {
-            "column": {"type": "string"},
-            "target_dtype": {
-                "type": "string",
-                "enum": ["numeric", "string", "datetime"],
-            },
-        },
-        "additionalProperties": False,
-    }
-    return _proposal_schema(
-        target_required=["run_id", "node_ref", "artifact_id", "casts"],
-        # `casts` is an array; the string default would make this operation
-        # literally unproposable (the live DeepSeek smoke hit exactly that and
-        # correctly guessed the schema — not itself — was wrong).
-        target_properties={
-            "casts": {"type": "array", "minItems": 1, "items": cast_item},
-            "output_format": {"type": "string", "enum": ["csv", "xlsx"]},
-        },
-        changes={
-            "type": "object",
-            "required": ["casts"],
-            "properties": {
-                "casts": {"type": "array", "minItems": 1, "items": cast_item},
-                "output_format": {"type": "string", "enum": ["csv", "xlsx"]},
-            },
-            "additionalProperties": False,
-        },
-    )
-
-
-def _validate_data_columns_cast(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    missing_target = {
-        key for key in ("run_id", "node_ref", "artifact_id", "casts") if not target.get(key)
-    }
-    if missing_target:
-        raise OperationValidationError(
-            "data.columns.cast target missing: " + ", ".join(sorted(missing_target))
-        )
-    casts = target.get("casts")
-    if not isinstance(casts, list) or not casts:
-        raise OperationValidationError("data.columns.cast casts must be a non-empty list")
-    seen: set[str] = set()
-    for item in casts:
-        if not isinstance(item, dict):
-            raise OperationValidationError("data.columns.cast cast items must be objects")
-        column = item.get("column")
-        dtype = item.get("target_dtype")
-        if not isinstance(column, str) or not column:
-            raise OperationValidationError("data.columns.cast cast column missing")
-        if dtype not in {"numeric", "string", "datetime"}:
-            raise OperationValidationError("data.columns.cast target_dtype is unsupported")
-        if column in seen:
-            raise OperationValidationError("data.columns.cast has a duplicate column")
-        seen.add(column)
-    output_format = target.get("output_format", "csv")
-    if output_format not in {"csv", "xlsx"}:
-        raise OperationValidationError("data.columns.cast output_format is unsupported")
-    missing_preconditions = {
-        key
-        for key in ("context_version", "context_fingerprint", "active_head_run_id", "owner_resolution")
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "data.columns.cast preconditions missing: "
-            + ", ".join(sorted(missing_preconditions))
-        )
-    if changes.get("casts") != casts:
-        raise OperationValidationError("data.columns.cast changes must match target casts")
-    if changes.get("output_format", "csv") != output_format:
-        raise OperationValidationError("data.columns.cast changes output_format must match target")
-
-
-def model_rerun_change_fields() -> tuple[str, ...]:
-    """Top-level fields a `model.rerun` proposal may carry.
-
-    Declared in one place because the operation's `editable_schema` and its
-    validator both consume it: a schema that advertises a field the validator
-    rejects teaches an Agent to emit proposals that always fail, and reads as
-    authoritative while doing so.
-
-    The survey design fields are flat rather than nested under one object
-    because `op_overrides` merges straight into the run form, where they are
-    flat -- a nested shape would need a translation step whose only job would be
-    to undo the nesting.
-    """
-    from ..survey.fields import DESIGN_FIELDS
-    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
-
-    # The weight columns travel with the design, not separately: a design
-    # without a sampling weight is refused by the engine, so an Agent able to
-    # propose one but not the other could only ever produce a rejected run.
-    # Which weights a given family accepts is still enforced downstream against
-    # that family's published params -- this is the union of what may be asked.
-    weights = {
-        f"{kind}_weight"
-        for contract in MODEL_FAMILY_CONTRACTS.values()
-        for kind in contract.allows_weights
-    }
-    # `model_type` switches the family. The executor has re-resolved the
-    # contract against the new family since v1.6.0 (`resolve_overrides_target`),
-    # and validates the rest of the patch against *that* family's params, so an
-    # under-specified switch is refused there rather than silently running a
-    # model configured by omission. Only the Agent whitelist stood in the way.
-    # `labels` carries the measurement-level declarations (v1.8.7 A2). A
-    # questionnaire has fifty columns; declared one at a time nobody declares
-    # any, so the batch has to be one proposal. It rides a rerun rather than a
-    # bespoke data operation because a measurement level is run metadata, not a
-    # transformation, and a rerun already gives the child node, the lineage and
-    # the confirmation gate.
-    return ("model_type", "model_options", "labels", *sorted(weights), *DESIGN_FIELDS)
-
-
-def _model_rerun_editable_schema() -> dict[str, Any]:
-    properties: dict[str, Any] = {
-        "model_options": {
-            "type": "object",
-            "description": (
-                "A one-level model-options patch, not an old/new field-diff wrapper."
-            ),
-        },
-    }
-    for field_name in model_rerun_change_fields():
-        properties.setdefault(
-            field_name,
-            {
-                "description": (
-                    "Complex survey design declaration; changing it re-runs the model "
-                    "with design-based variance."
-                ),
-            },
-        )
-    return {
-        "type": "object",
-        "description": "Field-level model rerun changes.",
-        "properties": properties,
-        "additionalProperties": True,
-    }
-
-
-def _validate_model_rerun(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    missing_target = {
-        key
-        for key in ("run_id", "node_ref", "node_hash", "forest_node_key")
-        if not target.get(key)
-    }
-    if missing_target:
-        raise OperationValidationError(
-            f"model.rerun target missing: {', '.join(sorted(missing_target))}"
-        )
-    missing_preconditions = {
-        key
-        for key in (
-            "context_version",
-            "context_fingerprint",
-            "active_head_run_id",
-            "owner_resolution",
-        )
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "model.rerun preconditions missing: "
-            + ", ".join(sorted(missing_preconditions))
-        )
-    if not changes:
-        raise OperationValidationError("model.rerun changes must not be empty")
-    unknown = set(changes) - set(model_rerun_change_fields())
-    # The pre-existing Analysis Loop has its own canonical PlanDiff binding and
-    # stores a legacy wire patch (covariance/entity_col) alongside the binding.
-    # Keep that adapter interoperable while making every ordinary Notebook or
-    # generic model.rerun proposal use the closed model_options envelope.
-    analysis_loop_compat = (
-        isinstance(preconditions.get("analysis_loop"), dict)
-        or preconditions.get("owner_resolution") == "active_head_contains_node"
-    )
-    if unknown and not analysis_loop_compat:
-        raise OperationValidationError(
-            "model.rerun changes contain unknown field(s): "
-            + ", ".join(sorted(unknown))
-        )
-    if "model_options" in changes:
-        model_options = changes["model_options"]
-        # Unlike legacy scalar changes, model_options is itself a generic
-        # object-valued patch. Treating an ``old``/``new`` pair as a diff wrapper
-        # would silently corrupt a future handler whose legitimate option keys
-        # happen to use those names.
-        if not isinstance(model_options, dict):
-            raise OperationValidationError("model.rerun model_options must be an object")
-
-
-def _validate_model_genesis(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    if not target.get("dataset_source_id"):
-        raise OperationValidationError("model.genesis target requires dataset_source_id")
-    missing = {
-        key
-        for key in ("context_version", "context_fingerprint", "owner_resolution")
-        if not preconditions.get(key)
-    }
-    if missing:
-        raise OperationValidationError(
-            "model.genesis preconditions missing: " + ", ".join(sorted(missing))
-        )
-    if not isinstance(changes, dict) or not changes:
-        raise OperationValidationError("model.genesis changes must not be empty")
-    allowed = {"table_params", "model_params", "model_options"}
-    unknown = set(changes) - allowed
-    if unknown:
-        raise OperationValidationError(
-            "model.genesis changes contain unknown field(s): " + ", ".join(sorted(unknown))
-        )
-    for key, value in changes.items():
-        if not isinstance(value, dict):
-            raise OperationValidationError(f"model.genesis {key} must be an object")
-
-
-def _model_custom_proposal_schema(contract: Any | None = None) -> dict[str, Any]:
-    if contract is None:
-        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
-
-        contract = WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"]
-    if not hasattr(contract, "to_schema"):
-        raise TypeError("model.custom contract must expose to_schema")
-    contract_schema = contract.to_schema()
-    changes = dict(contract_schema)
-    properties: dict[str, Any] = {}
-    for name, schema in contract_schema["properties"].items():
-        normalized = dict(schema)
-        if normalized.get("type") == "string":
-            normalized["minLength"] = 1
-        elif normalized.get("type") == "array":
-            normalized["items"] = {"type": "string", "minLength": 1}
-        properties[name] = normalized
-    changes["properties"] = properties
-    return _proposal_schema(
-        target_required=[],
-        changes=changes,
-        target_properties={
-            "dataset_source_id": {"type": "string", "minLength": 1},
-            "run_id": {"type": "string", "minLength": 1},
-            "node_ref": {"type": "string", "minLength": 1},
-            "node_hash": {"type": "string", "minLength": 1},
-            "forest_node_key": {"type": "string", "minLength": 1},
-        },
-    )
-
-
-def _validate_model_custom(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    dataset_target = bool(target.get("dataset_source_id"))
-    run_target = all(target.get(key) for key in ("run_id", "node_ref", "node_hash", "forest_node_key"))
-    if dataset_target == run_target:
-        raise OperationValidationError(
-            "model.custom target must identify exactly one dataset source or run model node"
-        )
-    missing_preconditions = {
-        key
-        for key in ("context_version", "context_fingerprint", "owner_resolution")
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "model.custom preconditions missing: " + ", ".join(sorted(missing_preconditions))
-        )
-    if not isinstance(changes, dict) or not changes:
-        raise OperationValidationError("model.custom changes must not be empty")
-    required = {"capability_ref", "binding_ref", "operation"}
-    missing = sorted(field for field in required if not changes.get(field))
-    if missing:
-        raise OperationValidationError(
-            "model.custom changes missing: " + ", ".join(missing)
-        )
-    allowed = required | {"input_handle", "parameters", "consumer_slots", "expected_artifacts"}
-    unknown = set(changes) - allowed
-    if unknown:
-        raise OperationValidationError(
-            "model.custom changes contain unknown field(s): " + ", ".join(sorted(unknown))
-        )
-    for key in required | {"input_handle"}:
-        if key in changes and (not isinstance(changes[key], str) or not changes[key]):
-            raise OperationValidationError(f"model.custom {key} must be a non-empty string")
-    if "parameters" in changes and not isinstance(changes["parameters"], dict):
-        raise OperationValidationError("model.custom parameters must be an object")
-    if "consumer_slots" in changes:
-        slots = changes["consumer_slots"]
-        if (
-            not isinstance(slots, list)
-            or not slots
-            or any(not isinstance(item, str) or not item for item in slots)
-            or len(set(slots)) != len(slots)
-        ):
-            raise OperationValidationError("model.custom consumer_slots must be unique non-empty strings")
-    if "expected_artifacts" in changes:
-        artifacts = changes["expected_artifacts"]
-        if not isinstance(artifacts, list) or any(
-            not isinstance(item, str) or not item for item in artifacts
-        ):
-            raise OperationValidationError("model.custom expected_artifacts must be strings")
-
-
-def _validate_graph_fork(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    missing_target = {
-        key
-        for key in (
-            "run_id",
-            "node_ref",
-            "node_hash",
-            "forest_node_key",
-            "source_session_entry_id",
-        )
-        if not target.get(key)
-    }
-    if missing_target:
-        raise OperationValidationError(
-            "graph.fork target missing: " + ", ".join(sorted(missing_target))
-        )
-    missing_preconditions = {
-        key
-        for key in (
-            "context_version",
-            "context_fingerprint",
-            "active_head_run_id",
-            "owner_resolution",
-        )
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "graph.fork preconditions missing: "
-            + ", ".join(sorted(missing_preconditions))
-        )
-    if set(changes) - {"reason"}:
-        raise OperationValidationError("graph.fork changes only allow reason")
-    reason = changes.get("reason")
-    if reason is not None and (not isinstance(reason, str) or len(reason) > 1_000):
-        raise OperationValidationError("graph.fork reason must be a bounded string")
-
-
-def _validate_data_column_cast(
-    target: dict[str, Any],
-    preconditions: dict[str, Any],
-    changes: dict[str, Any],
-) -> None:
-    required_target = {"run_id", "node_ref", "artifact_id", "column", "target_dtype"}
-    missing_target = {key for key in required_target if not target.get(key)}
-    if missing_target:
-        raise OperationValidationError(
-            "data.column.cast target missing: " + ", ".join(sorted(missing_target))
-        )
-    if target.get("target_dtype") not in {"numeric", "string", "datetime"}:
-        raise OperationValidationError("data.column.cast target_dtype is unsupported")
-    missing_preconditions = {
-        key
-        for key in ("context_version", "context_fingerprint", "active_head_run_id", "owner_resolution")
-        if not preconditions.get(key)
-    }
-    if missing_preconditions:
-        raise OperationValidationError(
-            "data.column.cast preconditions missing: "
-            + ", ".join(sorted(missing_preconditions))
-        )
-    if changes.get("column") != target.get("column"):
-        raise OperationValidationError("data.column.cast column change does not match target")
-    if changes.get("target_dtype") != target.get("target_dtype"):
-        raise OperationValidationError("data.column.cast dtype change does not match target")
-
-
-@dataclass(frozen=True)
-class OperationRecord:
-    record_id: str
-    operation_id: str
-    operation_version: str
-    proposal_id: str
-    proposal_revision: int
-    proposal_fingerprint: str
-    agent_session_id: str
-    chain_id: str
-    command_id: str | None
-    target: dict[str, Any]
-    preconditions: dict[str, Any]
-    actor_type: str
-    status: str
-    confirmation: dict[str, Any]
-    execution: dict[str, Any] = field(default_factory=dict)
-    outputs: dict[str, Any] = field(default_factory=dict)
-    diff_ref: dict[str, Any] | None = None
-    verification: dict[str, Any] = field(default_factory=dict)
-    error: dict[str, Any] | None = None
-    changes: dict[str, Any] = field(default_factory=dict)
-    # The domain effect and its read-model projection have separate durable
-    # states.  A crash after domain commit must be recoverable without
-    # re-running the effect or mistaking an unfinished projection for a second
-    # execution.
-    effect_status: str = "pending"
-    projection_status: str = "pending"
-    created_at: str = ""
-    updated_at: str = ""
-    workflow_id: str | None = None
-    workflow_confirmation_id: str | None = None
-    workflow_step_id: str | None = None
-    workflow_plan_fingerprint: str | None = None
-    confirmation_mode: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "record_type": "state",
-            "record_id": self.record_id,
-            "operation_id": self.operation_id,
-            "operation_version": self.operation_version,
-            "proposal_id": self.proposal_id,
-            "proposal_revision": self.proposal_revision,
-            "proposal_fingerprint": self.proposal_fingerprint,
-            "agent_session_id": self.agent_session_id,
-            "chain_id": self.chain_id,
-            "command_id": self.command_id,
-            "target": self.target,
-            "preconditions": self.preconditions,
-            "actor_type": self.actor_type,
-            "status": self.status,
-            "confirmation": self.confirmation,
-            "execution": self.execution,
-            "outputs": self.outputs,
-            "diff_ref": self.diff_ref,
-            "verification": self.verification,
-            "error": self.error,
-            "changes": self.changes,
-            "effect_status": self.effect_status,
-            "projection_status": self.projection_status,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "workflow_id": self.workflow_id,
-            "workflow_confirmation_id": self.workflow_confirmation_id,
-            "workflow_step_id": self.workflow_step_id,
-            "workflow_plan_fingerprint": self.workflow_plan_fingerprint,
-            "confirmation_mode": self.confirmation_mode,
-        }
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "OperationRecord":
-        return cls(
-            record_id=str(value["record_id"]),
-            operation_id=str(value["operation_id"]),
-            operation_version=str(value["operation_version"]),
-            proposal_id=str(value["proposal_id"]),
-            proposal_revision=int(value["proposal_revision"]),
-            proposal_fingerprint=str(value["proposal_fingerprint"]),
-            agent_session_id=str(value["agent_session_id"]),
-            chain_id=str(value["chain_id"]),
-            command_id=value.get("command_id"),
-            target=dict(value.get("target") or {}),
-            preconditions=dict(value.get("preconditions") or {}),
-            actor_type=str(value["actor_type"]),
-            status=str(value["status"]),
-            confirmation=dict(value.get("confirmation") or {}),
-            execution=dict(value.get("execution") or {}),
-            outputs=dict(value.get("outputs") or {}),
-            diff_ref=dict(value["diff_ref"]) if value.get("diff_ref") else None,
-            verification=dict(value.get("verification") or {}),
-            error=dict(value["error"]) if value.get("error") else None,
-            changes=dict(value.get("changes") or {}),
-            effect_status=str(value.get("effect_status") or "pending"),
-            projection_status=str(value.get("projection_status") or "pending"),
-            created_at=str(value["created_at"]),
-            updated_at=str(value["updated_at"]),
-            workflow_id=value.get("workflow_id"),
-            workflow_confirmation_id=value.get("workflow_confirmation_id"),
-            workflow_step_id=value.get("workflow_step_id"),
-            workflow_plan_fingerprint=value.get("workflow_plan_fingerprint"),
-            confirmation_mode=value.get("confirmation_mode"),
-        )
-
-
-class OperationRecordStore:
-    """Persist lifecycle states without overwriting completed history."""
-
-    def __init__(self, root: Path | str, *, create: bool = True) -> None:
-        self.root = Path(root)
-        self.records_dir = self.root / "operation-records"
-        if create:
-            self.records_dir.mkdir(parents=True, exist_ok=True)
-        self._lock = RLock()
-
-    def create_pending(
-        self,
-        confirmation: ProposalConfirmation,
-        *,
-        command_id: str | None = None,
-        workflow_authorization: dict[str, str] | None = None,
-    ) -> OperationRecord:
-        with self._lock:
-            record_id = self._record_id(confirmation, command_id=command_id)
-            path = self._path(record_id)
-            if path.exists():
-                return self.get(record_id)
-            now = _now()
-            record = OperationRecord(
-                record_id=record_id,
-                operation_id=confirmation.operation_id,
-                operation_version=confirmation.operation_version,
-                proposal_id=confirmation.proposal_id,
-                proposal_revision=confirmation.revision,
-                proposal_fingerprint=confirmation.fingerprint,
-                agent_session_id=confirmation.session_id,
-                chain_id=confirmation.chain_id,
-                command_id=command_id or confirmation.command_id,
-                target=confirmation.target,
-                preconditions=confirmation.preconditions,
-                actor_type=confirmation.actor_type,
-                status="pending",
-                confirmation=confirmation.to_dict(),
-                changes=dict(getattr(confirmation, "changes", {}) or {}),
-                workflow_id=(workflow_authorization or {}).get("workflow_id"),
-                workflow_confirmation_id=(workflow_authorization or {}).get(
-                    "workflow_confirmation_id"
-                ),
-                workflow_step_id=(workflow_authorization or {}).get("workflow_step_id"),
-                workflow_plan_fingerprint=(workflow_authorization or {}).get(
-                    "workflow_plan_fingerprint"
-                ),
-                confirmation_mode=(workflow_authorization or {}).get("confirmation_mode"),
-                created_at=now,
-                updated_at=now,
-            )
-            append_jsonl_atomic(path, record.to_dict())
-            return record
-
-    def bind_risk_authorization(
-        self,
-        record_id: str,
-        authorization_id: str,
-    ) -> OperationRecord:
-        """Durably bind a high-risk grant before its token is consumed."""
-
-        if not authorization_id:
-            raise ValueError("authorization_id is required")
-        with self._lock:
-            current = self.get(record_id)
-            existing = current.execution.get("risk_authorization_id")
-            if existing is not None and existing != authorization_id:
-                # A grant may expire or be rejected after this pending record
-                # was created. Reauthorization is safe until execution is
-                # claimed; after a claim, changing the authorization binding
-                # would make recovery ambiguous and must fail closed.
-                if current.execution.get("execution_key") is not None:
-                    raise OperationRecordTransitionError(
-                        f"operation already has another risk authorization: {record_id}"
-                    )
-            if existing == authorization_id:
-                return current
-            return self.append_status(
-                record_id,
-                current.status,
-                execution={
-                    **current.execution,
-                    "risk_authorization_id": authorization_id,
-                },
-            )
-
-    def claim_execution(
-        self,
-        record_id: str,
-        *,
-        execution_key: str,
-        lease_owner: str,
-        lease_seconds: int = 300,
-    ) -> OperationRecord:
-        """Claim one operation execution idempotently under the store lock."""
-
-        from .execution import OperationClaimConflict
-
-        if not execution_key or not lease_owner:
-            raise ValueError("execution_key and lease_owner are required")
-        with self._lock:
-            current = self.get(record_id)
-            if current.status in {"completed", "failed", "stale", "cancelled"}:
-                raise OperationClaimConflict(
-                    f"terminal operation cannot be claimed: {record_id}"
-                )
-            existing_key = current.execution.get("execution_key")
-            if existing_key is not None:
-                if existing_key == execution_key:
-                    existing_owner = current.execution.get("claim_owner")
-                    if (
-                        existing_owner
-                        and existing_owner != lease_owner
-                        and current.status != "recovering"
-                    ):
-                        raise OperationClaimConflict(
-                            f"operation is already owned by {existing_owner}"
-                        )
-                    if existing_owner != lease_owner:
-                        now = datetime.now(timezone.utc)
-                        execution = {
-                            **current.execution,
-                            "claim_owner": lease_owner,
-                            "claimed_at": now.isoformat(),
-                            "lease_expires_at": (
-                                now + timedelta(seconds=lease_seconds)
-                            ).isoformat(),
-                        }
-                        return self.append_status(
-                            record_id,
-                            current.status,
-                            execution=execution,
-                        )
-                    return current
-                raise OperationClaimConflict(
-                    f"operation already claimed by execution key: {existing_key}"
-                )
-            now = datetime.now(timezone.utc)
-            execution = {
-                **current.execution,
-                "execution_key": execution_key,
-                "claim_owner": lease_owner,
-                "claimed_at": now.isoformat(),
-                "lease_expires_at": (
-                    now + timedelta(seconds=lease_seconds)
-                ).isoformat(),
-                "bindings": {},
-            }
-            return self.append_status(
-                record_id,
-                "submitted",
-                execution=execution,
-            )
-
-    def bind_effect(
-        self,
-        record_id: str,
-        *,
-        execution_key: str,
-        bindings: dict[str, str],
-    ) -> OperationRecord:
-        """Persist effect ids only after verifying the claimed execution key."""
-
-        from .execution import OperationClaimConflict
-
-        with self._lock:
-            current = self.get(record_id)
-            if current.execution.get("execution_key") != execution_key:
-                raise OperationClaimConflict(
-                    f"effect binding does not match execution key: {record_id}"
-                )
-            existing = dict(current.execution.get("bindings") or {})
-            for key, value in bindings.items():
-                if key in existing and existing[key] != value:
-                    raise OperationClaimConflict(
-                        f"effect binding already exists for {key}: {record_id}"
-                    )
-            existing.update({str(key): str(value) for key, value in bindings.items()})
-            execution = {**current.execution, "bindings": existing}
-            return self.append_status(
-                record_id,
-                current.status,
-                execution=execution,
-            )
-
-    def append_status(
-        self,
-        record_id: str,
-        status: str,
-        *,
-        execution: dict[str, Any] | None = None,
-        outputs: dict[str, Any] | None = None,
-        diff_ref: dict[str, Any] | None = None,
-        verification: dict[str, Any] | None = None,
-        error: dict[str, Any] | None = None,
-        effect_status: str | None = None,
-        projection_status: str | None = None,
-    ) -> OperationRecord:
-        with self._lock:
-            current = self.get(record_id)
-            has_payload = any(
-                value is not None
-                for value in (
-                    execution,
-                    outputs,
-                    diff_ref,
-                    verification,
-                    error,
-                    effect_status,
-                    projection_status,
-                )
-            )
-            if status == current.status and not has_payload:
-                return current
-            allowed = {
-                "pending": {"submitted", "running", "completed", "failed", "stale", "cancelled", "recovering"},
-                "submitted": {"running", "completed", "failed", "stale", "cancelled", "recovering"},
-                "running": {"completed", "failed", "stale", "cancelled", "recovering"},
-                "recovering": {"submitted", "running", "completed", "failed", "stale", "cancelled"},
-                "completed": set(),
-                "failed": set(),
-                "stale": set(),
-                "cancelled": set(),
-            }
-            if status != current.status and status not in allowed.get(current.status, set()):
-                raise OperationRecordTransitionError(
-                    f"invalid operation record transition: {current.status} -> {status}"
-                )
-            updated = OperationRecord(
-                **{
-                    **current.__dict__,
-                    "status": status,
-                    "execution": execution if execution is not None else current.execution,
-                    "outputs": outputs if outputs is not None else current.outputs,
-                    "diff_ref": diff_ref if diff_ref is not None else current.diff_ref,
-                    "verification": verification if verification is not None else current.verification,
-                    "error": error if error is not None else current.error,
-                    "effect_status": (
-                        effect_status
-                        if effect_status is not None
-                        else current.effect_status
-                    ),
-                    "projection_status": (
-                        projection_status
-                        if projection_status is not None
-                        else current.projection_status
-                    ),
-                    "updated_at": _now(),
-                }
-            )
-            if updated == current:
-                return current
-            append_jsonl_atomic(self._path(record_id), updated.to_dict())
-            return updated
-
-    def get(self, record_id: str) -> OperationRecord:
-        records = [
-            OperationRecord.from_dict(item)
-            for item in read_jsonl(self._path(record_id))
-            if item.get("record_type") == "state"
-        ]
-        if not records:
-            raise KeyError(f"unknown operation record: {record_id}")
-        return records[-1]
-
-    def list_records(self) -> list[OperationRecord]:
-        with self._lock:
-            return [self.get(path.stem) for path in sorted(self.records_dir.glob("oprec_*.jsonl"))]
-
-    def _path(self, record_id: str) -> Path:
-        if not record_id or Path(record_id).name != record_id:
-            raise ValueError("record_id must be path-safe")
-        return self.records_dir / f"{record_id}.jsonl"
-
-    @staticmethod
-    def _record_id(confirmation: ProposalConfirmation, *, command_id: str | None) -> str:
-        identity = {
-            "operation_id": confirmation.operation_id,
-            "proposal_id": confirmation.proposal_id,
-            "proposal_revision": confirmation.revision,
-            "proposal_fingerprint": confirmation.fingerprint,
-            "active_head_run_id": confirmation.preconditions.get("active_head_run_id"),
-        }
-        encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        return f"oprec_{hashlib.sha256(encoded).hexdigest()[:24]}"

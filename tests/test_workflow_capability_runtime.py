@@ -26,6 +26,30 @@ def _frame() -> pd.DataFrame:
     )
 
 
+def test_source_resolution_reuses_the_frame_that_was_bound_to_the_artifact(tmp_path, monkeypatch):
+    from workbench import data_operations
+    from workbench.data_operations import casts
+    from workbench.statistical_exploration import resolve_statistical_source
+
+    frame = _frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    read = casts._read_frame
+    calls = []
+
+    def count(path, *, stream=None):
+        calls.append(path)
+        return read(path, stream=stream)
+
+    monkeypatch.setattr(casts, "_read_frame", count)
+    monkeypatch.setattr(data_operations, "_read_frame", count)
+    source, resolved = resolve_statistical_source(
+        project, source_run_id=run_id, source_node_id="stage:source", source_artifact_id=artifact_id,
+    )
+    assert source["source_artifact_id"] == artifact_id
+    pd.testing.assert_frame_equal(frame, resolved)
+    assert len(calls) == 1
+
+
 def _compile(project, run_id: str, artifact_id: str, frame: pd.DataFrame, steps: list[dict]):
     return compile_workflow(
         workflow_id="wf-generic-capability-runtime",
@@ -281,22 +305,19 @@ def test_post_estimation_projection_refuses_to_silently_truncate(
     tmp_path: Path,
 ) -> None:
     """A bounded projection reports overflow instead of hiding later evidence."""
-    from workbench.agent import workflow_runtime
+    from workbench.agent.workflow_runtime_parts import projection
 
     records = [
         {"artifact_id": "first", "artifact_type": "post_estimation"},
         {"artifact_id": "second", "artifact_type": "post_estimation"},
     ]
-    (tmp_path / "runs" / "source").mkdir(parents=True)
+    run_dir = tmp_path / "runs" / "source"
+    run_dir.mkdir(parents=True)
+    (run_dir / "artifacts_index.json").write_text(json.dumps({"artifacts": records}), encoding="utf-8")
     monkeypatch.setattr(
-        workflow_runtime,
-        "_read_artifacts_index",
-        lambda _run_dir: {"artifacts": records},
-    )
-    monkeypatch.setattr(
-        workflow_runtime,
+        projection,
         "_read_post_estimation_entry",
-        lambda _run_dir, record: {
+        lambda _run_dir, record, *, native_operation: {
             "artifact_id": record["artifact_id"],
             "run_id": "run",
             "model_run_id": "",

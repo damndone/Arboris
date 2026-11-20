@@ -39,7 +39,7 @@ class ManualReportDraft(TypedDict):
 class ManualReportRecord(TypedDict):
     id: str
     run_id: str
-    author: Literal["user"]
+    author: Literal["user", "agent"]
     draft_origin: Literal["deterministic"]
     created_at: str
     document_id: str

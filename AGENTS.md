@@ -27,3 +27,42 @@ Before closing the version, verify the event stream and regenerate
 
 Formal FMS verification is a process-control gate only; it does not replace
 model, containment, browser, performance, or release acceptance evidence.
+
+# Default-path performance and storage (2026-10-20)
+
+- New default-path code must keep elapsed time, peak RSS, and run-directory
+  bytes within 1.05 times v1.9.0 on the same workload. A regression blocks
+  further feature work until accepted.
+- Do not serialize observation rows into JSON, convert large arrays to Python
+  lists for processing, or re-read/copy a whole source merely for validation.
+  Use registered import digests, versioned array-byte fingerprints and compact
+  summaries; explicit observation inspection may use ranges or binary arrays.
+- Performance acceptance uses an otherwise test-idle host, fixed shared input
+  files with SHA256, fresh workers without data generation, baseline-only noise
+  calibration (at least five), then at least five alternating A/B pairs with raw
+  measurements and median comparisons; sampling noise must be below 5%.
+  Retain failed measurements. Numerical coefficients, standard errors and test
+  statistics must remain bit-identical; do not widen reference tolerances.
+- Check free disk space before every measurement; below 5 GB, report and do
+  not start (user changed the floor from 10 GB on 2026-10-27). Keep one fixed CSV per family under `local/perf-inputs/`, with
+  its registered SHA256; the reproducer must not make per-run input copies.
+  Product snapshots/uploads remain normal product outputs. Do not patch product
+  functions, replace file writes, change configuration or alter the worker
+  environment for measurement. Timing/memory observation stays outside product
+  functions; traced timings do not certify uninstrumented time limits.
+- Only one active benchmark run directory may exist. Before removing it,
+  durably journal commit, case, elapsed time, ru_maxrss, optional same-run
+  tracemalloc peak, directory bytes, every file's path/size/SHA256 and principal
+  numerical results; verify the journal and file count. Keep one verified
+  tar.gz representative per family/release, logs and scripts. This cleanup
+  authorization applies to benchmark products only, never other data/worktrees.
+
+# Disk discipline for evaluations and measurements (2026-10-31)
+
+- Before blaming files for lost disk, read `sysctl vm.swapusage` and the APFS VM volume: on 2026-10-25 swap, not evaluation data, took 9 GB. Close heavy applications before long runs.
+- Evaluation rounds keep every record, but not uncompressed: after a round is graded and reviewed, run `scripts/agent_eval/compact_rounds.py local/agent-eval <rounds still running>`. It verifies by SHA-256 and journals before replacing; provider tapes were 4.7 GB of 15 GB and compress to about 10%. Since 2026-11-03 it also applies APFS transparent compression to JSON/JSONL records of at least 1 MiB (same path and bytes, readers unchanged); on that date it freed 10.2 GB from 12 GB of finished-round records. Copying such a file without `cp -c` stores it uncompressed again.
+- Do not copy an unchanged input per task. Clone (`cp -c`) or reference one registered file.
+- Start only rounds whose size you have estimated: free space must cover them above the 5 GB floor. A floor is checked per task and pauses or stops; it is never lowered silently.
+- Never delete evidence, data or worktrees to make room, including failed runs. Compress losslessly, archive with checksums, or ask.
+- Keep one root per round. Finished previews, viewers and observers are stopped; their logs go inside the round root, not loose in `local/`.
+- Bytes per run are a measured budget: new default-path code stays within 1.05 times v1.9.0, and a round's growth per task is reported with its results.

@@ -15,6 +15,7 @@ from typing import Any, Iterator
 from ..custom_capability.canonical import domain_digest
 from .contracts import DomainMemoryContentRevision, DomainMemoryContractError, MemoryCandidate
 from .scope import MemoryScope
+from ..jsonl_store import jsonl_lines
 
 
 class ConflictStoreError(DomainMemoryContractError):
@@ -195,7 +196,7 @@ class ConflictStore:
         if len(raw) > _MAX_BYTES or (raw and not raw.endswith(b"\n")):
             raise ConflictStoreError("conflict journal is truncated or too large")
         result: list[MemoryConflictRecord] = []
-        for number, line in enumerate(raw.splitlines(), start=1):
+        for number, line in enumerate(jsonl_lines(raw), start=1):
             try:
                 event = json.loads(line.decode("utf-8"), object_pairs_hook=self._pairs)
                 if not isinstance(event, dict) or set(event) != {"record_type", "record"} or event["record_type"] != "memory_conflict":

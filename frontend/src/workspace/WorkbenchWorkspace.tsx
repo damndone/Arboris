@@ -1,8 +1,7 @@
-// v1.9.0 — the workbench in the new workspace shell. The classic shell keeps
-// owning tab, panel, focus and float state; this component only places the
-// pieces it already builds (stage tabs, docked node or review panel, floating
-// overlays) into the new regions, so both shells share one source of state
-// while the new one is behind its switch (design spec §8.8).
+import { PanelHost, type PanelHostActiveKind } from "../workbench/PanelHost";
+// The workspace composes the shared execution state into map, documents,
+// Agent and history regions. Manual actions and Agent proposals keep the same
+// backend capability, approval and operation-record owners.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -33,7 +32,7 @@ import { DeferredMap } from "./DeferredMap";
 import { StageHost } from "./StageHost";
 import { WorkspaceBottomPanel, type BottomTab } from "./WorkspaceBottomPanel";
 import { WorkspaceShell, type MapPresentation } from "./WorkspaceShell";
-import { OperationsPanel } from "../manual/OperationsPanel";
+import { OperationsPanel, type AnalysisReplay, type AnalysisTarget } from "../manual/OperationsPanel";
 import { TimelinePanel, timelineSummary, useTimeline } from "./TimelinePanel";
 import { WorkspaceTopbar } from "./WorkspaceTopbar";
 import { openDedicated } from "./dedicatedOperations";
@@ -43,10 +42,11 @@ import { WorkspaceCommandsContext, type WorkspaceCommands } from "./workspaceCom
 export interface WorkbenchWorkspaceProps {
   runId: string;
   projectRoot: string;
-  /** Open-item tabs for the Analysis stage (the classic right-panel tabs). */
+  /** Open-item tabs for the Analysis stage (the shared detail tabs). */
   stageTabs: ReactNode;
   /** The active docked item: node details or report review; null when none. */
   stagePanel: ReactNode | null;
+  stagePanelKind: PanelHostActiveKind;
   reportFocusRequest: number;
   newAnalysis?: { label: string; open: () => void };
   onOpenSettings: () => void;
@@ -54,8 +54,7 @@ export interface WorkbenchWorkspaceProps {
   overlays: ReactNode;
 }
 
-// Ask AI is the Agent column in the workspace; the analysis-loop status is an
-// internal record (design spec §8.7). Both stay in the classic shell.
+// Ask AI lives in the Agent column; analysis-loop status is an internal record.
 const STAGE_HIDDEN_SECTIONS: ReadonlySet<string> = new Set(["askAi", "analysisLoop"]);
 
 function TopbarActions() {
@@ -88,6 +87,7 @@ export function WorkbenchWorkspace({
   projectRoot,
   stageTabs,
   stagePanel,
+  stagePanelKind,
   reportFocusRequest,
   newAnalysis,
   onOpenSettings,
@@ -100,16 +100,32 @@ export function WorkbenchWorkspace({
   const { model } = useLineage();
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisSearch, setAnalysisSearch] = useState("");
+  const [analysisReplay, setAnalysisReplay] = useState<AnalysisReplay>();
+  const [analysisTarget, setAnalysisTarget] = useState<AnalysisTarget | null>();
+  const forest = useForest();
+  const selectedNode = forest?.forest.nodes.find(node => node.nodeKey === state.selectedKey);
   const agentHandle = useRef<{ show(): void } | null>(null);
   const commands = useMemo<WorkspaceCommands>(() => ({
-    analyze: (search = "") => {
+    analyze: (search = "", replay) => {
+      let target: AnalysisTarget | null | undefined;
+      if (!replay && state.selectedKey) {
+        const node = forest ? selectedNode : model.nodes.find(item => item.nodeKey === state.selectedKey);
+        const owner = node && (forest ? ownerRunOf(node as HeadSetNode, forest.forest, forest.activeRunId) : runId);
+        const nodeId = node && (forest ? (node as HeadSetNode).opNodeId : node.id);
+        target = node && owner && nodeId && !node.isDraft
+          ? node.kind === "dataset_stage" || node.kind === "dataset"
+            ? { kind: "dataset_node", run_id: owner, node_id: nodeId }
+            : node.kind === "model" ? { kind: "model_node", run_id: owner, node_id: nodeId } : null
+          : null;
+      }
       setAnalysisSearch(search);
+      setAnalysisReplay(replay);
+      setAnalysisTarget(target);
+      setOperationError(null);
       setAnalyzing(true);
     },
     showAgent: () => agentHandle.current?.show(),
-  }), []);
-  const forest = useForest();
-  const selectedNode = forest?.forest.nodes.find(node => node.nodeKey === state.selectedKey);
+  }), [forest, model.nodes, runId, selectedNode, state.selectedKey]);
   const timelineRun = selectedNode && forest ? ownerRunOf(selectedNode, forest.forest, forest.activeRunId) : forest?.activeRunId;
   const timeline = useTimeline(projectRoot, timelineRun ?? runId);
   const navigate = useNavigate();
@@ -172,17 +188,31 @@ export function WorkbenchWorkspace({
     <>
       {operationError && <p role="alert">{operationError}</p>}
       <OperationsPanel
-        key={projectRoot}
+        key={JSON.stringify({ projectRoot, analysisReplay, analysisTarget })}
         projectRoot={projectRoot}
         runId={runId}
         initialSearch={analysisSearch}
+        initialTarget={analysisTarget}
+        replay={analysisReplay}
         models={models}
         onClose={() => setAnalyzing(false)}
         onRefresh={refresh}
-        onOpenRun={(owner) => {
+        onOpenRun={(owner, nodeId) => {
+          if (nodeId.startsWith("native-result:")) {
+            const node = forest?.forest.nodes.find((item) => item.opNodeId === nodeId && item.runs.includes(owner));
+            if (!node) {
+              forest?.refetch?.();
+              setOperationError("The saved result is not in the graph yet. Try Open result again or use View saved result.");
+              return;
+            }
+            dispatch.selectByCanvasClick(node.nodeKey);
+            dispatch.setView("graph");
+          } else {
+            dispatch.setView("table");
+          }
           forest?.setActiveRunId(owner);
+          setOperationError(null);
           setAnalyzing(false);
-          dispatch.setView("table");
         }}
         onDedicated={async (op, target) => {
           setOperationError(null);
@@ -237,6 +267,8 @@ export function WorkbenchWorkspace({
   }
 
   const analysis = state.view === "graph";
+  // A report's review belongs beside the report; elsewhere its tab just waits.
+  const documentPanelKind = stagePanelKind === "report-review" && state.view !== "report" ? null : stagePanelKind;
   const hasOpenItem = stagePanel !== null;
   const stageOpen = stageIsOpen({ analyzing, analysisView: analysis, hasOpenItem, folded: stageFolded });
   const bottomTabs: BottomTab[] = [
@@ -247,7 +279,7 @@ export function WorkbenchWorkspace({
   ];
   const map = (presentation: MapPresentation) => (
     <>
-      <DeferredMap visible={presentation === "graph" && model.nodes.length > 0}>
+      <DeferredMap visible={presentation === "graph" && (model.nodes.length > 0 || model.legacy)}>
         <GraphAutoFitContext.Provider value={true}>
           <GraphView />
         </GraphAutoFitContext.Provider>
@@ -277,7 +309,10 @@ export function WorkbenchWorkspace({
               <StageHost tabs={stageTabs} panel={stagePanel} onFold={() => setStageFolded(true)} />
             </DetailSlotsContext.Provider>
           ) : (
-            main
+            <div className="ws-document-inspector">
+              <div className="ws-document-inspector__main">{main}</div>
+              <PanelHost projectRoot={projectRoot} activeKind={documentPanelKind} tabs={stageTabs} nodePanel={documentPanelKind === "node" ? stagePanel : null} reportPanel={documentPanelKind === "report-review" ? stagePanel : null} collapseLabel={documentPanelKind === "report-review" ? "report review" : "node panel"} />
+            </div>
           )
         }
         agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} compactHeader />}

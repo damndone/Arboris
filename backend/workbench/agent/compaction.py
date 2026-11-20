@@ -79,6 +79,8 @@ def estimate_message_tokens(message: Mapping[str, Any]) -> int:
     total = estimate_text_tokens(text) + 4
     if message.get("tool_calls"):
         total += estimate_text_tokens(json.dumps(message["tool_calls"], ensure_ascii=False))
+    if isinstance(message.get("reasoning_content"), str):
+        total += estimate_text_tokens(message["reasoning_content"])
     return total
 
 
@@ -106,7 +108,8 @@ class CompactionPolicy:
     budget_tokens: int = WORKING_BUDGET_TOKENS
 
     @classmethod
-    def from_config(cls, window_tokens: int | None, *, supports_1m: bool = False) -> "CompactionPolicy":
+    def from_config(cls, window_tokens: int | None, *, supports_1m: bool = False,
+                    explicit_limit: int | None = None) -> "CompactionPolicy":
         """The policy for a configured model: its declared window, else the
         1M flag the model carries in Settings (as the context ring reads it),
         with the working budget from the environment when set (a whole number
@@ -116,6 +119,9 @@ class CompactionPolicy:
 
         raw = os.environ.get(WORKING_BUDGET_ENV, "").strip().replace("_", "")
         budget = int(raw) if raw.isdigit() and int(raw) >= 8_000 else WORKING_BUDGET_TOKENS
+        # A limit the person chose is what they asked for; the working budget is only the default.
+        if explicit_limit:
+            budget = max(budget, explicit_limit)
         return cls(declared_window(window_tokens, supports_1m), budget_tokens=budget)
 
     @property
@@ -337,9 +343,13 @@ class CompactionResult:
     attempts: int = 1
 
 
-async def _complete(adapter: ModelAdapter, messages: list[dict[str, Any]], model_config: Mapping[str, Any]) -> str:
+async def _complete(adapter: ModelAdapter, messages: list[dict[str, Any]], model_config: Mapping[str, Any],
+                    check_request_budget=None) -> str:
     chunks: list[str] = []
-    request = ModelRequest(messages=messages, tools=[], model_config=dict(model_config))
+    request = ModelRequest(messages=messages, tools=[], model_config=dict(model_config),
+                           check_request_budget=check_request_budget)
+    if check_request_budget is not None:
+        check_request_budget()
     async for event in adapter.stream(request):
         if event.type == "text_delta":
             chunks.append(event.delta)
@@ -372,13 +382,14 @@ async def write_summary(
     *,
     standing: Sequence[Mapping[str, Any]] = (),
     focus: str | None = None,
+    check_request_budget=None,
 ) -> CompactionResult:
     """Ask the model for the summary and check its numbers; one rewrite."""
 
     config = summary_model_config(adapter)
     messages = summary_request(plan, focus=focus)
     evidence = evidence_for(plan, standing)
-    summary = await _complete(adapter, messages, config)
+    summary = await _complete(adapter, messages, config, check_request_budget)
     findings = _unsupported(summary, evidence)
     if not findings:
         return CompactionResult(summary, True)
@@ -393,7 +404,7 @@ async def write_summary(
             ),
         },
     ]
-    summary = await _complete(adapter, retry, config)
+    summary = await _complete(adapter, retry, config, check_request_budget)
     findings = _unsupported(summary, evidence)
     return CompactionResult(summary, not findings, findings, attempts=2)
 
@@ -421,6 +432,7 @@ async def compact(
     tokens_before: int,
     focus: str | None = None,
     model: str | None = None,
+    check_request_budget=None,
 ) -> SessionTreeEntry | None:
     """Summarize the older conversation and append a compaction entry.
 
@@ -431,7 +443,8 @@ async def compact(
     plan = plan_cut(branch, policy.keep_recent)
     if plan is None or not plan.summarize or plan.first_kept is None:
         return None
-    result = await write_summary(adapter, plan, standing=standing_messages(branch), focus=focus)
+    result = await write_summary(adapter, plan, standing=standing_messages(branch), focus=focus,
+                                 check_request_budget=check_request_budget)
     entry = repository.append(
         session_id,
         "compaction",

@@ -5,6 +5,9 @@
 // V1.4.1 P2.2 resolution (use new Date(...).toLocaleString()).
 
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import { useReportPreviewSelection } from "../../api/reportPreviewSelection";
+import { ReportPreviewControls } from "./ReportPreviewControls";
+import "../../tokens/lineage.css";
 
 const STAGE_LABELS: Record<string, string> = {
   source: "Source",
@@ -45,6 +48,8 @@ function formatCreated(iso: string | undefined): string {
 export function BasicInfoSection({ node }: { node: GraphViewNode }) {
   const isResult = node.stage === "report" && node.title === "Result";
   const runs = resultRuns(node);
+  const report = node.kind === "report" ? node.cardPreview?.report : undefined;
+  const [selection, setSelection] = useReportPreviewSelection(node.nodeKey);
   return (
     <section
       aria-label="Basic info"
@@ -54,6 +59,14 @@ export function BasicInfoSection({ node }: { node: GraphViewNode }) {
       <div className="ln-section-label" style={{ marginBottom: 6 }}>
         Basic info
       </div>
+      {report && (
+        <ReportPreviewControls
+          key={`${node.nodeKey}:${report.model_id}`}
+          report={report}
+          selection={selection}
+          onSelectionChange={setSelection}
+        />
+      )}
       <dl
         className="dp-kv"
         style={{
@@ -77,6 +90,9 @@ export function BasicInfoSection({ node }: { node: GraphViewNode }) {
           value={formatCreated(node.createdAt)}
           testid="created"
         />
+        {node.cardPreview?.detail && (
+          <KV label={report ? "Default view" : "Details"} value={node.cardPreview.detail} testid="card-details" />
+        )}
       </dl>
     </section>
   );
@@ -104,7 +120,7 @@ function KV({
       </dt>
       <dd
         data-testid={`basic-info-${testid}`}
-        style={{ margin: 0, color: "var(--label)" }}
+        className="ln-basic-info-value"
       >
         {value}
       </dd>

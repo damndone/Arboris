@@ -9,6 +9,8 @@ export type AskAIResponse = ResponseOf<"/llm/chat", "post">;
 export async function askAiForNode(
   packet: AskAIContextPacket,
   question: string,
+  /** The project whose data-sharing policy governs the send. */
+  projectRoot?: string | null,
 ): Promise<AskAIResponse> {
   const response = await fetch(apiUrl("/llm/chat"), {
     method: "POST",
@@ -18,6 +20,7 @@ export async function askAiForNode(
       question,
       packet,
       response_guardrails: packet.response_guardrails,
+      ...(projectRoot ? { project_root: projectRoot } : {}),
     } satisfies RequestOf<"/llm/chat", "post">),
   });
   if (!response.ok) {

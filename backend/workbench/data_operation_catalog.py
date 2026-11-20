@@ -213,6 +213,7 @@ _SUBSET_CONTRACT = {'summary': 'Subset rows and columns with closed comparison o
             'filters': 'ANDed closed filters with column, op, and operator value.',
             'equals': 'Legacy equality map retained for compatibility.',
             'row_indices': 'Explicit zero-based row indices.',
+            'exclude_row_indices': 'Zero-based row indices to leave out; every other row is kept.',
             'row_index_range': 'Bounded half-open row range.',
             'row_range': 'Legacy alias for row_index_range.'},
  'required': ('columns',),
@@ -220,6 +221,7 @@ _SUBSET_CONTRACT = {'summary': 'Subset rows and columns with closed comparison o
                  'filters': 'list',
                  'equals': 'object',
                  'row_indices': 'list',
+                 'exclude_row_indices': 'list',
                  'row_index_range': 'object',
                  'row_range': 'object'},
  'field_schemas': {'columns': {'type': 'array',
@@ -249,6 +251,10 @@ _SUBSET_CONTRACT = {'summary': 'Subset rows and columns with closed comparison o
                                    'minItems': 1,
                                    'uniqueItems': True,
                                    'items': {'type': 'integer', 'minimum': 0}},
+                   'exclude_row_indices': {'type': 'array',
+                                           'minItems': 1,
+                                           'uniqueItems': True,
+                                           'items': {'type': 'integer', 'minimum': 0}},
                    'row_index_range': {'type': 'object',
                                        'required': ['start', 'stop'],
                                        'properties': {'start': {'type': 'integer', 'minimum': 0},
@@ -273,6 +279,19 @@ _TSSET_CONTRACT = {'summary': 'Declare and stably order a time or panel-time ind
                    'panel_id_column': {'type': 'string', 'minLength': 1}},
  'field_enums': {'frequency': ('D', 'W', 'M', 'Q', 'Y')},
  'natural_language_enabled': False}
+
+
+_ROW_INDEX_CONTRACT = {'summary': ("Add a column holding each row's position in the dataset's current order (1, 2, ..., n). "
+                                   "When the rows are already in time order and the data has no time column, use it as the "
+                                   "time column of a time-series operation, and say in the answer that row order was taken as time."),
+ 'fields': {'output': 'Name of the new position column; must not exist yet.',
+            'start': 'Optional integer position of the first row (default 1).'},
+ 'required': ('output',),
+ 'field_types': {'output': 'string', 'start': 'integer'},
+ 'field_schemas': {'output': {'type': 'string', 'minLength': 1},
+                   'start': {'type': 'integer'}},
+ 'field_enums': {},
+ 'natural_language_enabled': True}
 
 
 # -- readable descriptions ----------------------------------------------------
@@ -394,6 +413,11 @@ def _describe_tsset(spec: Mapping[str, Any], labels: Labels) -> str:
     if spec.get("panel_id_column"):
         text += f", panels by {_name(spec['panel_id_column'], labels)}"
     return text
+
+
+
+def _describe_row_index(spec: Mapping[str, Any], labels: Labels) -> str:
+    return f"Add {spec.get('output')}: each row's position in the current order, from {spec.get('start', 1)}"
 
 
 def _describe_lag(spec: Mapping[str, Any], labels: Labels) -> str:
@@ -596,6 +620,14 @@ def _validate_lag(spec: Mapping[str, Any]) -> None:
         raise ValueError("difference must be non-negative")
 
 
+
+def _validate_row_index(spec: Mapping[str, Any]) -> None:
+    output = spec.get("output")
+    if not isinstance(output, str) or not output.strip():
+        raise ValueError("output must be a non-empty column name")
+    if "start" in spec and type(spec["start"]) is not int:
+        raise ValueError("start must be an integer")
+
 # -- columns read and produced --------------------------------------------------
 
 
@@ -793,6 +825,16 @@ _declare(
     describe=_describe_lag,
     example={"columns": ["gdp"], "lags": [1]},
     example_frame=_frame(year=[2020, 2021, 2022], gdp=[1.0, 1.1, 1.2]),
+)
+_declare(
+    "row_index", _ROW_INDEX_CONTRACT,
+    referenced_columns=lambda spec: set(),
+    output_columns=lambda spec, visible: {*visible, str(spec.get("output"))} if spec.get("output") else set(visible),
+    validate=_validate_row_index,
+    execute=_executor("_execute_row_index"),
+    describe=_describe_row_index,
+    example={"output": "period"},
+    example_frame=_frame(ice=[3.1, 2.9, 3.4], cloud=[0.2, 0.4, 0.1]),
 )
 
 

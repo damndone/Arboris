@@ -34,6 +34,25 @@ class DisclosureLine(TypedDict):
     summary: str
 
 
+class ResearchSpecificationLine(TypedDict):
+    record_id: str | None
+    run_id: str | None
+    step_id: str
+    operation_id: str
+    question_id: str | None
+    specification_status: Literal["pre_specified", "exploratory"]
+    verification: str
+    reason: str
+    status: str | None
+    at: str | None
+    specification_event_id: str | None
+
+
+class ResearchSpecificationSections(TypedDict):
+    pre_specified: list[ResearchSpecificationLine]
+    exploratory: list[ResearchSpecificationLine]
+
+
 class AnalysisDisclosure(TypedDict):
     run_id: str
     source_upload_sha256: str | None
@@ -46,3 +65,4 @@ class AnalysisDisclosure(TypedDict):
     entries_omitted: int
     settings: DisclosureSettings
     markdown: str
+    research_specifications: ResearchSpecificationSections

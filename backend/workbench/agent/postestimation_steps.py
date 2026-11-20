@@ -93,7 +93,7 @@ def postestimation_operation_id(operation: str) -> str:
 
 
 def postestimation_step_contracts() -> dict[str, Any]:
-    from .workflow_contracts import StepSpecContract
+    from .workflow_contract_parts.contracts import StepSpecContract
 
     contracts = {}
     for operation in OPERATIONS:
@@ -153,7 +153,11 @@ def validate_postestimation_spec(operation_id: str, spec: Mapping[str, Any]) -> 
             if model_step_reference(spec.get("restricted_model_ref")) is None:
                 model_id_from_ref(spec.get("restricted_model_ref"))
     except Exception as exc:  # noqa: BLE001 - the model_ref message is the validation message
-        raise OperationValidationError(str(exc)) from exc
+        raise OperationValidationError(
+            "model_ref must name a model node or step:<producer>:<branch>. "
+            "inspect_operation_contract(operation_id=operation.multi_step, "
+            f"step_operation_ids=[{operation_id}])."
+        ) from exc
     for key in ("model_run_id", "restricted_model_run_id"):
         if key in spec and not (isinstance(spec[key], str) and _RUN_ID.fullmatch(spec[key])):
             raise OperationValidationError(f"{operation_id} {key} must be a run id")
@@ -181,9 +185,15 @@ def _run_root(root: Path, run_id: str) -> Path:
 def _load_kernel(run_root: Path, model_id: str) -> dict[str, Any]:
     path = run_root / kernel_relative_path(model_id)
     if not path.is_file():
+        holders = sorted(item.name for item in run_root.parent.iterdir() if (item / kernel_relative_path(model_id)).is_file())
+        if holders:
+            raise _execution_error(
+                f"run {run_root.name} has no model {model_id}. Runs that fitted one: {', '.join(holders)}. "
+                "Set model_run_id to the run you mean."
+            )
         raise _execution_error(
-            f"model {model_id} in run {run_root.name} has no inference kernel; it was fitted before "
-            "kernels were recorded, so rerun it to use post-estimation"
+            f"no run in this project has an inference kernel for model {model_id}. "
+            "Models fitted before kernels were recorded need a rerun to use post-estimation."
         )
     kernel = read_json(path)
     try:

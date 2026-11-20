@@ -11,9 +11,25 @@ raw parameters remain available next to it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import json
 from typing import Any
 
 Labels = Mapping[str, str]
+_EXPERIMENTAL_FAST_NOTICE = " · Experimental fast IV; resource acceptance pending"
+
+
+def bounded_audit_content(payload: Mapping[str, Any]) -> str:
+    """Bound model-visible prose while retaining the complete structured audit."""
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    if len(content) <= 24_000:
+        return content
+    summary = {key:payload[key] for key in (
+        "proposal_id", "revision", "operation_id", "fingerprint", "status"
+    ) if key in payload}
+    summary["details_omitted"] = (
+        "Details exceed the conversation budget; full content remains in the review card and audit record."
+    )
+    return json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
 
 def _name(column: Any, labels: Labels) -> str:
@@ -57,7 +73,8 @@ def _genesis(spec: Mapping[str, Any], labels: Labels) -> str:
         branches.append(f"{_name(branch.get('outcome'), labels)} on {_names(predictors, labels) or 'a constant'}")
     covariance = spec.get("covariance")
     text = f"Estimate {family}: " + "; ".join(branches) if branches else f"Estimate {family} model"
-    return text + (f" ({covariance} standard errors)" if covariance else "")
+    return (text + (f" ({covariance} standard errors)" if covariance else "")
+            + (_EXPERIMENTAL_FAST_NOTICE if spec.get("estimation_engine") == "fast" else ""))
 
 
 def step_sentence(operation_id: str, spec: Mapping[str, Any], labels: Labels | None = None) -> str:
@@ -147,4 +164,8 @@ def proposal_lines(proposal: Mapping[str, Any], labels: Labels | None = None) ->
         return ["Create a new branch of the analysis from this node (runs nothing yet)"]
     if operation_id == "code.execute":
         return ["Run the proposed code on a copy of the data"]
+    if operation_id == "model.genesis":
+        model_params = changes.get("model_params")
+        if isinstance(model_params, Mapping) and model_params.get("estimation_engine") == "fast":
+            return [operation_id + _EXPERIMENTAL_FAST_NOTICE]
     return [operation_id or "operation"]

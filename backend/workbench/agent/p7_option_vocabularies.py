@@ -24,6 +24,7 @@ from workbench.contracts.model.matching import (
     MATCHING_TIE_POLICIES,
     MATCHING_UNMATCHED_POLICIES,
 )
+from workbench.contracts.treatment_effects import TREATMENT_EFFECTS_ESTIMANDS, TREATMENT_EFFECTS_METHODS
 from workbench.contracts.model.meta_analysis import (
     META_ANALYSIS_CI_METHODS,
     META_ANALYSIS_COMBINE_METHODS,
@@ -105,6 +106,10 @@ _DIAGNOSTICS = ("diagnostics.breusch_pagan", "diagnostics.white", "diagnostics.r
 OPTION_VOCABULARIES: dict[str, dict[str, tuple[str, ...]]] = {
     **_each(("diagnostics.breusch_godfrey",), {"time_order": MODEL_DIAGNOSTICS_TIME_ORDERS}),
     **_each(("iv.gmm",), {"estimator": GMM_ESTIMATORS, "covariance_method": GMM_COVARIANCE_METHODS}),
+    **_each(("treatment_effects.estimate",), {
+        "estimand": TREATMENT_EFFECTS_ESTIMANDS,
+        "method": TREATMENT_EFFECTS_METHODS,
+    }),
     **_each(("matching.att",), {
         "matching_geometry_policy": MATCHING_GEOMETRY_POLICIES,
         "support_distance_policy": MATCHING_SUPPORT_DISTANCE_POLICIES,
@@ -209,9 +214,10 @@ OPTION_VOCABULARIES: dict[str, dict[str, tuple[str, ...]]] = {
 
 #: String options whose value names something in the data, not a policy.
 OPEN_STRING_OPTIONS: dict[str, frozenset[str]] = {
-    **{operation_id: frozenset({"intercept_column"}) for operation_id in (*_DIAGNOSTICS, "diagnostics.breusch_godfrey")},
-    "synthetic_control.fit": frozenset({"treated_unit"}),
-    "synthetic_control.placebo": frozenset({"treated_unit"}),
+    **{operation_id: frozenset({"intercept_column"})
+       for operation_id in (*_DIAGNOSTICS, "diagnostics.breusch_godfrey", "iv.gmm", "iv.weak_instruments")},
+    "synthetic_control.fit": frozenset({"treated_unit", "unit_column", "time_column"}),
+    "synthetic_control.placebo": frozenset({"treated_unit", "unit_column", "time_column"}),
 }
 
 __all__ = ["OPEN_STRING_OPTIONS", "OPTION_VOCABULARIES"]

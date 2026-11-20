@@ -2,7 +2,7 @@
  * Agent API shapes, as the backend declares them (see apiTypes.ts). Only the
  * client-side context packet is defined here.
  */
-import type { Schema } from "../../apiTypes";
+import type { ResponseOf, Schema } from "../../apiTypes";
 
 export type AgentRole = Schema<"AgentSessionCreateRequest">["role"];
 export type AgentMessage = Schema<"AgentMessage">;
@@ -17,6 +17,8 @@ export type AgentOperationRecord = Schema<"OperationRecordView">;
 export type AgentSession = Schema<"AgentSession">;
 export type AgentChapter = Schema<"AgentChapter">;
 export type AgentModelOption = Schema<"ProviderModel">;
+/** What the model menu changes on a model: its thinking effort and the context limit. */
+export type AgentModelSettings = Partial<Pick<AgentModelOption, "reasoning_effort" | "context_limit_tokens">>;
 export type AgentCapability = Schema<"OperationCapability">;
 export type AgentCapabilityBoundaryItem = Schema<"BoundaryItem">;
 export type AgentCapabilityCatalog = Schema<"AgentCapabilities">;
@@ -24,3 +26,11 @@ export type AgentSessionCreateRequest = Schema<"AgentSessionCreateRequest">;
 
 /** What the client tells the Agent about the current view. */
 export type AgentContextPacket = Record<string, unknown>;
+
+export type AgentPlan = NonNullable<Schema<"AgentPlanResponse">["plan"]>;
+export type AgentPlanVersion = Schema<"AgentPlanResponse">["versions"][number];
+export type AgentPlanVerification = Schema<"AgentPlanVerificationResponse">;
+export type AgentPlanPreflight = ResponseOf<"/agent/sessions/{session_id}/plan/preflight", "get">;
+export type AgentPlanRequirement = Schema<"PlanRequirementDefinition">;
+export type AgentPlanPatch = Schema<"AgentPlanPatchRequest">;
+export type AgentDurableTurn = Schema<"AgentTurnStateResponse">["turns"][number];

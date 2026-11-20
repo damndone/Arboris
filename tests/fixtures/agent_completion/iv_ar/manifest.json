@@ -1,0 +1,81 @@
+{
+  "contract": "ar-global-validation.v1",
+  "comparisons": {
+    "rtol": 1e-07,
+    "atol": 1e-09,
+    "boundary_atol": 1e-07
+  },
+  "methods": {
+    "hc0": "Native R car::linearHypothesis + sandwich::vcovHC(HC0); native Stata regress/test HC1 Wald converted to HC0 by N/df_r",
+    "homoskedastic": "Native R car::linearHypothesis(test=F) and Stata regress/test",
+    "topology": "Exact dyadic input algebra; integer polynomials and Sturm count/isolation. Native package point tests and local brackets do not certify global topology."
+  },
+  "rows": "All 120 rows per generated CSV, no filters or weights; distant.csv adds 12000*x to q2 y. All 1500 original M0 rows retained unchanged.",
+  "scope": {
+    "hc0": "One endogenous variable, 1-4 excluded instruments, <=12 auxiliary columns, unweighted independent observations, full-rank design and covariance nonsingular on R",
+    "homoskedastic": "One endogenous variable, <=12 auxiliary columns, positive residual df; unweighted iid normal homoskedastic errors for exact F reference",
+    "unsupported": "weights, clustered/HAC errors, multiple endogenous variables: unavailable; never substitute HC0"
+  },
+  "critical_value": "Exact inversion of recorded scipy binary64 chi2/F ppf, not certification of the exact transcendental quantile or coverage assumptions",
+  "precision": "Disjoint rational root isolators width <=max(1,abs(endpoint))*2^-44; displayed floats are approximations. All real roots, repeated roots, singularities, and both tails enumerated.",
+  "simulation": {
+    "seed": 20261021,
+    "replicates": 200,
+    "n": 180,
+    "q": 2,
+    "gamma": 0.02,
+    "beta": 1,
+    "alpha": 0.05,
+    "nominal_mcse": 0.015411035007422441,
+    "rejection_limits": [
+      0.005,
+      0.11
+    ],
+    "global_subset": "first six fixed replicates; all 200 tested using native statsmodels HC0; no failures discarded"
+  },
+  "commands": [
+    ".venv/bin/python tests/fixtures/agent_completion/iv_ar/generate_inputs.py",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/iv_ar/generate_reference.R",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/iv_ar/generate_reference.do REPO_ROOT (cwd: scratch directory)",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest -q tests/test_agent_ar_global.py tests/test_agent_completion_iv.py tests/test_iv_diagnostics.py"
+  ],
+  "repository_files": {
+    "tests/fixtures/agent_completion/iv_ar/distant.csv": "b1ca50f49a5c66e767cfc9921ec0e4e231d9acb46530d32f287e12f83c2f8e31",
+    "tests/fixtures/agent_completion/iv_ar/generate_inputs.py": "43562160632483b262a0da477a2f4c98f880eaf1428b8b37d611a7834328a7b9",
+    "tests/fixtures/agent_completion/iv_ar/generate_reference.R": "a6f5d1d9b7b925b803f1daf4d891d0d2acc887f420aa0e602672c03912843814",
+    "tests/fixtures/agent_completion/iv_ar/generate_reference.do": "1c39d3548a923ea24cab8d999312c5fcfa833f90b7b9d2f283909acaf93c2674",
+    "tests/fixtures/agent_completion/iv_ar/q1.csv": "524e75ce771df53babc182b529f002195807ac741d37869a5c5eb4e870deefb6",
+    "tests/fixtures/agent_completion/iv_ar/q2.csv": "418a38094f5782d3c73d6049fcbd7bc7723bdb5a555afedb57fbac3928c4efef",
+    "tests/fixtures/agent_completion/iv_ar/q3.csv": "70030b4c6a1ef90490fd421b87fcf0676d4ba8a9bd1214f99e3d563fbf845037",
+    "tests/fixtures/agent_completion/iv_ar/q4.csv": "de74df353abc8c83e3c16b8329b426145428e0bfc52d724dbb900c182717ca32",
+    "tests/fixtures/agent_completion/iv_ar/reference_r.json": "3f2b6bb1045f9b4ef7ca118eeaa85bbbf056acb762a71cf2a63776547259d73c",
+    "tests/fixtures/agent_completion/iv_ar/reference_stata.csv": "5a32198d0c1ba2480c669b56f9867b00ada616548cd44a27d14dcc8b94df02e5",
+    "tests/fixtures/agent_completion/iv_ar/stata_environment.json": "0827ff5aea4f8b01946bb771ef1adff64701b4625cb7d1723d0d1766ca790ac3",
+    "tests/fixtures/agent_completion/iv_valid.open.r1/project/runs/20261018_035324_925213_81d490b3/raw_snapshot/iv_valid.csv": "032033b1fe07d05dc1a0fb30d93b86fe50bdf988a2c0fcd454b7afe0185033b1"
+  },
+  "installed_sources_sha256": {
+    "/Applications/Stata/ado/base/r/regress.sthlp": "5a9a395b3f592fa9d03093a269930389dc42fbf870fe7fa8cd8d6c2511c8ca85",
+    "/Applications/Stata/ado/base/t/test.sthlp": "9e78ebe6a62fd02959e2979fc6866b523039b52dd7cf50676820451099e1aef3"
+  },
+  "installed_r_method_snapshots_sha256": {
+    "car::linearHypothesis.lm": "cb9e74347cf4d3fbaf90803bcbcc5e2a68d4a6e71797754ccac3ea6e0a802bbb",
+    "car::linearHypothesis.default": "a7722b3c0d77d01a08c5b0da3bb9066c3925f33a97605258894e6afbf29e150b",
+    "sandwich::meatHC": "6c0b1391a0f8d6f328891a27a67dd6c6cc814af88fcc03311797b667464ea38c"
+  },
+  "installed_first_stage_source_sha256": "2c6328333727b0ec7cd6fdaed249f46ebefe8a81b00933e68ea6e5d2824c6790",
+  "installed_iv_results_source_sha256": "bf73bf081ac7186383c51837a7e17129ac901f8069315a6624eec7030bbf7583",
+  "python_versions": {
+    "numpy": "2.5.0",
+    "scipy": "1.18.0",
+    "statsmodels": "0.14.6",
+    "linearmodels": "7.0"
+  },
+  "sources": [
+    "https://www.stata.com/manuals/rivregresspostestimation.pdf",
+    "https://bashtage.github.io/linearmodels/iv/iv/linearmodels.iv.results.FirstStageResults.diagnostics.html",
+    "https://bashtage.github.io/linearmodels/iv/iv/linearmodels.iv.results.IVResults.wooldridge_overid.html",
+    "https://arxiv.org/html/2604.04279v1",
+    "https://economics.mit.edu/sites/default/files/publications/thirdsubmission.pdf"
+  ],
+  "historical_limitation": "Old checks/generate_oracle.R uses handwritten Wald plus finite grid; retained as local historical endpoints only, not an independent/global oracle."
+}

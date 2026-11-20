@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LlmProviderManager } from "./LlmProviderManager";
 import {
   activateLlmProvider,
   createLlmProvider,
   deleteLlmProvider,
+  detectLlmProviderModels,
   fetchLlmProviders,
   probeLlmProvider,
   refreshLlmProviderModels,
@@ -16,11 +17,13 @@ import {
 } from "../notebook/domainMemoryApi";
 import type { LlmProvider, LlmProvidersResponse } from "./llmTypes";
 import { llmModelFixture } from "../apiFixtures";
+import * as agentApi from "../workbench/agent/agentApi";
 
 vi.mock("./llmApi", () => ({
   activateLlmProvider: vi.fn(),
   createLlmProvider: vi.fn(),
   deleteLlmProvider: vi.fn(),
+  detectLlmProviderModels: vi.fn(),
   fetchLlmProviders: vi.fn(),
   probeLlmProvider: vi.fn(),
   refreshLlmProviderModels: vi.fn(),
@@ -35,6 +38,12 @@ vi.mock("../notebook/domainMemoryApi", () => ({
   updateProjectMemorySetting: vi.fn(),
   issueArchiveMemoryConfirmation: vi.fn(),
   archiveMemoryLibraryEntries: vi.fn(),
+}));
+
+vi.mock("../workbench/agent/agentApi", async (importOriginal) => ({
+  ...await importOriginal<typeof agentApi>(),
+  getProjectAgentPermissions: vi.fn(),
+  saveProjectAgentPermissions: vi.fn(),
 }));
 
 const providers: LlmProvider[] = [
@@ -89,6 +98,24 @@ const response = (active_provider_id: string | null = "deepseek"): LlmProvidersR
 });
 
 describe("LlmProviderManager", () => {
+  it("detects capabilities on demand and leaves the mapped model list intact", async () => {
+    vi.mocked(detectLlmProviderModels).mockResolvedValue({
+      ...providers[0],
+      models: providers[0].models.map((model, index) => index === 0
+        ? { ...model, context_window_tokens: 256000 } : model),
+    });
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    const card = await screen.findByRole("group", { name: "Mapped models for DeepSeek" });
+    expect(detectLlmProviderModels).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("llm-provider-detect-models-deepseek"));
+    expect(await screen.findByText("DeepSeek model capabilities checked")).toBeVisible();
+    expect(detectLlmProviderModels).toHaveBeenCalledWith("deepseek");
+    expect(within(card).getByRole("button", { name: "Use model DeepSeek Chat" }))
+      .toHaveAttribute("title", expect.stringContaining("256,000 tokens"));
+    expect(within(card).getAllByRole("button")).toHaveLength(3);
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchLlmProviders).mockResolvedValue(response());
@@ -154,6 +181,57 @@ describe("LlmProviderManager", () => {
     expect(memorySection).toHaveStyle({ background: "var(--tint-fill)", color: "var(--on-tint)" });
   });
 
+  it("edits the selected project's Agent permissions and saves all rule groups", async () => {
+    vi.mocked(agentApi.getProjectAgentPermissions)
+      .mockResolvedValueOnce({
+        revision: "revision-a",
+        rules: { allow: [{ class: "analyze" }], ask: [{ class: "high" }], deny: [] },
+      })
+      .mockResolvedValueOnce({ revision: "revision-c", rules: { allow: [], ask: [], deny: [] } });
+    vi.mocked(agentApi.saveProjectAgentPermissions).mockImplementation(async (_root, body) => ({
+      revision: "revision-b", rules: body.rules,
+    }));
+    const { rerender } = render(<LlmProviderManager onBack={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Agent permissions" })).not.toBeInTheDocument();
+    rerender(<LlmProviderManager projectRoot="/project-a" onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Agent permissions" }));
+    const addDeny = await screen.findByRole("button", { name: "Add deny rule" });
+    const save = screen.getByRole("button", { name: "Save rules" });
+    expect(save).toBeDisabled();
+    fireEvent.click(addDeny);
+    fireEvent.change(screen.getByLabelText("Deny rule 1 permission class"), { target: { value: "derive" } });
+    fireEvent.change(screen.getByLabelText("Deny rule 1 operation ID"), { target: { value: "model.genesis" } });
+    fireEvent.click(save);
+    expect(await screen.findByText("Rules saved.")).toBeVisible();
+    expect(agentApi.getProjectAgentPermissions).toHaveBeenCalledWith("/project-a");
+    expect(agentApi.saveProjectAgentPermissions).toHaveBeenCalledWith("/project-a", {
+      expected_revision: "revision-a",
+      rules: {
+        allow: [{ class: "analyze" }], ask: [{ class: "high" }],
+        deny: [{ class: "derive", operation_id: "model.genesis" }],
+      },
+    });
+    expect(save).toBeDisabled();
+    rerender(<LlmProviderManager projectRoot="/project-b" onBack={vi.fn()} />);
+    await screen.findByRole("button", { name: "Add deny rule" });
+    expect(agentApi.getProjectAgentPermissions).toHaveBeenLastCalledWith("/project-b");
+    expect(screen.queryByLabelText("Deny rule 1 operation ID")).not.toBeInTheDocument();
+  });
+
+  it("keeps unsaved permission changes visible when saving fails", async () => {
+    vi.mocked(agentApi.getProjectAgentPermissions).mockResolvedValue({
+      revision: "revision-a", rules: { allow: [], ask: [], deny: [{ class: "derive" }] },
+    });
+    vi.mocked(agentApi.saveProjectAgentPermissions).mockRejectedValue(new Error("The project rules changed."));
+    render(<LlmProviderManager projectRoot="/project-a" onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Agent permissions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove deny rule 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save rules" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The project rules changed.");
+    expect(screen.queryByRole("button", { name: "Remove deny rule 1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload rules" })).toBeEnabled();
+  });
+
   it("backs out and opens the editor for add and edit", async () => {
     const onBack = vi.fn();
     render(<LlmProviderManager onBack={onBack} />);
@@ -183,6 +261,51 @@ describe("LlmProviderManager", () => {
     await waitFor(() => expect(activateLlmProvider).toHaveBeenCalledWith("openai"));
     await waitFor(() => expect(fetchLlmProviders).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId("llm-provider-active-openai")).toHaveTextContent("Active");
+  });
+
+  it("reloads externally updated provider settings and all mapped models without switching the default", async () => {
+    const nvidia = {
+      ...providers[0],
+      id: "nvidia",
+      name: "NVIDIA · Nemotron 3 Ultra (Free Trial)",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      models: [llmModelFixture({ display_name: "Nemotron 3 Ultra", request_model: "nvidia/nemotron-3-ultra-550b-a55b", context_window_tokens: 1048576, supports_1m: true })],
+    };
+    const updated = {
+      ...nvidia,
+      name: "NVIDIA NIM",
+      models: [
+        ...nvidia.models,
+        llmModelFixture({ display_name: "GLM 5.3", request_model: "z-ai/glm-5.3", context_window_tokens: 1048576, supports_1m: true }),
+        llmModelFixture({ display_name: "DeepSeek V4.1 Flash", request_model: "deepseek-ai/deepseek-v4.1-flash", context_window_tokens: 1048576, supports_1m: true }),
+        llmModelFixture({ display_name: "GLM 5.3 Flash", request_model: "z-ai/glm-5.3-flash", context_window_tokens: 1048576, supports_1m: true }),
+      ],
+    };
+    vi.mocked(fetchLlmProviders)
+      .mockResolvedValueOnce({ active_provider_id: nvidia.id, providers: [nvidia] })
+      .mockResolvedValueOnce({ active_provider_id: nvidia.id, providers: [updated] });
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    await screen.findByText(nvidia.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload providers" }));
+
+    await screen.findByText(updated.name);
+    expect(fetchLlmProviders).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(nvidia.name)).not.toBeInTheDocument();
+    const selector = screen.getByRole("combobox", { name: "Model for NVIDIA NIM" });
+    expect(selector).toHaveValue(nvidia.model);
+    expect(within(selector).getAllByRole("option")).toHaveLength(4);
+    const modelList = screen.getByTestId("llm-provider-models-nvidia");
+    for (const model of updated.models) {
+      expect(within(selector).getByRole("option", { name: model.display_name })).toHaveValue(model.request_model);
+      expect(within(modelList).getByRole("button", { name: `Use model ${model.display_name}` }))
+        .toHaveAttribute("title", expect.stringContaining(model.request_model));
+    }
+    expect(screen.getByTestId("llm-provider-active-nvidia")).toHaveTextContent("Active");
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
+    expect(activateLlmProvider).not.toHaveBeenCalled();
+    expect(updateLlmProvider).not.toHaveBeenCalled();
   });
 
   it("deletes only after confirmation and refreshes after deletion", async () => {
@@ -237,6 +360,30 @@ describe("LlmProviderManager", () => {
     expect(await screen.findByTestId("llm-provider-manager-status")).toHaveTextContent(
       /model switched/i,
     );
+  });
+
+  it("lets each of eighteen model cards select a default without probing or activating another provider", async () => {
+    const models = Array.from({ length: 18 }, (_, index) => llmModelFixture({
+      display_name: `Nemotron variant ${index + 1}`,
+      request_model: `nvidia/variant-${index + 1}`,
+      context_window_tokens: 1_048_576,
+      supports_1m: true,
+    }));
+    vi.mocked(fetchLlmProviders).mockResolvedValue({ active_provider_id: "deepseek", providers: [{ ...providers[0], models, model: models[0].request_model }] });
+    vi.mocked(updateLlmProvider).mockResolvedValue({ ...providers[0], models, model: models[17].request_model });
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    const list = await screen.findByTestId("llm-provider-models-deepseek");
+    expect(within(list).getAllByRole("button")).toHaveLength(18);
+    expect(within(list).getByRole("button", { name: "Use model Nemotron variant 18" }))
+      .toHaveAttribute("title", `Nemotron variant 18\nnvidia/variant-18\nContext: 1,048,576 tokens`);
+    expect(within(list).getByRole("button", { name: "Use model Nemotron variant 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(updateLlmProvider).not.toHaveBeenCalled();
+    fireEvent.click(within(list).getByRole("button", { name: "Use model Nemotron variant 18" }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith("deepseek", { model: models[17].request_model }));
+    await waitFor(() => expect(within(list).getByRole("button", { name: "Use model Nemotron variant 18" })).toHaveAttribute("aria-pressed", "true"));
+    expect(activateLlmProvider).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
   });
 
   it("opens a fresh create editor for copy without carrying the API key", async () => {

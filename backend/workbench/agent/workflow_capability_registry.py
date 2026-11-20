@@ -65,7 +65,7 @@ class WorkflowCapabilityOperation:
     def validate_result(self, result: Mapping[str, Any]) -> None:
         self._adapter().validate_result(self.operation_id, result)
 
-    def execute_with_context(self, frame: Any, request: Mapping[str, Any]):
+    def execute_with_context(self, frame: Any, request: Mapping[str, Any], *, project_root=None):
         from .workflow_capability_adapters import (
             WorkflowCapabilityExecution,
             get_workflow_capability_adapter,
@@ -73,7 +73,14 @@ class WorkflowCapabilityOperation:
 
         adapter = get_workflow_capability_adapter(self.adapter_key)
         normalized = adapter.validate_request(self.operation_id, request)
-        execution = adapter.execute(frame, normalized)
+        if self.operation_id == "prediction.native_forest_apply":
+            from ..services.native_prediction_apply import execute_saved_forest
+
+            if project_root is None:
+                raise WorkflowCapabilityRegistryError("FOREST_APPLY_PROJECT_REQUIRED: use the shared project workflow executor")
+            execution = execute_saved_forest(project_root, frame, normalized)
+        else:
+            execution = adapter.execute(frame, normalized)
         if not isinstance(execution, WorkflowCapabilityExecution):
             raise WorkflowCapabilityRegistryError(
                 f"workflow capability {self.operation_id} adapter returned an invalid execution"
@@ -93,6 +100,11 @@ class WorkflowCapabilityOperation:
                 raise WorkflowCapabilityRegistryError(
                     f"workflow capability {self.operation_id} payload dataset kind is inconsistent"
                 )
+        elif self.operation_id == "quant.replay":
+            # The complete ledger accompanies the original JSON result. It must not
+            # become an inferred source for existing depends_on consumers.
+            if execution.output_frame is None or execution.dataset_kind is not None:
+                raise WorkflowCapabilityRegistryError("quant.replay requires a local ledger, not a produced dataset")
         elif execution.output_frame is not None or execution.dataset_kind is not None:
             raise WorkflowCapabilityRegistryError(
                 f"workflow capability {self.operation_id} is not a dataset producer"
@@ -127,6 +139,7 @@ def _live_declarations() -> tuple[dict[str, Any], ...]:
     from ..statistical_tests import TEST_FAMILIES
     from ..engine.packs.builtin_declarations import BUILTIN_PACK_DECLARATIONS
     from ..engine.capabilities import build_capabilities
+    from ..native_research import NATIVE_RESEARCH_OPERATIONS
 
     # Capability discovery is part of app import.  It must not bootstrap every
     # executable pack just to publish a typed workflow contract: ARMA-GARCH's
@@ -183,6 +196,16 @@ def _live_declarations() -> tuple[dict[str, Any], ...]:
             "dataset_kind": "prepared_data",
             "accepted_dataset_kinds": ("derived_data", "prepared_data"),
         })
+    from .network_capability import SUMMARY as NETWORK_SUMMARY
+
+    declarations.append({
+        "operation_id": "network.centrality",
+        "kind": "network_analysis",
+        "summary": NETWORK_SUMMARY,
+        "adapter_key": "network",
+        "produces_dataset": False,
+        "accepted_dataset_kinds": ("derived_data", "prepared_data"),
+    })
     model_entries = list(manifest["model_types"])
     model_entry_keys = {str(entry.get("key")) for entry in model_entries}
     for pack in BUILTIN_PACK_DECLARATIONS:
@@ -215,6 +238,15 @@ def _live_declarations() -> tuple[dict[str, Any], ...]:
             "produces_dataset": False,
             "accepted_dataset_kinds": ("derived_data", "prepared_data"),
         })
+    declarations.extend({
+        "operation_id": operation_id,
+        "kind": operation.kind,
+        "summary": operation.summary,
+        "adapter_key": "native_research",
+        "produces_dataset": operation.dataset_kind is not None,
+        "dataset_kind": operation.dataset_kind,
+        "accepted_dataset_kinds": ("derived_data", "prepared_data"),
+    } for operation_id, operation in NATIVE_RESEARCH_OPERATIONS.items())
     unique: dict[str, dict[str, Any]] = {}
     for declaration in declarations:
         operation_id = declaration["operation_id"]
@@ -242,7 +274,7 @@ def _build_registry() -> WorkflowCapabilityRegistry:
             kind=str(declaration["kind"]),
             summary=str(declaration["summary"]),
             adapter_key=adapter_key,
-            request_schema=workflow_capability_request_schema(adapter_key),
+            request_schema=workflow_capability_request_schema(adapter_key, operation_id=operation_id),
             output_schema_ref=f"workbench.workflow-capability.{operation_id}/v1",
             produces_dataset=bool(declaration.get("produces_dataset", False)),
             dataset_kind=declaration.get("dataset_kind"),
@@ -258,10 +290,12 @@ def workflow_capability_registry() -> WorkflowCapabilityRegistry:
 def workflow_capability_step_contracts() -> dict[str, Any]:
     """Project the live adapter declarations into workflow step contracts."""
 
-    from .workflow_contracts import StepSpecContract
+    from .workflow_contract_parts.contracts import StepSpecContract
+    from ..native_research import NATIVE_RESEARCH_OPERATIONS
 
     contracts: dict[str, StepSpecContract] = {}
     for operation in workflow_capability_registry()._operations.values():
+        publishes_lineage = operation.produces_dataset or operation.operation_id in NATIVE_RESEARCH_OPERATIONS
         contracts[operation.operation_id] = StepSpecContract(
             summary=operation.summary,
             fields={
@@ -281,8 +315,8 @@ def workflow_capability_step_contracts() -> dict[str, Any]:
             output_schema_ref=operation.output_schema_ref,
             dispatcher_key=WORKFLOW_CAPABILITY_DISPATCHER,
             scope="typed workflow capability",
-            risk_level="mutating" if operation.produces_dataset else "none",
-            effect_level="mutation" if operation.produces_dataset else "read_only",
+            risk_level="mutating" if publishes_lineage else "none",
+            effect_level="mutation" if publishes_lineage else "read_only",
             reconciler_key=WORKFLOW_CAPABILITY_DISPATCHER,
             diff_builder_key="workflow_capability.diff.v1",
             verification_builder_key="workflow_capability.verification.v1",

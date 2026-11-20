@@ -400,7 +400,14 @@ def _analyze_group() -> Any:
     return build_analyze_group(_json_value, _fail)
 
 
+def _agent_group() -> Any:
+    from .cli_agent import build_agent_group
+
+    return build_agent_group(_json_value, _fail)
+
+
 _GENERATED_COMMANDS: dict[str, Callable[[], Any]] = {
+    "agent": _agent_group,
     "analyze": _analyze_group,
     "data": _data_group,
     "run": _run_command,

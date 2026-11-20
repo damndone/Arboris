@@ -10,6 +10,11 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from .native_canonical import encode_numbers as _native_encode_numbers
+from .native_canonical import MEASURED_MIN_ITEMS, small_sequence_reference
+from .native_io import canonical_list as _native_canonical_list
+from .native_io import canonical_list_kind as _native_list_kind
+
 
 class CanonicalJSONError(ValueError):
     """Raised when a value cannot be represented by canonical JSON v1."""
@@ -38,6 +43,15 @@ def _normalize(value: Any) -> Any:
             normalized[normalized_key] = _normalize(item)
         return normalized
     if isinstance(value, (list, tuple)):
+        if len(value) >= MEASURED_MIN_ITEMS and _native_list_kind(value):
+            return list(value)  # plain strings, or exact ints and floats that are all finite
+        if _plain_string_list(value):
+            return list(value)  # ASCII text is already NFC and has no surrogates
+        if _numeric_list(value):
+            # Same text as normalizing each item: zero is encoded "0" either way.
+            if not all(map(math.isfinite, value)):
+                raise CanonicalJSONError("canonical JSON does not allow NaN or Infinity")
+            return list(value)
         return [_normalize(item) for item in value]
     if value is None or isinstance(value, (bool, int)):
         return value
@@ -67,6 +81,20 @@ def _encode_json(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if isinstance(value, list):
+        if len(value) >= MEASURED_MIN_ITEMS:
+            text = _native_canonical_list(value)
+            if text is not None:
+                return text
+        if value and _plain_string_list(value):
+            return '["' + '","'.join(value) + '"]'
+        if _numeric_list(value):
+            if len(value) >= MEASURED_MIN_ITEMS:
+                native = _native_encode_numbers(value)
+                if native is not None:
+                    return native
+            else:
+                small_sequence_reference()
+            return "[" + ",".join(_encode_numbers(value)) + "]"
         return "[" + ",".join(_encode_json(item) for item in value) + "]"
     if isinstance(value, dict):
         items = (
@@ -79,6 +107,45 @@ def _encode_json(value: Any) -> str:
     raise CanonicalJSONError(
         f"unsupported canonical JSON value: {type(value).__name__}"
     )
+
+
+_NUMBER_TYPES = frozenset({int, float})
+
+
+def _plain_string_list(value: list | tuple) -> bool:
+    """Strings JSON writes as themselves in quotes: printable ASCII, no quote or backslash.
+
+    A 1,000,000-row OLS fingerprint names every analysis row by a decimal id;
+    each went through NFC normalization and json.dumps one by one.
+    """
+    if not value or set(map(type, value)) != {str}:
+        return False
+    joined = "".join(value)
+    return joined.isascii() and joined.isprintable() and '"' not in joined and "\\" not in joined
+
+
+def _numeric_list(value: list | tuple) -> bool:
+    """Only ints and floats (bool is an int subclass and is excluded)."""
+    return set(map(type, value)) <= _NUMBER_TYPES
+
+
+def _encode_numbers(values: list | tuple) -> list[str]:
+    """Each distinct number is formatted once.
+
+    Data columns repeat values heavily, and a 1,000,000-row OLS fingerprint
+    formatted six million numbers one by one (about 6 s of the 20.9 s import
+    + OLS run). Dict keys treat -0.0 and 0.0 as equal, and both encode as "0".
+    """
+    cache: dict[float | int, str] = {}
+    out = []
+    append = out.append
+    for item in values:
+        text = cache.get(item)
+        if text is None:
+            text = _canonical_int(item) if type(item) is int else _canonical_float(item)
+            cache[item] = text
+        append(text)
+    return out
 
 
 def _canonical_float(value: float) -> str:

@@ -14,9 +14,41 @@ from ...contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
     MemoryDefaultSource,
+    NotebookOptionRevision,
+    NotebookOptionRevisionV11,
 )
+from .errors import OptionRevisionStale
 
 CANONICAL_PROPOSAL_HASH_PREFIX = "prop1:"
+
+
+@dataclass(frozen=True)
+class OptionRevisionPins:
+    """The exact option and typed proposal revision the user reviewed."""
+
+    option_revision: int
+    proposal_id: str
+    proposal_revision: int
+
+    @classmethod
+    def from_revision(
+        cls, revision: NotebookOptionRevision | NotebookOptionRevisionV11
+    ) -> OptionRevisionPins:
+        return cls(
+            revision.option_revision, revision.typed_proposal_id, revision.typed_proposal_revision
+        )
+
+    def require_current(
+        self, current: NotebookOptionRevision | NotebookOptionRevisionV11, *, message: str
+    ) -> None:
+        if self != self.from_revision(current):
+            raise OptionRevisionStale(
+                message,
+                option_id=current.option_id,
+                requested_revision=self.option_revision,
+                current_revision=current.option_revision,
+                reason="proposal_pin_mismatch",
+            )
 
 
 @dataclass(frozen=True)
@@ -121,4 +153,4 @@ class OptionDraft:
     recommendation_status: str | None = None
 
 
-__all__ = ["CANONICAL_PROPOSAL_HASH_PREFIX", "OptionDraft", "TypedProposal"]
+__all__ = ["CANONICAL_PROPOSAL_HASH_PREFIX", "OptionDraft", "OptionRevisionPins", "TypedProposal"]

@@ -43,6 +43,7 @@ CAPABILITY_KINDS = frozenset(
         # before a model is fit and produces no result of its own.
         "data_preparation",
         "pack",
+        "network_analysis",
     }
 )
 

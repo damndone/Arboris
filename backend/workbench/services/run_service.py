@@ -33,7 +33,7 @@ from ..lineage.hashing import dag_hash, override_hash
 from ..lineage.role_layer import canonicalize_focal_x
 from ..lineage.run_family import ensure_run_family_binding
 from ..lineage.run_inputs import write_run_inputs
-from ..lineage.upload_store import resolve_upload, store_upload_bytes
+from ..lineage.upload_store import store_upload_bytes
 from ..model_options import (
     ModelOptionsBinding,
     ModelOptionsError,
@@ -667,6 +667,12 @@ def _submit_run(
     form = {
         key: value for key, value in form.items() if key != "model_options_binding"
     }
+    if "estimation_engine" in form:
+        from ..estimation_engine import stored_choice
+
+        engine = stored_choice(form.pop("estimation_engine"))
+        if engine:
+            form["estimation_engine"] = engine
     raw_model_options = form.get("model_options", {})
     model_options = (
         parse_model_options(raw_model_options)
@@ -817,7 +823,7 @@ def _submit_run(
     uploads_dir = run.root / "_uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     saved_path = uploads_dir / Path(upload_filename or "upload.csv").name
-    saved_path.write_bytes(resolve_upload(root, sha).read_bytes())
+    saved_path.write_bytes(upload_bytes)
 
     _write_manifest(
         run.root, run.run_id, form.get("mode", "auto"), "running",
@@ -882,6 +888,7 @@ def _submit_run(
         form.get("survey_subpop", ""),
         by_group_request,
         form.get("survey_df", ""),
+        form.get("estimation_engine", ""),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -944,6 +951,7 @@ def _bg_run(
     survey_subpop: str = "",
     by_group: dict | None = None,
     survey_df: str = "",
+    estimation_engine: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -1024,6 +1032,7 @@ def _bg_run(
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
             survey_df=survey_df,
+            estimation_engine=estimation_engine,
             labels=labels,
             statistical_tests=statistical_tests_request,
             by_group=by_group,

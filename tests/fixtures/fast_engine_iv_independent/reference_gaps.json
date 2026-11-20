@@ -1,0 +1,337 @@
+{
+  "generator": "tests/fixtures/fast_engine_iv_independent/generate_reference_gaps.py",
+  "definition": "Compatibility failures remain failures; independent accuracy is a separate gate.",
+  "r_environment": {
+    "r_version": "4.6.0",
+    "platform": "aarch64-apple-darwin24.6.0",
+    "lib_paths": [
+      "/opt/homebrew/lib/R/4.6/site-library",
+      "/opt/homebrew/Cellar/r/4.6.0/lib/R/library"
+    ],
+    "packages": {
+      "fixest": "0.14.1",
+      "sandwich": "3.1.1",
+      "jsonlite": "2.0.0"
+    }
+  },
+  "cases": [
+    {
+      "rows": 20000,
+      "seed": 20004,
+      "case": "just",
+      "shape": "scaled",
+      "covariance": "robust",
+      "input_array_sha256": "9986c70ecbeab0bcb3198abd30cf8b2531a47509fb6ecd7bc736d0b10332d0e0",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "cov.w.Intercept: fast 1.4691889906154612 vs reference 1.4691889960784155",
+        "cov.Intercept.w: fast 1.4691889906154612 vs reference 1.4691889960784155"
+      ],
+      "fields": [
+        {
+          "field": "cov.w.Intercept",
+          "fast": 1.4691889906154612,
+          "reference": 1.4691889960784155,
+          "independent": 1.4691889906154398,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 283.0264402512969,
+          "fast_absolute_error": 2.1316282072803006e-14,
+          "fast_relative_error": 1.4508876808199922e-14,
+          "reference_relative_error": 3.718361396878824e-09
+        },
+        {
+          "field": "cov.Intercept.w",
+          "fast": 1.4691889906154612,
+          "reference": 1.4691889960784155,
+          "independent": 1.4691889906154398,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 283.0264402512969,
+          "fast_absolute_error": 2.1316282072803006e-14,
+          "fast_relative_error": 1.4508876808199922e-14,
+          "reference_relative_error": 3.718361396878824e-09
+        }
+      ]
+    },
+    {
+      "rows": 30,
+      "seed": 44,
+      "case": "two_endogenous",
+      "shape": "scaled",
+      "covariance": "robust",
+      "input_array_sha256": "2daebd16359dcd4d483fe8f14480a8fe73122f8622d6fdaa70d6721ae427647c",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "cov.d1.w: fast -1392.6196395650536 vs reference -1392.619637356427",
+        "cov.w.d1: fast -1392.6196395650536 vs reference -1392.619637356427"
+      ],
+      "fields": [
+        {
+          "field": "cov.d1.w",
+          "fast": -1392.6196395650536,
+          "reference": -1392.619637356427,
+          "independent": -1392.6196395650422,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 227825.0975300786,
+          "fast_absolute_error": 1.1368683772161603e-11,
+          "fast_relative_error": 8.163523943775769e-15,
+          "reference_relative_error": 1.5859429807118539e-09
+        },
+        {
+          "field": "cov.w.d1",
+          "fast": -1392.6196395650536,
+          "reference": -1392.619637356427,
+          "independent": -1392.6196395650422,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 227825.0975300786,
+          "fast_absolute_error": 1.1368683772161603e-11,
+          "fast_relative_error": 8.163523943775769e-15,
+          "reference_relative_error": 1.5859429807118539e-09
+        }
+      ]
+    },
+    {
+      "rows": 400,
+      "seed": 414,
+      "case": "two_endogenous",
+      "shape": "scaled",
+      "covariance": "robust",
+      "input_array_sha256": "1aa277edadd1f340919bd064eb781fca3243cd4a334cfacb66ed754c37bfc99e",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "pvalues.Intercept: fast 5.447987297736333e-24 vs reference 5.447987290217122e-24",
+        "pvalues.d2: fast 0.010235833752431074 vs reference 0.010235833739706086",
+        "cov.d1.w: fast -245.59303133714127 vs reference -245.5930310844049",
+        "cov.w.d1: fast -245.59303133714127 vs reference -245.5930310844049",
+        "first_stage.d1.pval: fast 2.5755258652150623e-32 vs reference 2.575525880214823e-32",
+        "first_stage.d2.pval: fast 2.9701665842002788e-30 vs reference 2.9701665973574284e-30"
+      ],
+      "fields": [
+        {
+          "field": "pvalues.Intercept",
+          "fast": 5.447987297736333e-24,
+          "reference": 5.447987290217122e-24,
+          "independent": 5.4479872977361504e-24,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "2*pnorm(-abs(10.101362606453677))",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 1.829363083467185e-37,
+          "fast_relative_error": 3.357869582822552e-14,
+          "reference_relative_error": 1.3801479148683223e-09
+        },
+        {
+          "field": "pvalues.d2",
+          "fast": 0.010235833752431074,
+          "reference": 0.010235833739706086,
+          "independent": 0.010235833752431063,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "2*pnorm(-abs(-2.5677588447286057))",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 1.0408340855860843e-17,
+          "fast_relative_error": 1.0168532537360533e-15,
+          "reference_relative_error": 1.2431793666863553e-09
+        },
+        {
+          "field": "cov.d1.w",
+          "fast": -245.59303133714127,
+          "reference": -245.5930310844049,
+          "independent": -245.5930313371407,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 17629.792945956022,
+          "fast_absolute_error": 5.684341886080801e-13,
+          "fast_relative_error": 2.314537124743395e-15,
+          "reference_relative_error": 1.0290837100605965e-09
+        },
+        {
+          "field": "cov.w.d1",
+          "fast": -245.59303133714127,
+          "reference": -245.5930310844049,
+          "independent": -245.5930313371407,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 17629.792945956022,
+          "fast_absolute_error": 5.684341886080801e-13,
+          "fast_relative_error": 2.314537124743395e-15,
+          "reference_relative_error": 1.0290837100605965e-09
+        },
+        {
+          "field": "first_stage.d1.pval",
+          "fast": 2.5755258652150623e-32,
+          "reference": 2.575525880214823e-32,
+          "independent": 2.575525865215064e-32,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "pchisq(150.04589549205113, 3.0, lower.tail=FALSE)",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 1.642146637880645e-47,
+          "fast_relative_error": 6.375966399947302e-16,
+          "reference_relative_error": 5.823959670244397e-09
+        },
+        {
+          "field": "first_stage.d2.pval",
+          "fast": 2.9701665842002788e-30,
+          "reference": 2.9701665973574284e-30,
+          "independent": 2.9701665842000998e-30,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "pchisq(140.48547829051125, 3.0, lower.tail=FALSE)",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 1.7901587881749538e-43,
+          "fast_relative_error": 6.027132611678291e-14,
+          "reference_relative_error": 4.429828532008146e-09
+        }
+      ]
+    },
+    {
+      "rows": 20000,
+      "seed": 20004,
+      "case": "just",
+      "shape": "scaled",
+      "covariance": "unadjusted",
+      "input_array_sha256": "9986c70ecbeab0bcb3198abd30cf8b2531a47509fb6ecd7bc736d0b10332d0e0",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "cov.w.Intercept: fast 3.389706428181961 vs reference 3.38970642151158",
+        "cov.Intercept.w: fast 3.389706428181961 vs reference 3.38970642151158"
+      ],
+      "fields": [
+        {
+          "field": "cov.w.Intercept",
+          "fast": 3.389706428181961,
+          "reference": 3.38970642151158,
+          "independent": 3.389706428181959,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 209.96392953496647,
+          "fast_absolute_error": 1.7763568394002505e-15,
+          "fast_relative_error": 5.240444495817252e-16,
+          "reference_relative_error": 1.9678338101576156e-09
+        },
+        {
+          "field": "cov.Intercept.w",
+          "fast": 3.389706428181961,
+          "reference": 3.38970642151158,
+          "independent": 3.389706428181959,
+          "independent_method": "Decimal IV moments",
+          "r_expression": null,
+          "reference_agreement": false,
+          "independent_covariance_scale": 209.96392953496647,
+          "fast_absolute_error": 1.7763568394002505e-15,
+          "fast_relative_error": 5.240444495817252e-16,
+          "reference_relative_error": 1.9678338101576156e-09
+        }
+      ]
+    },
+    {
+      "rows": 400,
+      "seed": 404,
+      "case": "over",
+      "shape": "scaled",
+      "covariance": "unadjusted",
+      "input_array_sha256": "2b95ba2dab862c1d9f6615b94b748573e81cea0b303407bdfbdd0e056fa0f82a",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "wu_hausman.pval: fast 1.8130869789200975e-05 vs reference 1.8130869828566163e-05"
+      ],
+      "fields": [
+        {
+          "field": "wu_hausman.pval",
+          "fast": 1.8130869789200975e-05,
+          "reference": 1.8130869828566163e-05,
+          "independent": 1.8130869789201012e-05,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "pf(18.83346662394366, 1.0, 396.0, lower.tail=FALSE)",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 3.7269449679189215e-20,
+          "fast_relative_error": 2.0555797991217937e-15,
+          "reference_relative_error": 2.171167293677102e-09
+        }
+      ]
+    },
+    {
+      "rows": 400,
+      "seed": 414,
+      "case": "two_endogenous",
+      "shape": "scaled",
+      "covariance": "unadjusted",
+      "input_array_sha256": "1aa277edadd1f340919bd064eb781fca3243cd4a334cfacb66ed754c37bfc99e",
+      "precision": [
+        80,
+        110
+      ],
+      "precision_stable_as_float": true,
+      "reference_agreement": false,
+      "reference_failures": [
+        "pvalues.Intercept: fast 1.0292693761496933e-24 vs reference 1.0292693745617856e-24",
+        "pvalues.d2: fast 0.005108506406538539 vs reference 0.005108506400549196"
+      ],
+      "fields": [
+        {
+          "field": "pvalues.Intercept",
+          "fast": 1.0292693761496933e-24,
+          "reference": 1.0292693745617856e-24,
+          "independent": 1.02926937614968e-24,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "2*pnorm(-abs(10.263482037208796))",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 1.3407982439066717e-38,
+          "fast_relative_error": 1.3026699083600134e-14,
+          "reference_relative_error": 1.5427393026675456e-09
+        },
+        {
+          "field": "pvalues.d2",
+          "fast": 0.005108506406538539,
+          "reference": 0.005108506400549196,
+          "independent": 0.005108506406538534,
+          "independent_method": "R upper tail from stable Decimal statistic",
+          "r_expression": "2*pnorm(-abs(-2.800110829212224))",
+          "reference_agreement": false,
+          "independent_covariance_scale": null,
+          "fast_absolute_error": 4.336808689942018e-18,
+          "fast_relative_error": 8.489386808620232e-16,
+          "reference_relative_error": 1.172424557963927e-09
+        }
+      ]
+    }
+  ]
+}

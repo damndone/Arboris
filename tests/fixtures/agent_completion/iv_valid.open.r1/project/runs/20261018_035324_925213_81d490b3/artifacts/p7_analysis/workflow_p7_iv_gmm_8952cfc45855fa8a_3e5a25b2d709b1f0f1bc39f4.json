@@ -1,0 +1,108 @@
+{
+  "schema_version": "workbench.workflow.p7-pack/v1",
+  "source": {
+    "run_id": "20261018_035324_925213_81d490b3",
+    "node_ref": "stage:cleaned",
+    "artifact_id": "cleaned_dataset",
+    "sha256": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+    "workflow_id": "workflow_oprec_605239aede388eca7d356e12",
+    "workflow_step_id": "s_gmm",
+    "workflow_step_fingerprint": "sha256:3e5a25b2d709b1f0f1bc39f477b5a0b3862e939cd130a8005f6c25168a8d088d",
+    "operation_id": "iv.gmm",
+    "pack_family": "iv_gmm"
+  },
+  "result": {
+    "contract": "iv_gmm.result",
+    "contract_version": "1.0",
+    "operation_id": "iv.gmm",
+    "status": "completed",
+    "reason_code": "IV_GMM_COMPLETED",
+    "n_observations": 1500,
+    "parameter_names": [
+      "experience",
+      "education"
+    ],
+    "result": {
+      "estimator": "two_step",
+      "covariance_method": "heteroskedastic_hc0",
+      "confidence_level": 0.95,
+      "sample_size": 1500,
+      "residual_degrees_of_freedom": 1498,
+      "parameter_names": [
+        "experience",
+        "education"
+      ],
+      "coefficients": {
+        "experience": {
+          "estimate": 0.01954073866084878,
+          "std_error": 0.0012277061642129842,
+          "z_value": 15.916462122983058,
+          "p_value": 4.8715522289841766e-57,
+          "confidence_interval": [
+            0.017134478795393513,
+            0.021946998526304048
+          ]
+        },
+        "education": {
+          "estimate": 0.17946486345062573,
+          "std_error": 0.0016406231801442217,
+          "z_value": 109.38822858448799,
+          "p_value": 0.0,
+          "confidence_interval": [
+            0.17624930110534148,
+            0.18268042579590998
+          ]
+        }
+      },
+      "covariance": [
+        [
+          1.5072624256465588e-06,
+          -1.7499752522074672e-06
+        ],
+        [
+          -1.7499752522074672e-06,
+          2.691644419226539e-06
+        ]
+      ],
+      "weighting": {
+        "method": "heteroskedastic_hc0_two_step",
+        "center_moments": false,
+        "moment_count": 3
+      },
+      "overidentification": {
+        "available": true,
+        "statistic": 25.027347180495724,
+        "degrees_of_freedom": 1,
+        "p_value": 5.652291697399979e-07,
+        "semantics": "Hansen_J_heteroskedastic_moment_test"
+      },
+      "weak_instruments": {
+        "exog_names": [
+          "experience"
+        ],
+        "endogenous_names": [
+          "education"
+        ],
+        "excluded_instrument_names": [
+          "near_college",
+          "mother_educ"
+        ],
+        "diagnostic_policy": "descriptive_no_automatic_threshold_decision",
+        "method": "per_endogenous_partial_f_and_robust_excluded_wald_f",
+        "by_endogenous": {
+          "education": {
+            "partial_f": 6376.259298578642,
+            "partial_r2": 0.8949438193442798,
+            "robust_excluded_wald_f": 6591.586107841729,
+            "robust_excluded_wald_status": "completed",
+            "excluded_instrument_count": 2,
+            "residual_degrees_of_freedom": 1497
+          }
+        },
+        "minimum_partial_f": 6376.259298578642,
+        "minimum_robust_excluded_wald_f": 6591.586107841729
+      }
+    },
+    "evidence_digest": "e695ae3dea8be503fd8fbd276f018ed7e3d0c160ac79e3817395c31252d5d094"
+  }
+}

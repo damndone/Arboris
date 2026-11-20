@@ -1,4 +1,5 @@
 from __future__ import annotations
+from workbench.http import agent_route_context, agent_route_runtime, agent_turn_routes
 
 import json
 from collections.abc import AsyncIterator
@@ -70,8 +71,8 @@ def test_agent_session_turn_is_durable_and_replayable(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -110,7 +111,10 @@ def test_agent_session_turn_is_durable_and_replayable(
             "user",
             "assistant",
         ]
-        assert "fp-agent-1" in FakeAgentAdapter.instances[-1].requests[0].messages[0]["content"]
+        contexts = [message for message in FakeAgentAdapter.instances[-1].requests[0].messages
+                    if message.get("name") == "workbench_context"]
+        assert len(contexts) == 1
+        assert "fp-agent-1" in contexts[0]["content"]
 
         events = client.get(
             f"/agent/sessions/{session_id}/events",
@@ -285,7 +289,7 @@ def test_agent_turn_abort_rejects_when_the_session_has_no_active_turn(
 
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -325,7 +329,7 @@ def test_agent_turn_abort_targets_only_the_live_session_turn(
         async def abort(self) -> None:
             self.aborted = True
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     live = ActiveAgent()
@@ -366,8 +370,8 @@ def test_chain_turn_receives_structured_proposal_protocol(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -400,7 +404,7 @@ def test_chain_turn_receives_structured_proposal_protocol(
     ]
     assert len(protocol_messages) == 1
     protocol = protocol_messages[0]["content"]
-    assert "must call propose_operation" in protocol
+    assert "must call run_operation" in protocol
     assert "does not execute" in protocol
     assert "description does not execute a result" in protocol
     assert "model.joint_f_test" in protocol
@@ -431,7 +435,7 @@ def test_agent_session_rejects_oversized_context_and_unknown_session(tmp_path: P
 def test_agent_session_never_returns_provider_secret(tmp_path: Path, monkeypatch) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     with TestClient(app) as client:
@@ -691,8 +695,8 @@ def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
     def no_provider(*args, **kwargs):
         raise AssertionError("Manual graph fork must not construct a provider")
 
-    monkeypatch.setattr("workbench.http.agent_routes.OpenAICompatibleModelAdapter", no_provider)
-    monkeypatch.setattr("workbench.http.agent_routes.load_llm_config", no_provider)
+    monkeypatch.setattr("workbench.http.agent_route_runtime.OpenAICompatibleModelAdapter", no_provider)
+    monkeypatch.setattr("workbench.http.agent_route_runtime.load_llm_config", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -853,7 +857,7 @@ class ProposalCallingAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-propose",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "operation_version": "v1",
@@ -894,6 +898,8 @@ def _write_inspectable_run(project_root: Path) -> None:
     runs_root = project_root / "runs"
     run_root = runs_root / "run-a"
     run_root.mkdir(parents=True)
+    from workbench.lineage.upload_store import store_upload_bytes
+    upload_sha = store_upload_bytes(project_root, b"y,x\n2,1\n4,2\n6,3\n", filename="source.csv")
     GraphStore(runs_root).write(
         Graph(
             schema_version=3,
@@ -917,7 +923,8 @@ def _write_inspectable_run(project_root: Path) -> None:
         _json.dumps({"model:ols_1": {"node_hash": "hash-a"}}), encoding="utf-8"
     )
     (run_root / "run_inputs.json").write_text(
-        _json.dumps({"rerun_of": None, "form": {"model_type": "ols"}}),
+        _json.dumps({"rerun_of": None, "form": {"model_type": "ols", "y": "y", "x": "x"},
+                     "upload": {"sha256": upload_sha, "filename": "source.csv"}}),
         encoding="utf-8",
     )
     (run_root / "run_manifest.json").write_text(
@@ -942,8 +949,8 @@ def test_chain_turn_persists_structured_proposal_from_tool_call(
     from workbench.http import agent_routes
 
     ProposalCallingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposalCallingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposalCallingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1026,13 +1033,15 @@ def _create_route_proposal(
     )
 
 
+@pytest.mark.parametrize("grant_session", [False, True])
 def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
     tmp_path: Path,
     monkeypatch,
+    grant_session: bool,
 ) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1059,6 +1068,7 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
         assert listed.status_code == 200
         [listed_proposal] = listed.json()["proposals"]
         assert listed_proposal.pop("readable")  # the card's sentences
+        assert listed_proposal.pop("session_grant_class") == "derive"
         assert listed_proposal == proposal.to_dict() | {"status": "pending"}
 
         confirmed = client.post(
@@ -1068,6 +1078,7 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
                 "revision": proposal.revision,
                 "fingerprint": proposal.fingerprint,
                 "active_head_run_id": "run-a",
+                "grant_session": grant_session,
             },
         )
         assert confirmed.status_code == 200, confirmed.text
@@ -1083,6 +1094,16 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
         assert payload["operation"]["error"]
         assert payload["operation"]["proposal_id"] == proposal.proposal_id
         assert list((project_root / "runs").iterdir()) == [project_root / "runs" / "run-a"]
+        metadata = JsonlSessionRepository(project_root / "workbench").get_metadata(session_id)
+        assert metadata.get("permission_grants", []) == ([{"class": "derive"}] if grant_session else [])
+        repeated = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/confirm",
+            params={"project_root": str(project_root)},
+            json={"revision": proposal.revision, "fingerprint": proposal.fingerprint,
+                  "active_head_run_id": "run-a", "grant_session": True},
+        )
+        assert repeated.status_code == (200 if grant_session else 409), repeated.text
+        assert JsonlSessionRepository(project_root / "workbench").get_metadata(session_id).get("permission_grants", []) == metadata.get("permission_grants", [])
 
 
 def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
@@ -1091,7 +1112,7 @@ def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
 ) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1159,7 +1180,7 @@ def test_proposal_confirmation_uses_chain_store_active_head(
     """A request must not replace the ChainStore's authoritative active head."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1206,7 +1227,7 @@ def test_proposal_decline_is_a_scoped_append_only_decision(
     """Declining a proposal records the user's decision without executing it."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1223,16 +1244,25 @@ def test_proposal_decline_is_a_scoped_append_only_decision(
             },
         ).json()["session_id"]
         proposal = _create_route_proposal(project_root, session_id=session_id)
-
+        path = f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/decline"
+        params = {"project_root": str(project_root)}
+        stale = client.post(path, params=params, json={"revision": proposal.revision + 1, "fingerprint": proposal.fingerprint})
+        assert stale.status_code == 409, stale.text
+        assert ProposalStore(project_root / "workbench").latest_status(proposal.proposal_id) == "pending"
+        body = {"revision": proposal.revision, "fingerprint": proposal.fingerprint, "reason": "保留当前模型设定"}
         declined = client.post(
-            f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/decline",
-            params={"project_root": str(project_root)},
-            json={"reason": "保留当前模型设定"},
+            path, params=params, json=body,
         )
 
         assert declined.status_code == 200, declined.text
         payload = declined.json()
         assert payload["status"] == "declined"
+        assert payload["continue_after_decline"] is True
+        repeated = client.post(path, params=params, json=body)
+        assert repeated.status_code == 200 and repeated.json()["continue_after_decline"] is False
+        notices = [entry for entry in JsonlSessionRepository(project_root / "workbench").get_branch(session_id)
+                   if entry.payload.get("message_type") == "operation_proposal_declined"]
+        assert len(notices) == 1
         assert payload["proposal"]["status"] == "declined"
         assert payload["proposal"]["decision"]["reason"] == "保留当前模型设定"
         assert not list((project_root / "workbench" / "operation-records").glob("*.jsonl"))
@@ -1258,7 +1288,7 @@ def test_proposal_revision_route_preserves_scope_and_rejects_stale_revision(
     """Revision edits only the allowlisted proposal payload, never its target."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1315,15 +1345,15 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     from workbench.http import agent_routes
 
     constructed = []
-    original_orchestrator = agent_routes.WorkbenchOrchestrator
+    original_orchestrator = agent_turn_routes.WorkbenchOrchestrator
     def capture_orchestrator(*args, **kwargs):
         instance = original_orchestrator(*args, **kwargs)
         constructed.append(instance)
         return instance
-    monkeypatch.setattr(agent_routes, "WorkbenchOrchestrator", capture_orchestrator)
+    monkeypatch.setattr(agent_turn_routes, "WorkbenchOrchestrator", capture_orchestrator)
     ToolCallingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ToolCallingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ToolCallingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1354,9 +1384,9 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
             for tool in adapter.requests[0].tools
         }
         assert "inspect_node_context" in tool_ids
-        assert "propose_operation" in tool_ids
+        assert "run_operation" in tool_ids
         proposal_tool = next(
-            tool for tool in adapter.requests[0].tools if tool.get("tool_id") == "propose_operation"
+            tool for tool in adapter.requests[0].tools if tool.get("tool_id") == "run_operation"
         )
         proposal_schema = proposal_tool["input_schema"]
         # The envelope stays shape-agnostic: a `oneOf` is an AND with its
@@ -1371,18 +1401,13 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
             for item in proposal_schema["oneOf"]
             if item["properties"]["operation_id"]["const"] == "model.rerun"
         )
-        assert rerun_branch["properties"]["target"]["required"] == [
-            "run_id",
-            "node_ref",
-            "node_hash",
-            "forest_node_key",
-        ]
-        assert rerun_branch["properties"]["preconditions"]["required"] == [
-            "context_version",
-            "context_fingerprint",
-            "active_head_run_id",
-            "owner_resolution",
-        ]
+        # Node identity is backend-bound (design §5.3): references only.
+        assert rerun_branch["properties"]["target"]["required"] == ["run_id", "node_ref"]
+        assert {"node_hash", "forest_node_key"} <= set(rerun_branch["properties"]["target"]["properties"])
+        preconditions = rerun_branch["properties"]["preconditions"]
+        assert preconditions["required"] == ["active_head_run_id"]
+        # Previously issued clients can still supply all of the owner-bound pins.
+        assert {"context_version", "context_fingerprint", "owner_resolution"} <= preconditions["properties"].keys()
 
         # The tool result is durable typed evidence in the session transcript.
         messages = turn.json()["session"]["messages"]
@@ -1408,15 +1433,15 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     assert _snapshot(project_root) == before
 
 
-def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
+def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tools(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -1436,7 +1461,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     tool_ids = {
         tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
     }
-    assert tool_ids == {
+    evidence_tools = {
         # Rows go to the user's screen; the provider sees them only if the
         # project's sharing policy allows rows (workbench.egress).
         "show_dataset_rows",
@@ -1453,8 +1478,20 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         # Earlier conversations of this project (agent/recall.py), read-only.
         "search_project_conversations",
         "read_project_conversation",
+        # Reference discovery and checks read evidence without changing it.
+        "inspect_builtin_skills",
+        "inspect_custom_skills",
+        "inspect_extensions",
+        "check_model_claims",
+        "show_chart",
+        "read_reports",
+        "inspect_analysis_completion",
     }
-    assert all(tool["side_effect"] == "none" for tool in FakeAgentAdapter.instances[-1].requests[0].tools)
+    operation_tools = {"run_operation", "update_plan", "plan_analysis"}
+    source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}
+    assert tool_ids == evidence_tools | source_tools | operation_tools
+    for tool in FakeAgentAdapter.instances[-1].requests[0].tools:
+        assert tool["side_effect"] == ("proposal" if tool["tool_id"] in operation_tools else "none")
     descriptor = next(
         tool
         for tool in FakeAgentAdapter.instances[-1].requests[0].tools
@@ -1468,7 +1505,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         if message.get("name") == "workbench_global_agent_protocol"
     ]
     assert len(protocol_messages) == 1
-    assert "project-level advisory Agent" in protocol_messages[0]["content"]
+    assert "project-level research Agent" in protocol_messages[0]["content"]
     assert "never invent" in protocol_messages[0]["content"].lower()
     assert "inspect_project_model_coefficients" in protocol_messages[0]["content"]
     assert "at most four exact persisted term names per call" in protocol_messages[0]["content"]
@@ -1508,8 +1545,8 @@ def test_main_turn_refreshes_protocol_for_existing_session(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -1522,9 +1559,9 @@ def test_main_turn_refreshes_protocol_for_existing_session(
         session_id = created.json()["session_id"]
         marker = "PROTOCOL_UPGRADE_MARKER"
         monkeypatch.setattr(
-            agent_routes,
+            agent_route_context,
             "MAIN_AGENT_PROTOCOL",
-            f"{agent_routes.MAIN_AGENT_PROTOCOL}\n- {marker}",
+            f"{agent_route_context.MAIN_AGENT_PROTOCOL}\n- {marker}",
         )
         turn = client.post(
             f"/agent/sessions/{session_id}/turns",
@@ -1542,7 +1579,7 @@ def test_main_turn_refreshes_protocol_for_existing_session(
 
 
 class ProposingAdapter:
-    """Emits one propose_operation call built from real project state."""
+    """Emits one run_operation call built from real project state."""
 
     instances: list["ProposingAdapter"] = []
     proposal_arguments: dict = {}
@@ -1559,7 +1596,7 @@ class ProposingAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-propose-1",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": ProposingAdapter.proposal_arguments,
                 },
             )
@@ -1576,8 +1613,8 @@ def test_natural_language_turn_can_propose_registry_enabled_graph_fork(
     from workbench.http import agent_routes
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1661,8 +1698,8 @@ def test_unsupported_natural_language_operation_creates_no_proposal_or_effect(
     from workbench.http import agent_routes
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1723,6 +1760,7 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
     import io
     import time
 
+    from workbench.agent.orchestrator import WorkbenchOrchestrator
     from workbench.http import agent_routes
     from workbench.lineage.node_write_validation import (
         NodeWriteOperationRequestV1,
@@ -1731,8 +1769,8 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "demo")
@@ -1859,12 +1897,16 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
         final = reconciled.json()["operation"]
         assert final["status"] == "completed"
         assert final["verification"]
+        async def terminal_execution_must_not_restart(*args, **kwargs):
+            raise AssertionError("Terminal reconciliation must not append an observation or execute again")
+
+        monkeypatch.setattr(WorkbenchOrchestrator, "execute_confirmed_operation", terminal_execution_must_not_restart)
         again = client.post(
             f"/agent/sessions/{session_id}/operations/{record_id}/reconcile",
             params={"project_root": str(project.root)},
         )
         assert again.status_code == 200
-        assert again.json()["operation"]["status"] == "completed"
+        assert again.json()["operation"] == final
 
         unknown = client.post(
             f"/agent/sessions/{session_id}/operations/oprec_missing/reconcile",
@@ -1889,8 +1931,8 @@ def test_proposal_canonicalizes_model_supplied_target_references(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "demo")
@@ -1980,8 +2022,8 @@ def test_metadata_for_a_column_outside_the_model_goes_through_metadata_edit(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "metadata")
@@ -2091,8 +2133,18 @@ def test_a_main_session_sees_runs_made_after_it_started(tmp_path) -> None:
     )
 
     contexts = [m for m in ContextBuilder(repository).build("main-1").messages if m.get("name") == "workbench_context"]
-    assert len(contexts) == 4
-    assert '"run_count":3' in contexts[-1]["content"] and "supersedes" in contexts[-1]["content"]
+    assert len(contexts) == 1
+    assert '"run_count":3' in contexts[0]["content"] and "supersedes" in contexts[0]["content"]
+    # Projection replaces stale snapshots, while append-only audit history
+    # retains every distinct context as originally recorded.
+    recorded = [entry.payload for entry in repository.get_branch("main-1")
+                if entry.entry_type == "custom_message"
+                and entry.payload.get("name") == "workbench_context"]
+    assert len(recorded) == 4
+    assert '"run-old"' in recorded[0]["content"]
+    assert '"run-new"' in recorded[1]["content"]
+    assert '"run_count":2' in recorded[2]["content"]
+    assert recorded[3]["content"] == contexts[0]["content"]
 
 
 def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
@@ -2112,8 +2164,8 @@ def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
         time.sleep(0.3)  # widen the window between the check and the start
         return _config()
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", slow_config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", slow_config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 

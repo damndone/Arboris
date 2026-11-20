@@ -39,7 +39,7 @@ RESULT = _tool({"p_value": 0.098491234, "mean_men": 5.1234, "mean_women": 4.0221
         "p 值远低于 0.05",
         "p is well below 0.05",
         "p is less than 0.01",
-        "样本 176 人，3 个检验",  # small integers are prose
+        "编号 176，3 个检验",  # ordinary identifiers and prose remain exempt
         "GSS 2022 的数据",  # years are prose
     ],
 )
@@ -61,9 +61,34 @@ def test_wrong_rounding_arithmetic_and_invention_are_found(reply: str, bad: str)
     assert [finding.text for finding in findings] == [bad]
 
 
+def test_a_thin_space_in_a_large_number_is_a_thousands_separator() -> None:
+    evidence = [{"role": "tool", "name": "get_model", "content": '{"nobs": 1500}'}]
+    assert grounding.check("Sample: 1\u202f500 observations.", evidence) == ()
+
+
 def test_findings_name_the_closest_real_values() -> None:
     (finding,) = grounding.check("p = 0.099", [RESULT])
     assert finding.closest[0] == "0.098491234"
+
+
+def test_signed_estimates_and_interval_endpoints_cannot_ground_the_opposite_sign() -> None:
+    evidence = _tool({"estimate": -2.8984771573604062, "lower": -5.310131921282001,
+                      "upper": -0.4868223934388114})
+    assert grounding.check("Difference = −2.90, interval [−5.31,−.49].", [evidence]) == ()
+    findings = grounding.check("Difference = +2.90, interval [−5.31,0.49].", [evidence])
+    assert [finding.text for finding in findings] == ["+2.90", "0.49"]
+    assert "-2.8984771573604062" in findings[0].closest
+    assert [finding.text for finding in grounding.check("p = −.0985", [RESULT])] == ["−.0985"]
+
+
+def test_signed_zero_still_matches_zero() -> None:
+    assert grounding.check("Estimate = −0.00.", [_tool({"estimate": 0.0})]) == ()
+
+
+def test_an_explicit_comparative_magnitude_does_not_reverse_the_estimate() -> None:
+    evidence = _tool({"estimate": -2.8984771573604062})
+    assert grounding.check("Estimate = –2.90. The second group averaged 2.90 more days.", [evidence]) == ()
+    assert [finding.text for finding in grounding.check("Estimate = 2.90.", [evidence])] == ["2.90"]
 
 
 def test_the_agents_own_words_and_the_correction_are_not_evidence() -> None:
@@ -88,6 +113,18 @@ def test_a_calculation_counts_only_when_its_operands_come_from_results() -> None
 
     laundered = _tool(grounding.calculate([{"expression": "5.1234 - 3.9"}]), name="calculate")
     assert [f.text for f in grounding.check("两组差 1.2234", [RESULT, laundered])] == ["1.2234"]
+
+
+def test_a_calculation_verifies_signed_operands() -> None:
+    calculated = _tool(grounding.calculate([{"expression": "abs(-1.6602)"}]), name="calculate")
+    assert grounding.check("Magnitude = 1.6602", [RESULT, calculated]) == ()
+    wrong_sign = _tool(grounding.calculate([{"expression": "5.1234 - (-4.0221)"}]), name="calculate")
+    assert [finding.text for finding in grounding.check("Sum = 9.1455", [RESULT, wrong_sign])] == ["9.1455"]
+
+
+def test_a_recorded_calculation_keeps_its_signed_operand_evidence() -> None:
+    old_result = {"results": [{"expression": "abs(-1.6602)", "operands": ["1.6602"], "value": "1.6602"}]}
+    assert grounding.check("Magnitude = 1.6602", [RESULT, _tool(old_result, name="calculate")]) == ()
 
 
 def test_a_calculated_value_carries_no_binary_rounding_noise() -> None:
@@ -259,3 +296,33 @@ def test_scientific_notation_is_read_as_one_number(reply: str) -> None:
 )
 def test_a_wrong_mantissa_or_exponent_is_still_found(reply: str, bad: str) -> None:
     assert [finding.text for finding in grounding.check(reply, [TINY_P])] == [bad]
+
+
+def test_a_number_read_from_an_image_of_this_turn_says_what_to_compare_it_with() -> None:
+    image = {"role": "user", "content": "The person attached the image a.png.", "name": "workbench_attachment", "attachment_image": {"attachment_id": "a"}}
+    text = {"role": "user", "content": "The person attached the file b.txt.", "name": "workbench_attachment"}
+    asked = {"role": "user", "content": "What does it show?"}
+    tool = {"role": "tool", "content": "{}", "name": "get_context"}
+    assert grounding.image_in_this_turn([image, text, asked, tool])
+    assert not grounding.image_in_this_turn([text, asked])
+    assert not grounding.image_in_this_turn([image, asked, {"role": "assistant", "content": "7316"}, {"role": "user", "content": "And the coefficient?"}])
+    findings = grounding.check("The image shows 7316.", [image, asked])
+    assert findings
+    assert "Compare them with the image" in grounding.unverified_note(findings, "en", image=True)
+    assert "closest" not in grounding.unverified_note((grounding.Finding("7316", ("2026",)),), "en", image=True)
+    assert "do not rely on them" in grounding.unverified_note(findings, "en")
+
+
+@pytest.mark.parametrize("identifier", ["27600adca2f1", "proposal_27600adca2f1", "27600.5e1x"])
+def test_digits_inside_an_identifier_are_not_evidence_for_a_reply_number(identifier):
+    """Agent pipeline replay of QRData 381: a random proposal fingerprint 27600adca2... was read as 2760."""
+    messages = [{"role": "tool", "content": json.dumps({"proposal_fingerprint": identifier})}]
+    assert not grounding.evidence_from_messages(messages).supports(grounding.Decimal("2760"))
+    assert grounding.check("The total is 2760 dollars.", messages)
+
+
+def test_a_number_beside_punctuation_is_still_evidence():
+    messages = [{"role": "tool", "content": json.dumps({"total": 2760, "share": "0.25", "label": "n=2760;"})}]
+    evidence = grounding.evidence_from_messages(messages)
+    assert evidence.supports(grounding.Decimal("2760")) and evidence.supports(grounding.Decimal("0.25"))
+    assert not grounding.check("The total is 2760 dollars.", messages)

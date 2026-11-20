@@ -1,43 +1,8 @@
-// frontend/src/workbench/WorkbenchTopbar.tsx
-//
-// V1.5.2 P3 — workbench top bar with view-mode switcher.
-//
-// View switcher tabs (Graph / Table / Pipeline) + the right-side action
-// slot (plan §15), driven by actionRegistry surface="topbar". `Rerun` routes
-// to the node rerun flow. Report navigation stays in the adjacent view tabs.
-//
-// The switcher writes `view` via `useWorkbench().dispatch.setView` —
-// which goes through the provider's single-commit URL writer.
-
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  useWorkbench,
-} from "./WorkbenchStateProvider";
-import type { ViewMode } from "./state/urlSchema";
-import { useTopbarActions } from "./useTopbarActions";
 import { rootToSlug } from "./projectSlug";
 import { CreateProjectModal } from "../launcher/CreateProjectModal";
 import { listRecents, touchRecent } from "../launcher/recents";
-
-interface TabSpec {
-  id: ViewMode;
-  label: string;
-}
-
-// v1.6.7 — Pipeline tab entry retired (the Pipeline view merges into the main
-// lineage graph via draft-in-graph). PipelineView + the "pipeline" ViewMode and
-// WorkbenchMain branch are kept as a URL deep-link fallback; only the clickable
-// tab is removed. Project Home is owned by the outer Home/Workbench
-// navigation, so it is intentionally not duplicated in this inner switcher.
-// Exported for testing.
-export const VIEW_TABS: TabSpec[] = [
-  { id: "notebook", label: "Notebook" },
-  { id: "graph", label: "Graph" },
-  { id: "data", label: "Data" },
-  { id: "table", label: "Table" },
-  { id: "report", label: "Report" },
-];
 
 function projectName(root: string): string {
   return root.split("/").filter(Boolean).pop() ?? root;
@@ -112,7 +77,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
           fontWeight: 600,
         }}
       >
-        {projectName(projectRoot)}
+        <span className="wb-project-name">{projectName(projectRoot)}</span>
         <span aria-hidden="true" style={{ fontSize: 10 }}>
           ▾
         </span>
@@ -213,134 +178,5 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
         }}
       />
     </div>
-  );
-}
-
-export function WorkbenchTopbar({
-  projectRoot,
-  extraActions = null,
-  leadingActions = null,
-  onViewChange,
-}: {
-  projectRoot: string;
-  extraActions?: ReactNode;
-  leadingActions?: ReactNode;
-  onViewChange?: () => void;
-}) {
-  const { state, dispatch } = useWorkbench();
-  const { actionCtx, actions: topbarActions } = useTopbarActions();
-
-  return (
-    <div
-      data-testid="workbench-topbar"
-      role="toolbar"
-      aria-label="Workbench views"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "0 16px",
-        height: 40,
-        borderBottom: "1px solid var(--separator)",
-        background: "var(--bg-card, transparent)",
-      }}
-    >
-      <div
-        data-testid="workbench-topbar-navigation"
-        style={{ display: "flex", alignItems: "center", gap: 8 }}
-      >
-        {leadingActions}
-        <ProjectSwitcher projectRoot={projectRoot} />
-      </div>
-      <div
-        role="tablist"
-        aria-label="Workbench view mode"
-        style={{ display: "flex", gap: 4 }}
-      >
-        {VIEW_TABS.map((tab) => (
-          <ViewTabButton
-            key={tab.id}
-            active={state.view === tab.id}
-            onClick={() => {
-              onViewChange?.();
-              dispatch.setView(tab.id);
-            }}
-            testId={`view-tab-${tab.id}`}
-          >
-            {tab.label}
-          </ViewTabButton>
-        ))}
-      </div>
-      {/* Right-side analysis action slot, driven by actionRegistry. */}
-      <div
-        data-testid="workbench-topbar-actions"
-        style={{ marginLeft: "auto", display: "flex", gap: 8 }}
-      >
-        {extraActions}
-        {topbarActions.map((action) => {
-          const disabled = action.disabled?.(actionCtx!);
-          return (
-            <button
-              key={action.id}
-              type="button"
-              data-testid={`topbar-action-${action.id}`}
-              data-disabled={disabled ? "true" : undefined}
-              title={disabled ? disabled.reason : undefined}
-              disabled={!!disabled}
-              onClick={() => {
-                if (disabled || !actionCtx) return;
-                action.invoke(actionCtx);
-              }}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: 0,
-                background: "transparent",
-                color: disabled ? "var(--label-tertiary)" : "var(--label)",
-                cursor: disabled ? "not-allowed" : "pointer",
-                fontSize: 12,
-                opacity: disabled ? 0.7 : 1,
-              }}
-            >
-              {action.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ViewTabButton({
-  active,
-  onClick,
-  children,
-  testId,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-  testId: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      data-testid={testId}
-      onClick={onClick}
-      style={{
-        padding: "8px 12px",
-        border: 0,
-        background: active ? "var(--tint-bg)" : "transparent",
-        color: active ? "var(--tint)" : "var(--label-secondary)",
-        cursor: "pointer",
-        fontSize: 13,
-        fontWeight: active ? 600 : 400,
-        borderRadius: 6,
-      }}
-    >
-      {children}
-    </button>
   );
 }

@@ -1,4 +1,4 @@
-import { apiUrl, readResponse } from "../api";
+import { apiUrl, drawRunFigures, readResponse } from "../api";
 import type { RequestOf, Schema } from "../apiTypes";
 export type Operation = Schema<"OperationCatalogEntry">;
 export type Target = NonNullable<Schema<"ManualOperationRequest">["target"]>;
@@ -16,7 +16,10 @@ async function request<T>(root: string, path: string, body?: unknown, query?: Re
 export const catalog = (root: string, target?: Target) => request<Schema<"OperationCatalog">>(root, "/operations", undefined, target ? { target: JSON.stringify(target) } : undefined);
 export const execute = (root: string, body: RequestOf<"/operations/run", "post">) => request<Outcome>(root, "/operations/run", body);
 const reportPath = (run: string) => `/runs/${encodeURIComponent(run)}/manual-reports`;
-export const reportDraft = (root: string, run: string) => request<Draft>(root, `${reportPath(run)}/draft`);
+export const reportDraft = async (root: string, run: string) => {
+    await drawRunFigures(root, run);
+    return request<Draft>(root, `${reportPath(run)}/draft`);
+};
 export const reportHistory = (root: string, run: string) => request<Schema<"ManualReportHistory">>(root, reportPath(run));
 export const saveReport = (root: string, run: string, body: Schema<"ManualReportRequest">) => request<Schema<"ManualReportSaved">>(root, reportPath(run), body);
 export const reportExportUrl = (root: string, run: string, id: string, format: string) => manualUrl(root, `${reportPath(run)}/${encodeURIComponent(id)}/export`, { format });
@@ -24,8 +27,9 @@ export const reportExportUrl = (root: string, run: string, id: string, format: s
 /** A saved result. Its content is whatever the step wrote (JSON, a table, a
  *  figure), so the caller reads the response by its content type. */
 export async function readArtifact(root: string, run: string, id: string): Promise<Response> {
-    const response = await fetch(artifactUrl(root, run, id));
+    const response = await fetch(manualUrl(root, artifactPath(run, id), {view: "local"}));
     if (!response.ok) await readResponse(response);
     return response;
 }
-export const artifactUrl = (root: string, run: string, id: string) => manualUrl(root, `/runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}`);
+const artifactPath = (run: string, id: string) => `/runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}`;
+export const artifactUrl = (root: string, run: string, id: string) => manualUrl(root, artifactPath(run, id));

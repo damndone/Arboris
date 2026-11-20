@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { OperationSection } from "./OperationSection";
 import { RerunContext } from "../RerunContext";
 import type { RerunContextValue } from "../RerunContext";
@@ -129,7 +130,78 @@ function renderWithRerun(node: GraphViewNode, submitRerun = vi.fn().mockResolved
   return { submitRerun };
 }
 
+function expectWrappedFeedback(element: HTMLElement) {
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/lineage/detail/sections/operationForms.css", "utf8");
+  document.head.append(style);
+  try {
+    expect(element).toHaveStyle({minWidth: "0", maxWidth: "100%", overflowWrap: "anywhere"});
+  } finally {
+    style.remove();
+  }
+}
+
 describe("OperationSection (editable)", () => {
+  it("disables preview when a role selection is restored to the same ordered values", () => {
+    const { submitRerun } = renderWithRerun({ ...modelNode(), editableSchema: [{
+      kind: "columns", key: "iv_endog", label: "Endogenous", options: ["d0", "d30"], value: ["d0", "d30"],
+    }] });
+    const preview = screen.getByRole("button", { name: "Preview changes" });
+    const last = screen.getByRole("checkbox", { name: "d30" });
+    expect(preview).toBeDisabled();
+    fireEvent.click(last);
+    expect(preview).toBeEnabled();
+    fireEvent.click(last);
+    expect(preview).toBeDisabled();
+    expect(submitRerun).not.toHaveBeenCalled();
+  });
+  it("wraps long child identifiers and original issues without clipping their text", () => {
+    const runId = "child_" + "r".repeat(500), issue = "WORKFLOW_FAILED: " + "e".repeat(1000);
+    resolvedContextMock.current = {ok: true, context: makeContext()};
+    render(<RerunContext.Provider value={{submitRerun: vi.fn(), activeRunId: "run_a", receipt: {
+      runId, contextFingerprint: "nocv1:test", status: "failed", issue, href: "/runs/child?tab=overview",
+    }}}><OperationSection node={modelNode()}/></RerunContext.Provider>);
+    const receipt = screen.getByTestId("operation-rerun-receipt");
+    expect(receipt).toHaveTextContent(runId);
+    expect(receipt).toHaveTextContent(issue);
+    expectWrappedFeedback(receipt);
+  });
+
+  it("wraps an original long POST error without clipping it", async () => {
+    const issue = "POST_FAILED_" + "x".repeat(1000);
+    renderWithRerun(modelNode(), vi.fn().mockRejectedValue(new Error(issue)));
+    fireEvent.change(screen.getByRole("combobox"), {target: {value: "robust"}});
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    const error = await screen.findByTestId("operation-rerun-error");
+    expect(error).toHaveTextContent(issue);
+    expectWrappedFeedback(error);
+  });
+
+  it("keeps the edited source values and shows the failed child receipt without another POST", async () => {
+    resolvedContextMock.current = {ok: true, context: makeContext()};
+    const submitRerun = vi.fn().mockResolvedValue({run_id: "run_child", focus: null});
+    const value: RerunContextValue = {submitRerun, activeRunId: "run_a"};
+    const node = modelNode();
+    const {rerender} = render(<RerunContext.Provider value={value}><OperationSection node={node}/></RerunContext.Provider>);
+    fireEvent.change(screen.getByRole("combobox"), {target: {value: "robust"}});
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    await screen.findByTestId("operation-rerun-submitted");
+    expect(screen.queryByText(/Rerun completed/)).toBeNull();
+    rerender(<RerunContext.Provider value={{...value, receipt: {
+      runId: "run_child", contextFingerprint: "nocv1:test", status: "failed", issue: "WORKFLOW_FAILED: 'hac'",
+      href: "/runs/run_child?project_root=%2Fproj&tab=overview",
+    }}}><OperationSection node={node}/></RerunContext.Provider>);
+    expect(screen.getByRole("combobox")).toHaveValue("robust");
+    expect(screen.getByTestId("operation-rerun-receipt")).toHaveTextContent("run_child");
+    expect(screen.getByRole("alert")).toHaveTextContent("failed");
+    expect(screen.getByRole("alert")).toHaveTextContent("WORKFLOW_FAILED: 'hac'");
+    expect(screen.getByRole("link", {name: "Open child run"})).toHaveAttribute("href", "/runs/run_child?project_root=%2Fproj&tab=overview");
+    expect(submitRerun).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("operation-rerun-done")).toBeNull();
+  });
+
   it("blocks invalid nested options and confirms only the latest structured edit", async () => {
     const node = modelNode();
     node.editableSchema = [{kind: "json", key: "model_options", label: "Options", required: true,
@@ -166,8 +238,9 @@ describe("OperationSection (editable)", () => {
     ];
     renderWithRerun(node);
 
-    expect(screen.getByTestId("operation-x-hint")).toHaveTextContent(
-      "Uncheck a regressor to remove it from the next rerun",
+    expect(screen.getByTestId("operation-control-x")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Uncheck a regressor to drop it"),
     );
   });
 
@@ -184,12 +257,9 @@ describe("OperationSection (editable)", () => {
 
   it("previews a manual patch before submitting rerun", async () => {
     const { submitRerun } = renderWithRerun(modelNode());
-    expect(screen.getByTestId("operation-rerun-label")).toHaveTextContent(
-      "Rerun source with changes",
-    );
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
-    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent("covariance");
+    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent(/covariance/i);
     expect(submitRerun).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     await waitFor(() => expect(submitRerun).toHaveBeenCalledTimes(1));
@@ -207,7 +277,8 @@ describe("OperationSection (editable)", () => {
         ],
       }),
     });
-    await screen.findByTestId("operation-rerun-done");
+    await screen.findByTestId("operation-rerun-submitted");
+    expect(screen.queryByTestId("operation-rerun-done")).toBeNull();
   });
 
   it("resets edited values and submit state when context identity changes", async () => {
@@ -266,7 +337,7 @@ describe("OperationSection (editable)", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
-    await screen.findByTestId("operation-rerun-done");
+    await screen.findByTestId("operation-rerun-submitted");
 
     resolvedContextMock.current = { ok: true, context: secondContext };
     rerender(

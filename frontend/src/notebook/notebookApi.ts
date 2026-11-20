@@ -12,6 +12,7 @@ export type NotebookTraceResponse = Schema<"NotebookTrace">;
 export type NotebookCreateInput = RequestOf<"/notebooks", "post">;
 export type NotebookProjectionDataset = Schema<"DatasetProjectionSource">;
 export type NotebookMaterializationResponse = Schema<"Materialized">;
+export type NotebookNote = Schema<"NotebookNoteView">;
 
 export interface NotebookPlanningRequest {
   attemptId: string;
@@ -87,6 +88,19 @@ export function getNotebook(
     projectRoot,
     `/notebooks/${encodeURIComponent(notebookId)}`,
   );
+}
+
+export function listNotebookNotes(projectRoot: string, notebookId: string): Promise<NotebookNote[]> {
+  return readNotebookResponse(projectRoot, `/notebooks/${encodeURIComponent(notebookId)}/notes`);
+}
+
+export function saveNotebookNote(
+  projectRoot: string, notebookId: string,
+  input: RequestOf<"/notebooks/{notebook_id}/notes", "post">,
+): Promise<NotebookNote> {
+  return readNotebookResponse(projectRoot, `/notebooks/${encodeURIComponent(notebookId)}/notes`, {
+    method: "POST", headers: jsonHeaders, body: JSON.stringify(input),
+  });
 }
 
 export function updateNotebookFocus(

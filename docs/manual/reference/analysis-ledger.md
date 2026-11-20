@@ -9,6 +9,7 @@ Every executed step is recorded in `workbench/analysis_ledger.jsonl` under one c
 | Operation | Category |
 |---|---|
 | `code.execute` | `data_change` |
+| `external.query` | `export` |
 | `graph.fork` | `descriptive` |
 | `iv.gmm` | `model` |
 | `matching.att` | `model` |
@@ -21,7 +22,15 @@ Every executed step is recorded in `workbench/analysis_ledger.jsonl` under one c
 | `model.quadratic_stationary_point` | `inferential` |
 | `model.white_test` | `inferential` |
 | `multivariate.cronbach_alpha` | `descriptive` |
+| `network.centrality` | `descriptive` |
 | `nonparametric.robust_summary` | `descriptive` |
+| `notebook.note.save` | `metadata_change` |
+| `quant.min_variance` | `descriptive` |
+| `quant.min_variance_walk_forward` | `descriptive` |
+| `quant.replay` | `descriptive` |
+| `quant.replay_fee_comparison` | `descriptive` |
+| `quant.replay_tail_risk` | `descriptive` |
+| `quant.rolling_risk` | `descriptive` |
 | `roc.calibration` | `descriptive` |
 | `roc.curve` | `descriptive` |
 | `run.delete` | `deletion` |
@@ -35,10 +44,35 @@ Every executed step is recorded in `workbench/analysis_ledger.jsonl` under one c
 | `synthetic_control.fit` | `model` |
 | `time_series.acf` | `descriptive` |
 | `time_series.arima` | `model` |
+| `time_series.arima_residual_check` | `model` |
+| `time_series.correlogram` | `descriptive` |
+| `time_series.ets_trend` | `model` |
+| `time_series.ets_trend_estimate` | `model` |
+| `time_series.figarch_fixed` | `model` |
+| `time_series.holt_winters_additive` | `model` |
+| `time_series.holt_winters_fit_alpha` | `model` |
+| `time_series.holt_winters_fit_joint` | `model` |
 | `time_series.irf` | `model` |
+| `time_series.johansen_rank` | `descriptive` |
+| `time_series.local_level` | `model` |
+| `time_series.local_level_fit` | `model` |
+| `time_series.markov_switching` | `model` |
+| `time_series.native_arfima` | `model` |
+| `time_series.native_arima` | `model` |
+| `time_series.native_arimax` | `model` |
+| `time_series.native_egarch` | `model` |
+| `time_series.native_igarch` | `model` |
+| `time_series.native_sarima` | `model` |
+| `time_series.native_sarimax` | `model` |
+| `time_series.native_var` | `model` |
+| `time_series.native_vecm` | `model` |
+| `time_series.native_volatility` | `model` |
 | `time_series.pacf` | `descriptive` |
+| `time_series.stationarity_statistic` | `descriptive` |
 | `time_series.var` | `model` |
+| `time_series.varma11_fixed_ma` | `model` |
 | `time_series.vecm` | `model` |
+| `treatment_effects.estimate` | `model` |
 
 ## By prefix (first match wins)
 

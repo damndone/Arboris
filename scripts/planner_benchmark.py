@@ -29,6 +29,7 @@ from workbench.agent.planner_evaluation import (
     live_capability_inventory,
     score_case,
 )
+from workbench.jsonl_store import jsonl_lines
 
 
 ORDINARY_THRESHOLD = 0.95
@@ -287,7 +288,7 @@ def _read_records(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(jsonl_lines(path.read_text(encoding="utf-8")), start=1):
         if not line.strip():
             continue
         try:

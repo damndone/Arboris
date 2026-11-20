@@ -61,6 +61,15 @@ def test_statistical_adapter_rejects_malformed_paired_columns() -> None:
         )
 
 
+def test_one_pair_written_flat_is_read_as_that_pair() -> None:
+    from workbench.agent.workflow_capability_registry import workflow_capability_registry
+
+    operation = workflow_capability_registry().require("test.evidence")
+    request = operation.validate({"operation_id": operation.operation_id, "input_mode": "frame",
+                                  "column_bindings": {"columns": ["x", "y"]}, "options": {"paired_columns": ["x", "y"]}})
+    assert request["options"]["paired_columns"] == [["x", "y"]]
+
+
 def test_prediction_adapter_uses_oos_protocol_and_declares_noncausal_output() -> None:
     from workbench.agent.workflow_capability_registry import workflow_capability_registry
 
@@ -276,3 +285,12 @@ def test_real_resampling_preserves_positional_target_alignment(method: str) -> N
     np.testing.assert_array_equal(output["y"].to_numpy(), expected_y.to_numpy())
     expected_count = 8 if method == "undersample" else 24
     assert output["y"].value_counts().to_dict() == {0: expected_count, 1: expected_count}
+
+
+def test_group_tests_send_paired_columns_to_the_paired_test() -> None:
+    from workbench.agent.workflow_capability_registry import workflow_capability_registry
+
+    operation = workflow_capability_registry().require("test.t_tests")
+    with pytest.raises(ValueError, match="Use operation_id test.evidence"):
+        operation.validate({"operation_id": operation.operation_id, "input_mode": "frame",
+                            "column_bindings": {"columns": ["x", "y"]}, "options": {"paired_columns": [["x", "y"]]}})

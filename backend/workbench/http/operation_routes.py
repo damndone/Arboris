@@ -67,7 +67,7 @@ class ManualOperationRequest(BaseModel):
 _DEDICATED = (
     ("model.custom", "notebook_routes", "/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute", None,
      ("notebook_option", "admitted_capability_binding", "trusted_execution_gateway"), "notebook"),
-    ("graph.fork", "agent_routes", "/agent/fork-proposals", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", ("graph_node",), "agent"),
+    ("graph.fork", "agent_fork_routes", "/agent/fork-proposals", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", ("graph_node",), "agent"),
     ("operation.multi_step", "operation_routes", "/operations/run", "/operations/run", ("dataset_or_model_or_upload",), "analyze"),
     ("data.column.cast", "data_operation_routes", "/data-operations/column-cast/preview", "/data-operations/column-cast/confirm", ("dataset_node",), "graph"),
     ("data.columns.cast", "data_operation_routes", "/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm", ("dataset_node",), "graph"),

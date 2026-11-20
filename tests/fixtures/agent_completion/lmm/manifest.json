@@ -1,0 +1,36 @@
+{
+  "independent_producers": [
+    "R lme4",
+    "Stata mixed"
+  ],
+  "tolerance": {
+    "atol": 2e-06,
+    "rtol": 2e-06
+  },
+  "repository_files": {
+    "tests/fixtures/admission/linear_mixed_effects/data.csv": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "tests/fixtures/agent_completion/lmm/generate_residuals.R": "bc8a4051f2cf04b78d7b4837a49d1a1af6c10ff00ecb0e8cf31de359c5773791",
+    "tests/fixtures/agent_completion/lmm/generate_residuals.do": "c8c082de188bce776ee7e528abb58dd8402eefd1e60403629946a001dbe60350",
+    "tests/fixtures/agent_completion/lmm/stata_environment.json": "74ed6fc482731f7394405eb254708b75de3a2d8aba68eaf5184336b9cd1fb320",
+    "tests/fixtures/agent_completion/lmm/unbalanced_missing.csv": "f5d89975cd3f06f12d67de89e056ae4b05d0ed4e96800ef582a0b047402ba721",
+    "tests/fixtures/postestimation/lmm_v1811/random_slope.csv": "8daaa586b83bf865b08f59e5af9fa2a29dc2d0b6069069cd98e10f9fedea91d3",
+    "tests/fixtures/agent_completion/lmm/residuals_r.json.gz": "012f71f2117b4a5aae8122bdbabae3b2a7053476eb8395db728dd7e0a80bb5e2",
+    "tests/fixtures/agent_completion/lmm/residuals_stata.csv.gz": "05f9e1b3acc31cd342c15db9417b1ce9e3d7442409d1d5cd023e5640cc00b03b"
+  },
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/lmm/generate_residuals.R",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/lmm/generate_residuals.do REPO_ROOT (cwd: scratch directory)"
+  ],
+  "sampling": "All rows in original order; unbalanced_missing removes original 1-based rows 2,8,20,102 and sets x on retained row 4 missing. Native complete-case samples; no precomputed model input.",
+  "stata_help": {
+    "path": "/Applications/Stata/ado/base/m/mixed_postestimation.sthlp",
+    "sha256": "d5650ab5259eababc2c27163bc9878f871dd892e1c928166c210a34ed6ebc1be"
+  },
+  "limits": [
+    "Row-level predictions/residual descriptions only; not model validity, a provider evaluation, held-out run, browser acceptance or full gate."
+  ],
+  "decoded_sha256": {
+    "tests/fixtures/agent_completion/lmm/residuals_r.json.gz": "91ee0583cdcf0adacda96d7e1a7ea70e04b2f4b72df3a79bd2ee78b05b2b506d",
+    "tests/fixtures/agent_completion/lmm/residuals_stata.csv.gz": "5745ad08bb631e7d418e48a2bba7e8154e37c678cf251a990f70e3a02ad6061f"
+  }
+}

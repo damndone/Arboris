@@ -53,6 +53,51 @@ function mount(context: AgentSurfaceContextValue) {
 }
 
 describe("AgentComposer", () => {
+  it.each([
+    ["tool_execution_start", "Working"],
+    ["tool_execution_end", "Working"],
+    ["message_progress", "Working"],
+  ])("keeps compact %s activity distinct", (lastEventType, expected) => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(expected);
+  });
+
+  it("names unfinished parallel tools in the compact activity after another receipt arrives", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "tool_execution_end",
+      activeToolCalls: [
+        { session_id: "saved", command_id: "command", tool_call_id: "schema", tool_id: "inspect_data_schema" },
+        { session_id: "saved", command_id: "command", tool_call_id: "result", tool_id: "inspect_result_summary" },
+      ],
+    })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    const activity = screen.getByRole("button", { name: "View Agent activity" });
+    expect(activity).toHaveTextContent("Reading data schema");
+    expect(activity).toHaveTextContent("Reading data schema");
+    expect(activity).toHaveTextContent("Reading the result summary");
+  });
+
+  it("keeps the full long tool activity accessible when the compact row is truncated", () => {
+    const toolId = `inspect_${"longlabel".repeat(16)}`;
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "tool_execution_start",
+      activeToolCalls: [{ session_id: "saved", command_id: "command", tool_call_id: "long", tool_id: toolId }],
+    })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveAttribute("title", expect.stringContaining(toolId.replace("inspect_", "").replace(/_/g, " ")));
+  });
+
+  it("does not invent elapsed time for externally started compact activity", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("time unavailable");
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("Waiting for the model");
+    expect(screen.getByRole("button", { name: "View Agent activity" })).not.toHaveTextContent("0s");
+  });
+
   it("does not render an idle-only session label", () => {
     mount(value({ sessionStatus: "idle" }));
 
@@ -110,8 +155,7 @@ describe("AgentComposer", () => {
 
     const activity = screen.getByRole("button", { name: "View Agent activity" });
     expect(activity).toHaveTextContent(/working/i);
-    expect(activity).toHaveTextContent(/checking evidence/i);
-    expect(screen.getByTestId("agent-compact-composer")).not.toContainElement(activity);
+        expect(screen.getByTestId("agent-compact-composer")).not.toContainElement(activity);
 
     fireEvent.click(activity);
 
@@ -152,6 +196,12 @@ describe("AgentComposer", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(/processed/i);
     });
+    rendered.rerender(
+      <AgentSurfaceContext.Provider value={value({ sessionStatus: "running" })}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("time unavailable");
     expect(onExpand).not.toHaveBeenCalled();
   });
 
@@ -288,9 +338,7 @@ describe("AgentComposer", () => {
 
     fireEvent.mouseEnter(ring);
     const tooltip = screen.getByTestId("agent-context-tooltip");
-    expect(tooltip).toHaveTextContent("2,048"); // used
-    expect(tooltip).toHaveTextContent("29,952"); // remaining
-    expect(tooltip).toHaveTextContent("32,000"); // total
+    expect(tooltip).toHaveTextContent("2K / 32K");
 
     fireEvent.mouseLeave(ring);
     expect(screen.queryByTestId("agent-context-tooltip")).not.toBeInTheDocument();

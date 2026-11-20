@@ -240,6 +240,27 @@ class PinnedRunDirectory:
 
         return self._read_regular_snapshot(_LMM_TERMINAL_PACKET_PARTS, 1024 * 1024)
 
+    def lmm_source_record(self, *, artifact_id=None, sha256=None):
+        """Resolve import metadata, including the legacy pre-index fit state."""
+        records = _read_lmm_index(self)['artifacts']
+        matches = [r for r in records if r['artifact_type'] in {'raw_data', 'processed_data', 'derived_data'}
+                   and (r['artifact_id'] == artifact_id if artifact_id is not None else r['sha256'] == sha256)]
+        return matches[0] if len(matches) == 1 else None
+
+    def read_lmm_analysis_source(self, *, artifact_id=None, sha256=None):
+        """Read one registered data source through the pinned FD, never a raw path."""
+        record = self.lmm_source_record(artifact_id=artifact_id, sha256=sha256)
+        if record is None:
+            return None
+        raw = self._read_regular_snapshot(tuple(record['path'].split('/')), 256 * 1024 * 1024)
+        if hashlib.sha256(raw).hexdigest() != record['sha256']:
+            _raise('LMM_ANALYSIS_SOURCE_CHANGED')
+        return record, raw
+
+    def read_lmm_analysis_evidence(self) -> bytes:
+        return self._read_regular_snapshot(
+            ('artifacts', 'diagnostics', 'linear_mixed_effects_1.analysis_evidence.json'), 64 * 1024 * 1024)
+
     def read_execution_seal(self) -> bytes:
         """Return the one immutable byte snapshot for the fixed execution seal."""
 
@@ -1247,6 +1268,27 @@ class _LmmPinnedPersistenceFacade:
             terminal=False,
         )
 
+    def persist_analysis_evidence(self, *, admission, packet, terminal):
+        self._require(admission)
+        terminal_record = self._receipt_record(terminal)
+        bound = PacketEnvelope.from_dict(packet).to_dict()
+        bound['payload']['terminal_sha256'] = terminal_record['sha256']
+        inputs = [terminal_record['artifact_id']]
+        source = bound['payload']['source']
+        if source is not None:
+            # Recheck the import registration, not a second source decode.
+            # The producer binds the live frame fingerprint separately.
+            current = admission._pinned.lmm_source_record(artifact_id=source['artifact_id'])
+            if current is None or current['sha256'] != source['sha256']:
+                _raise('LMM_ANALYSIS_SOURCE_CHANGED')
+            inputs.append(source['artifact_id'])
+        return self._persist(admission=admission, packet=bound,
+            contract='linear_mixed_effects.analysis_evidence',
+            artifact_id='linear_mixed_effects_1.analysis_evidence',
+            path='artifacts/diagnostics/linear_mixed_effects_1.analysis_evidence.json',
+            artifact_type='lmm_analysis_evidence', directory_parts=('artifacts', 'diagnostics'),
+            final_part='linear_mixed_effects_1.analysis_evidence.json', inputs=tuple(inputs), terminal=False)
+
     def persist_recovery(self, *, admission: _LmmExecutionAdmission, packet: Mapping[str, object], terminal: PinnedArtifactReceipt) -> PinnedArtifactReceipt:
         self._require(admission)
         terminal_record = self._receipt_record(terminal)
@@ -1287,6 +1329,12 @@ def _persist_lmm_diagnostic_packet(*, admission: object, packet: Mapping[str, ob
     if not isinstance(admission, _LmmExecutionAdmission) or admission._facade is None:
         _raise("LMM_EXECUTION_BINDING_REQUIRED")
     return admission._facade.persist_diagnostic(admission=admission, packet=packet, terminal=terminal)
+
+
+def _persist_lmm_analysis_evidence(*, admission, packet, terminal):
+    if not isinstance(admission, _LmmExecutionAdmission) or admission._facade is None:
+        _raise('LMM_EXECUTION_BINDING_REQUIRED')
+    return admission._facade.persist_analysis_evidence(admission=admission, packet=packet, terminal=terminal)
 
 
 def _persist_lmm_input_blocked_diagnostic(*, admission: object, packet: Mapping[str, object]) -> PinnedArtifactReceipt:

@@ -524,6 +524,7 @@
 
 /* A saved result, read as a document. */
 .op-result {
+  container: operation-result / inline-size;
   margin-top: var(--space-2);
   padding: var(--space-3);
   border-radius: var(--radius-md);
@@ -570,6 +571,16 @@
 .op-result__fields > div[data-block] > dd {
   padding-left: var(--space-3);
   border-left: 2px solid var(--separator-faint);
+}
+
+@container operation-result (max-width: 260px) {
+  .op-result__fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .op-result__fields dt { overflow-wrap: anywhere; }
+  .op-result__fields dd { margin-bottom: var(--space-2); }
 }
 
 .op-result [data-numeric] {
@@ -624,6 +635,13 @@
 
 .op-result__raw summary {
   cursor: pointer;
+}
+
+.op-result__details {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .op-result__raw pre {

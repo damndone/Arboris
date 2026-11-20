@@ -18,6 +18,8 @@ from workbench.agent.notebook.planning_agent import (
     NotebookPlanningContractError,
     NotebookPlanningTimeout,
     NotebookPlanningUnavailable,
+)
+from workbench.agent.planning.normalize import (
     _canonicalize_provider_option_batch,
     _parse_submissions,
     _submission,
@@ -805,6 +807,57 @@ def test_pure_p7_workflow_needs_no_synthetic_model_root(tmp_path: Path) -> None:
         match="user-visible option text contains internal protocol vocabulary",
     ):
         agent._assert_user_visible_domain_language(leaked_schema_field)
+
+
+@pytest.mark.parametrize("workflow_available", [True, False])
+def test_planning_packet_references_only_exact_duplicate_step_contracts(
+    tmp_path: Path, workflow_available: bool
+) -> None:
+    from workbench.agent.planning.factory import _notebook_p7_capability_catalog
+
+    source = ProjectionSource(
+        kind="dataset",
+        upload_sha256="a" * 64,
+        filename="survey.csv",
+        workflow_source=WorkflowSource(
+            run_id="run_source",
+            node_ref="stage:raw",
+            artifact_id="raw_survey.csv",
+            source_sha256="b" * 64,
+        ) if workflow_available else None,
+    )
+    context = _context(make_project(tmp_path), projection_source=source.to_dict())
+    catalog = _notebook_p7_capability_catalog()
+    different = "synthetic_control.fit"
+    catalog[different]["workflow_step_contract"]["ui_description"] = "A distinct description."
+    catalog["custom.no_step"] = {"workflow_step_contract": {"description": "Catalog only."}}
+    catalog["custom.no_contract"] = {"label": "Without a step contract"}
+    original = json.loads(json.dumps(catalog))
+    planner = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+    phase = planner.create_phase(context=context, initial_evidence=_evidence())
+    request = phase.request([])
+    packet = json.loads(request.messages[1]["content"])
+    projected = packet["capability_catalog"]
+    assert phase.checkpoint()["catalog"] == catalog
+    assert json.loads(json.dumps(catalog)) == original
+
+    if not workflow_available:
+        assert "operation.multi_step" not in packet["context"]["typed_operation_contracts"]
+        assert projected == original
+        return
+
+    keep_full = {different, "custom.no_step", "custom.no_contract"}
+    assert {name for name, item in projected.items() if "workflow_step_contract_ref" not in item} == keep_full
+    for operation_id, entry in original.items():
+        wire_entry = dict(projected[operation_id])
+        if operation_id not in keep_full:
+            assert "workflow_step_contract" not in wire_entry
+            pointer = wire_entry.pop("workflow_step_contract_ref")
+            resolved = packet
+            for component in pointer.split("/")[1:]:
+                resolved = resolved[component.replace("~1", "/").replace("~0", "~")]
+            wire_entry["workflow_step_contract"] = resolved
+        assert wire_entry == entry
 
 
 def test_ordinary_user_goal_reaches_a_typed_p7_plan_without_protocol_language(
@@ -4234,6 +4287,37 @@ def test_text_only_completion_gets_bounded_typed_tool_correction(
 
     assert len(result.option_drafts) == 1
     assert "must call exactly one" in adapter.requests[1].messages[-1]["content"]
+
+
+@pytest.mark.parametrize("malformed_json", [False, True])
+def test_quoted_option_array_gets_a_type_specific_correction(tmp_path: Path, malformed_json: bool) -> None:
+    valid = _submit_call()
+    quoted = json.dumps(valid["options"])
+    if malformed_json:
+        quoted = quoted.replace('"rank": 1,', '"rank": 1', 1)
+    adapter = ScriptedAdapter([
+        {
+            "tool_call_id": "quoted",
+            "tool_id": "submit_notebook_option_batch",
+            "arguments": {"options": quoted},
+        },
+        {
+            "tool_call_id": "array",
+            "tool_id": "submit_notebook_option_batch",
+            "arguments": valid,
+        },
+    ])
+    result = NotebookPlanningAgent(
+        adapter=adapter, capability_catalog={"time_series.ets": {}},
+    ).plan(context=_context(make_project(tmp_path)), initial_evidence=_evidence())
+
+    assert len(adapter.requests) == 2
+    assert result.option_drafts[0].option_id == "opt_ets"
+    messages = adapter.requests[1].messages
+    rejection = json.loads(messages[-2]["content"])
+    assert rejection["status"] == "rejected"
+    assert rejection["message"] == "options must be a JSON array"
+    assert "Start the options value with [" in messages[-1]["content"]
 
 
 def test_unregistered_capability_is_rejected(tmp_path: Path) -> None:

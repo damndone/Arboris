@@ -58,8 +58,5 @@ test("browser entrypoint honors direct /runs/:runId URLs", async () => {
   await waitFor(() => {
     expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  expect(screen.getByRole("tab", { name: "Workbench" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  expect(document.querySelector(".workbench-shell--workspace")).not.toBeNull();
 });

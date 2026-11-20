@@ -4,5 +4,11 @@
       "max_bytes": 1048576,
       "reason": "Generated frontend API types (scripts/generate_api_types.py), not evidence. Grows with the number of declared operations; tests/test_api_types_drift.py keeps it identical to the backend. Approved by the user 2026-10-08 with a 1 MiB cap."
     }
+  },
+  "versions": {
+    "v1.9.0": {
+      "net_growth_bytes": 8388608,
+      "reason": "v1.9.1 (baseline v1.9.0): 6.04 MiB net on 2026-11-03 after merging the native-math and agent-pipeline speedup branches. Largest additions are the devline event stream (formal FMS record, not editable) and the candidate-round, performance and refusal-audit evaluation documents; compressed in git the whole version's new history is about 11 MiB. Approved by the user 2026-11-02 at 6 MiB and raised by the user 2026-11-03 to 7 MiB. At closeout, the user raised the v1.9.1 cap to 7.25 MiB. On 2026-11-09, after the pre-release risk fixes (new tests and devline records) put net growth at 7.36 MiB, the user chose to raise the cap rather than compress files; 8 MiB leaves room for the remaining closeout records (formal evaluation, browser scenarios, retrospective). These approvals apply to this version only; the default 5 MiB applies again from the v1.9.1 baseline."
+    }
   }
 }

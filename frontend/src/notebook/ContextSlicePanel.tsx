@@ -20,9 +20,10 @@ function shortHash(value: string): string {
 
 export interface ContextSlicePanelProps {
   slice: NotebookContextSlice;
+  resultBlind?: boolean;
 }
 
-export function ContextSlicePanel({ slice }: ContextSlicePanelProps) {
+export function ContextSlicePanel({ slice, resultBlind = false }: ContextSlicePanelProps) {
   const budget = slice.budget_report;
   const budgetUnit = budget.unit ?? "bytes";
   const omittedCount = slice.omissions.reduce(
@@ -44,11 +45,12 @@ export function ContextSlicePanel({ slice }: ContextSlicePanelProps) {
 
         <div className="nb-context-details-body">
           <header className="nb-context-header">
-            <span className="nb-label">What the agent saw</span>
+            <span className="nb-label">{resultBlind ? "Compiled source context" : "What the agent saw"}</span>
             <span data-testid="context-slice-identity">
               {`${slice.context_id} · ${slice.context_profile}`}
             </span>
           </header>
+          {resultBlind ? <p>New comparisons receive a separate projection that withholds fitted results, post-fit diagnostics, paired sample values and unclassified memory lessons. These source counts describe the evidence before that projection; historical options keep their original trace.</p> : null}
 
           <div className="nb-context-hashes">
             <div data-testid="context-slice-generation-hash">

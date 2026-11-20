@@ -86,6 +86,31 @@ once can fail the third time.
 next against budgets (ingest and OLS 90 s, next page of the Data view 1 s,
 summarize detail 5 s, export 30 s, ...). It exits non-zero on a miss.
 
+### Local benchmark artifacts
+
+A benchmark campaign uses one `active` project at a time. Use
+`perf_evidence.create_active_project` for new performance drivers, save complete
+worker logs with `retain_worker_logs`, and call `finalize_active` before starting
+the next observation. The `perf-project-retention-owner` lint rule catches direct
+project creation in performance scripts and points to these helpers. The
+retention code verifies file identities and records sample results, including
+failures. It keeps one verified representative per case and version in that
+campaign and records its size. An existing `active` directory is an interrupted
+sample to inspect and preserve before restarting.
+
+Keep raw samples, manifests and failure detail under the ignored output directory.
+Use summaries and an index in Git. New output directories start independent
+campaigns and each has its own retained evidence. The drivers check available
+space before starting, with formal development evaluation requiring 25 GiB.
+For older output, inspect file identities and verify SHA-256 before compacting
+evidence. APFS can count the same blocks once per filename in directory totals.
+Use volume free bytes to check what the maintenance actually reclaimed. Keep
+canonical inputs and any active run outside maintenance scope.
+
+The storage check uses filesystem capacity. The resource comparison measures
+the worker's peak memory footprint. Retain every recorded observation and the
+original limits for their separate acceptance checks.
+
 ## The development line
 
 Each version has one development line, controlled only through

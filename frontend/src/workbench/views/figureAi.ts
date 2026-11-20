@@ -35,6 +35,8 @@ export async function askAiAboutFigure(
   question: string,
   /** G2 step 2: only set after the user explicitly opted into sending the PNG. */
   imageDataUrl?: string,
+  /** The project whose data-sharing policy governs the send. */
+  projectRoot?: string | null,
 ): Promise<FigureAiAnswer> {
   const response = await fetch(apiUrl("/llm/chat"), {
     method: "POST",
@@ -45,6 +47,7 @@ export async function askAiAboutFigure(
       packet: context,
       response_guardrails: context.response_guardrails,
       ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}),
+      ...(projectRoot ? { project_root: projectRoot } : {}),
     } satisfies RequestOf<"/llm/chat", "post">),
   });
   if (!response.ok) {

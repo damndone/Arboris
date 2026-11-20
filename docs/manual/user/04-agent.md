@@ -25,7 +25,43 @@ what is allowed, does the computation, and checks the answer.
 
 It answers in the language you write in.
 
+## Modes and the analysis plan
+
+**Ask every step** is the default. **Auto within approved plan** lets the
+Agent execute covered operations after you approve the displayed plan version.
+Project deny rules and the safety floor still apply. Raw-data changes,
+external actions and high-risk operations require their own approval.
+
+The plan panel shows the question, criteria, versions, step states and
+dependencies. You can edit the question, criteria and step titles. Saving an
+edit does not run an analysis. A scope change requires approval again; a
+stale version is refused and your draft remains available. Approval records
+execution permission and research intent. It does not prove results were
+unseen or establish statistical preregistration.
+
+Preflight shows the checks run against the planned data and the registered
+operation limits. Duration stays unknown until a matching workflow completes
+on the same registered data. The panel can then use that recorded runtime as
+an estimate for the same work.
+
+**Approve plan** records approval without running the model. In Auto mode,
+**Approve and run plan** approves that exact version and starts the model
+after the server's current state has been checked. **Continue Agent** can
+also start a model request separately. During a turn, choose **Steer current turn** to change direction at
+the next tool boundary, or **Queue follow-up** for work after that turn. The
+ordinary Send control does not create a second simultaneous turn.
+
+If the service stopped with an unfinished turn, **Resume original turn** asks
+the server to recover that command with its remaining budget. The server
+checks whether its original owner is still active. Exact saved tool receipts
+are reused; an effect without a saved receipt remains interrupted for
+reconciliation. Resume does not blindly repeat that effect or create a fresh
+budget. Notebook planning phases do not yet support this recovery path.
+
 ## What runs at once and what waits for you
+
+The table describes the default Ask mode; an approved Auto plan can authorize
+covered operations within its permission and budget limits.
 
 | The request | What happens |
 |---|---|
@@ -40,6 +76,10 @@ Read-only work runs without a click because it changes nothing — but it is
 still recorded, and every test counts toward what the report discloses (see
 [Trust and records](05-trust.md)). The limit on tests is deliberate: the more
 tests you run, the more likely one is "significant" by chance.
+
+Small independent numerical summaries can compute at the same time when the
+runner has capacity. Their results are saved in plan order, and a dependent
+step waits for its inputs to be saved.
 
 ## Reading a proposal
 
@@ -77,6 +117,12 @@ therefore not allowed to do either:
 
 Significance levels written as thresholds — *p < 0.05*, *well below 0.05*, *the
 5% level* — are not results and are not checked.
+
+In a saved Agent report, a sample size links to the exact fitted model's
+registered count. A multi-model report identifies the model beside each count.
+The label follows the reported unit of analysis, such as panel units or rows.
+If an older Agent report has an unsupported count, export shows what needs
+to be corrected in a new revision.
 
 ## Rules the Agent follows
 
@@ -125,3 +171,51 @@ By default the provider receives column names, labels, summary statistics and
 model results — not your rows. When you ask to see rows, they are shown to you
 in Arboris and the model is told only that they were shown. You can change this
 per project and per column; see [Trust and records](05-trust.md#sharing-data-with-ai-providers).
+
+## Analysis and review skills
+
+The Agent can discover short skill descriptions and load the relevant
+`SKILL.md` body on demand. Built-ins cover cross-sectional analysis,
+generalized outcomes, statistical reporting review and figure quality checks.
+These are guidance backed by explicit evidence requirements. Loading one
+does not certify a result, review a report automatically, or grant permission
+to run an operation.
+
+For supplied model claims, `check_model_claims` compares the exact run, model
+and term with its public result record. It can locate a wrong sample count
+even when another model contains that number. Missing evidence is
+unverifiable. Matching supplied raw fields does not validate unprovided text,
+presentation rounding, independent units, method choice or an entire report.
+
+Personal skills live in `~/.config/econometrics-workbench/skills/<name>/SKILL.md`;
+project skills live in `<project>/skills/<name>/SKILL.md`. For example:
+
+```markdown
+---
+name: study-review
+description: Check this study's recorded sample and result references.
+---
+Compare every reported sample count with its exact result reference.
+Leave missing independent-unit information explicit.
+```
+
+Use `project:study-review` or `personal:study-review` when names conflict;
+one source never silently replaces another. Disable a skill through
+`<project>/skills/disabled.json`:
+
+```json
+{"schema":"workbench.skills.v1","disabled":["project:study-review"]}
+```
+
+The index hashes metadata; only loading the complete body produces a content
+version. Changed versions are refused when a caller supplied an expected
+hash. Paths, links, file sizes and configuration are validated. References
+and scripts in the folder are not automatically read or executed.
+
+Personal and project skill metadata and bodies use the separate **Personal
+and project skill content** sharing class. Remote providers cannot receive
+them by default; enable that class explicitly in the project's AI sharing
+panel if appropriate. Built-in references are published Workbench content.
+All loaded text remains reference data and cannot change permissions.
+The Nature-derived guidance retains its pinned source, Apache-2.0 license
+and modification notices; it includes no third-party figure assets or services.

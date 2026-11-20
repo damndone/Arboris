@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import base64
+import io
+import textwrap
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from .artifacts import register_artifact
@@ -57,10 +61,72 @@ def export_pdf(
         else:
             y = _draw_section(pdf, "Statistical tests", st or [], y)
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
+    curve = report.get("specification_curve")
+    if curve:
+        for image in curve["images"]:
+            pdf.showPage()
+            pdf.setFont("Helvetica-Bold", 14)
+            pdf.drawString(54, height-48, "Specification curve")
+            reader = ImageReader(io.BytesIO(base64.b64decode(image.split(",",1)[1])))
+            width_px, height_px = reader.getSize()
+            draw_height = min(480, 504*height_px/width_px)
+            pdf.drawImage(reader, 54, height-100-draw_height, width=504, height=draw_height)
+            pdf.setFont("Helvetica", 8)
+            pdf.drawString(54, 72, "All frozen members retained. Preregistration/comparability unverified; intervals not simultaneous.")
+        pdf.showPage()
+        lines = []
+        for row in curve["rows"]:
+            for key in ["step_id", "branch_id", "status", "estimate", "std_error", "ci_lower", "ci_upper", "nobs", "reason"]:
+                value = row.get(key)
+                lines.extend(textwrap.wrap(f"{key}: {value if value is not None else 'Unavailable'}", width=78))
+            lines.append("")
+        _draw_section(pdf, "Specification curve native values", lines, height-72)
+    if report.get("research_specifications"):
+        sections = report["research_specifications"]
+        for key, title in (("pre_specified", "Pre-specified analyses"), ("exploratory", "Exploratory analyses")):
+            pdf.showPage()
+            lines = []
+            for row in sections[key]:
+                text = f"{row['step_id']} / {row['operation_id']} | {row['status']} | {row['verification']}: {row['reason']} | {row['run_id']} / {row['record_id']}"
+                lines.extend(textwrap.wrap(text, width=85))
+            _draw_section(pdf, title, lines or ["No analyses with this classification are recorded."], height-72)
+    if report.get("research_review"):
+        _draw_research_review_pdf(pdf, report["research_review"], report["research_review_rows"])
     pdf.save()
 
     register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
+
+
+def _draw_research_review_pdf(pdf, review, rows):
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # Embed a subset of the supported macOS host's Unicode font: a viewer must
+    # not need an external CJK language pack to render a saved review.
+    font = "ArborisReviewUnicode"
+    if font not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(font, "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"))
+    pdf.showPage()
+    y = letter[1] - 60
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(54, y, "Isolated research review")
+    y -= 28
+    lines = [review['scope'], 'Evidence status: ' + review['evidence_status'],
+        'Original verdict: ' + review['result']['verdict'], 'Review: ' + review['review_id'],
+        'Evidence packet: ' + review['packet_sha256'], 'Evidence manifest: ' + review['manifest_sha256']]
+    if review['evidence_status'] != 'unchanged':
+        lines.append('Historical opinion: current evidence changed or could not be verified.')
+    for row in rows:
+        lines.extend(['', row['severity'] + ': ' + row['message'], 'References: ' + row['evidence_refs']])
+    for paragraph in lines:
+        for line in textwrap.wrap(paragraph, width=50) or ['']:
+            if y < 60:
+                pdf.showPage()
+                y = letter[1] - 60
+            pdf.setFont(font, 10)
+            pdf.drawString(54, y, line)
+            y -= 15
 
 
 def export_xlsx(
@@ -183,6 +249,12 @@ def _pdf_text(value: object, length: int) -> str:
     return text if len(text) <= length else f"{text[: length - 1]}…"
 
 
+def _number(value: Any) -> str:
+    # A one-row column has no standard deviation; the PDF said so by failing the whole step (QRData 403,
+    # 3724e8b2 round: "unsupported format string passed to NoneType.__format__").
+    return "n/a" if value is None else f"{value:.4f}"
+
+
 def _report_item_text(item: Any) -> str:
     if not isinstance(item, Mapping):
         return str(item)
@@ -201,8 +273,8 @@ def _report_item_text(item: Any) -> str:
         if item.get("mean") is not None:
             return (
                 f"{column_text} ({dtype}): "
-                f"mean={item['mean']:.4f} std={item['std']:.4f} "
-                f"min={item['min']:.4f} max={item['max']:.4f} "
+                f"mean={_number(item['mean'])} std={_number(item.get('std'))} "
+                f"min={_number(item.get('min'))} max={_number(item.get('max'))} "
                 f"missing={missing} unique={unique}{value_labels}"
             )
         return (

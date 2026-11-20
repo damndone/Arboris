@@ -2,7 +2,7 @@
 import pytest
 from workbench import analysis_ledger
 from workbench.agent.operations import OperationRecord
-from workbench.agent.orchestrator import _record_operation_in_ledger
+from workbench.agent.orchestration_audit import _record_operation_in_ledger
 from workbench.projects import create_project
 
 

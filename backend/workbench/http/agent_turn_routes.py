@@ -1,0 +1,443 @@
+"""agent turn routes: extracted HTTP responsibility."""
+from __future__ import annotations
+import asyncio
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import quote
+from fastapi import Query, Request
+from ..agent.context_tools import NodeOperationContextProvider
+from ..agent.compaction import CompactionPolicy
+from ..agent.core import AgentCore
+from ..agent.plan_control import PlanControl, PlanControlError
+from .agent_plan_requests import AgentPlanApproveRequest, AgentPlanPatchRequest
+from .responses.agent import (AgentPlanResponse, AgentPlanMutationResponse, AgentPlanPreflightResponse,
+                              AgentPlanVerificationResponse, AgentTurnStateResponse)
+from ..agent.runtime_adapter import runtime_config_identity
+from ..agent.operations import OperationRegistry
+from ..agent.orchestrator import WorkbenchOrchestrator
+from ..agent.tools import ToolRegistry
+from ..api_errors import WorkbenchAPIError
+from fastapi import File, Form, Response, UploadFile
+from ..agent.attachments import MAX_BYTES as MAX_ATTACHMENT_BYTES, AttachmentError, load as load_attachment, message_payload, store as store_attachment, text_of as attachment_text
+from ..agent.protocol import CONTINUATION_NOTE
+from .responses.agent import AgentAttachment
+from ..agent.turn_runtime import turn_budget, turn_registry
+from ..egress import egress_project
+from .responses.agent import AgentEvents, AgentMessageQueued, AgentTurn, AgentTurnCancelling
+from .agent_operation_routes import (_run_read_only_proposal, _tell_agent_finished_outcomes)
+from .agent_route_context import (_ensure_current_global_protocol, _ensure_main_session, _get_session, _project_root, _refresh_main_context)
+from .agent_route_permissions import (_project_permission_rules, _session_grants)
+from .agent_route_projection import (_messages, _public_session)
+from .agent_route_requests import (AgentContinueRequest, AgentResumeRequest, AgentSteerRequest, AgentTurnRequest)
+from .agent_route_runtime import (_agent_llm_config, _agent_llm_configured, _agent_model_adapter, _reserve_turn, _require_active_session)
+
+from fastapi import APIRouter
+from .typed_routes import TypedAPIRoute
+
+router = APIRouter(route_class=TypedAPIRoute)
+
+
+def _execution_mode_notice(mode: str, policy: str) -> str:
+    if mode == "auto":
+        notice = ("Workbench: execution mode is now Auto within plan. After the necessary inspections, call "
+                  "update_plan before submitting a workflow for execution. Wait for plan approval.")
+        if policy == "proposal_only":
+            return f"{notice} The selected review policy also requires a card for read-only analysis."
+        return f"{notice} Covered steps can run within the usual permissions after approval."
+    if policy == "proposal_only":
+        return ("Workbench: execution mode is now Review every step. Every step, read-only analysis included, "
+                "is shown to the person as a card and runs after their OK; you are then resumed with its result.")
+    return ("Workbench: execution mode is now Ask every step. Each step that changes something is shown "
+            "to the person as a card; read-only analysis runs at once.")
+
+
+@router.post("/agent/attachments")
+async def upload_agent_attachment(project_root: str = Form(...), file: UploadFile = File(...)) -> AgentAttachment:
+    root = Path(project_root).expanduser().resolve()
+    if not (root / "workbench").is_dir():
+        raise WorkbenchAPIError(status_code=404, code="PROJECT_NOT_FOUND", message="No such project.")
+    try:
+        # Reading a long PDF takes seconds; turns in progress keep streaming meanwhile.
+        return await asyncio.to_thread(store_attachment, root, file.filename or "attachment", await file.read(MAX_ATTACHMENT_BYTES + 1))
+    except AttachmentError as exc:
+        code, _, message = str(exc).partition(": ")
+        raise WorkbenchAPIError(status_code=422, code=code, message=message) from exc
+
+
+@router.get("/agent/attachments/{attachment_id}", response_class=Response, response_model=None)
+def read_agent_attachment(attachment_id: str, project_root: str, view: Literal["original", "text"] = "original") -> Response:
+    root = Path(project_root).expanduser().resolve()
+    try:
+        if view == "text":
+            return Response(content=attachment_text(root, attachment_id), media_type="text/plain; charset=utf-8", headers={"X-Content-Type-Options": "nosniff"})
+        record, data = load_attachment(root, attachment_id)
+    except AttachmentError as exc:
+        raise WorkbenchAPIError(status_code=404, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
+    # Text is served as plain text and images by their sniffed type, so nothing here runs in the page.
+    return Response(content=data, media_type=record["media_type"], headers={"X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(record['name'])}"})
+
+@router.post("/agent/sessions/{session_id}/turns")
+async def run_agent_turn(
+    session_id: str,
+    project_root: str,
+    body: AgentTurnRequest,
+    http_request: Request = None,
+) -> AgentTurn:
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
+    turn_key = _reserve_turn(root, session_id)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, body, repository, events, metadata, turn_key, notebook_service=notebook_service
+    ))
+
+
+@router.get("/agent/sessions/{session_id}/plan")
+def get_agent_plan(session_id: str, project_root: str) -> AgentPlanResponse:
+    """The conversation's current plan and version history."""
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    return PlanControl(root, repository, session_id).view()
+
+
+@router.get("/agent/sessions/{session_id}/plan/verification")
+def verify_agent_plan(session_id: str, project_root: str) -> AgentPlanVerificationResponse:
+    """Check registered deliverables on demand; never execute operations or call a model."""
+    from ..agent.delivery import delivery_check
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    plan = PlanControl(root, repository, session_id).store.current(session_id)
+    if plan is None:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND",
+                                message="This conversation has no plan.")
+    check = delivery_check(root, plan)
+    return {"plan_id": plan.plan_id, "plan_version": plan.version,
+            **({"criteria_not_machine_checked": True} if check.get("criteria_not_machine_checked") else {}),
+            "status": check["status"], "playbook_status": check["playbook_status"],
+            "criteria_verification": check["criteria_verification"]}
+
+
+def _plan_control_error(error: PlanControlError) -> WorkbenchAPIError:
+    return WorkbenchAPIError(status_code=error.status, code=error.code,
+                             message=str(error), details=error.details)
+
+
+@router.get("/agent/sessions/{session_id}/plan/preflight")
+def preflight_agent_plan(session_id: str, project_root: str) -> AgentPlanPreflightResponse:
+    """Check the current version's exact proposals without fitting or authorizing them."""
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    try:
+        return PlanControl(root, repository, session_id).preflight()
+    except PlanControlError as exc:
+        raise _plan_control_error(exc) from exc
+
+
+@router.post("/agent/sessions/{session_id}/plan/approve")
+def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApproveRequest) -> AgentPlanMutationResponse:
+    """Approve exactly the version the person reviewed, without a model call."""
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    _require_active_session(repository, session_id)
+    try:
+        return PlanControl(root, repository, session_id).approve(body.version)
+    except PlanControlError as exc:
+        raise _plan_control_error(exc) from exc
+
+
+@router.patch("/agent/sessions/{session_id}/plan")
+def revise_agent_plan(session_id: str, project_root: str, body: AgentPlanPatchRequest) -> AgentPlanMutationResponse:
+    """Apply a versioned human edit; execution state is server-owned."""
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    _require_active_session(repository, session_id)
+    try:
+        return PlanControl(root, repository, session_id).revise(
+            body.version, body.model_dump(exclude_unset=True, exclude={"version"}))
+    except PlanControlError as exc:
+        raise _plan_control_error(exc) from exc
+
+
+@router.post("/agent/sessions/{session_id}/continue")
+async def continue_agent_turn(
+    session_id: str,
+    project_root: str,
+    body: AgentContinueRequest,
+    http_request: Request = None,
+) -> AgentTurn:
+    """Resume the Agent after a confirmed proposal finished (Ask every step)."""
+
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
+    turn_key = _reserve_turn(root, session_id)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, body, repository, events, metadata, turn_key, continuation=True, notebook_service=notebook_service
+    ))
+
+
+async def _run_reserved_agent_turn(
+    root: Path,
+    session_id: str,
+    body: AgentTurnRequest,
+    repository: Any,
+    events: Any,
+    metadata: dict[str, Any],
+    turn_key: tuple[str, str],
+    *,
+    continuation: bool = False,
+    resume_turn_id: str | None = None,
+    notebook_service=None,
+) -> dict[str, Any]:
+    from ..agent.turn_journal import TurnJournal
+    from ..agent.turn_store import TurnStore, TurnStoreError
+
+    permission_rules = _project_permission_rules(root)
+    if resume_turn_id is None:
+        if any(record.session_id == session_id for record in TurnStore(root).list_active()):
+            raise WorkbenchAPIError(
+                status_code=409, code="AGENT_TURN_RECOVERY_REQUIRED",
+                message="This conversation has an unfinished durable turn; resume or reconcile it before starting another.",
+                details={"session_id": session_id},
+            )
+        _tell_agent_finished_outcomes(root, session_id)
+    from ..agent.startup_recovery import RecoveryProjectCatalog
+    RecoveryProjectCatalog().remember(root)
+    config = _agent_llm_config()
+    if not _agent_llm_configured(config):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="LLM_NOT_CONFIGURED",
+            # A broken explicit store must say so — "configure a provider" is
+            # the wrong advice when the operator already did and the pinned
+            # file is missing.
+            message=config.configuration_error_message(),
+        )
+    agent = AgentCore(
+        repository,
+        events,
+        _agent_model_adapter(config),
+        session_id=session_id,
+        compaction_policy=CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m,
+            explicit_limit=getattr(config, "context_limit_tokens", None)),
+        model_name=config.model,
+        model_config_identity=runtime_config_identity(config),
+        turn_journal=TurnJournal(TurnStore(root), repository, session_id=session_id,
+                                 execution_mode=body.execution_mode or "ask"),
+    )
+    tool_context: dict[str, Any] | None = None
+    # One registry per turn: the protocol text and the orchestrator read the same
+    # definitions (each construction projects every step contract again).
+    operation_registry = OperationRegistry() if metadata.get("role") in {"chain", "main"} else None
+    if resume_turn_id is None:
+        from ..agent.identity import identity_text
+        from ..agent.protocol import ensure_standing_message, chain_agent_protocol
+        ensure_standing_message(repository, session_id, name="workbench_agent_identity",
+            content=identity_text(metadata["role"], config), message_type="agent_identity")
+        if metadata["role"] == "chain":
+            ensure_standing_message(repository, session_id, name="workbench_agent_protocol",
+                content=chain_agent_protocol(operation_registry), message_type="agent_protocol",
+                metadata={"protocol_version": "agent/v1"})
+    if metadata.get("role") == "main" and resume_turn_id is None:
+        _ensure_current_global_protocol(repository, session_id)
+        if body.context_packet:
+            _refresh_main_context(repository, session_id, body.context_packet)
+    if metadata.get("role") in {"chain", "main"}:
+        # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
+        # tools through the existing orchestrator boundary — the model never
+        # discovers Workbench capabilities on its own, and a plain inspection
+        # turn performs zero Workbench mutation. Proposals stay allowlisted to
+        # registry-enabled operations and remain confirmation-gated audit records.
+        orchestrator = WorkbenchOrchestrator(
+            repository,
+            events,
+            main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
+            operation_registry=operation_registry,
+            notebook_service=notebook_service,
+            context_provider=NodeOperationContextProvider(root),
+        )
+        orchestrator.execution_policy = body.execution_policy
+        orchestrator.execution_mode = body.execution_mode
+        # The notice states the mode and the review policy together: under "Review every step"
+        # (proposal_only) read-only analysis also waits for a card, and the old Ask notice said it ran
+        # at once (refusal audit 2026-11-02). The permission decision itself is unchanged.
+        if resume_turn_id is None and (metadata.get("execution_mode") != body.execution_mode
+                                       or metadata.get("execution_policy") != body.execution_policy):
+            repository.update_metadata(session_id, execution_mode=body.execution_mode,
+                                       execution_policy=body.execution_policy)
+            repository.append(session_id, "custom_message", {
+                "message_type": "agent_execution_mode",
+                "audience": "model",
+                "name": "workbench_mode",
+                "content": _execution_mode_notice(body.execution_mode, body.execution_policy),
+            })
+        orchestrator.permission_rules = permission_rules
+        agent.operation_denied = orchestrator.operation_denied
+        orchestrator.session_grants = _session_grants(repository, session_id)
+        if metadata["role"] == "main":
+            orchestrator.register_main(session_id, agent)
+        else:
+            orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
+        orchestrator.read_only_runner = lambda proposal, actor=None: _run_read_only_proposal(
+            root, orchestrator, proposal, actor
+        )
+        tool_context = {
+            "allowed_operations": operation_registry.natural_language_operation_ids(
+                scope_requirements=("chain", "active_head")
+            )
+        }
+    else:
+        provider = NodeOperationContextProvider(root)
+        registry = ToolRegistry()
+        for definition in provider.global_tool_definitions(session_id=session_id):
+            registry.register(definition)
+        agent.attach_tools(registry.descriptors(), registry)
+    turn_registry.activate(turn_key, agent)
+    try:
+        with egress_project(root):
+            budget = turn_budget(body.execution_mode)
+            if resume_turn_id is not None:
+                await agent.resume(resume_turn_id, tool_context=tool_context)
+            elif continuation:
+                repository.append(session_id, "custom_message", {
+                    "message_type": "agent_continuation",
+                    "audience": "model",
+                    "model_role": "user",
+                    "name": "workbench_continuation",
+                    "content": CONTINUATION_NOTE,
+                })
+                await agent.continue_(budget=budget, tool_context=tool_context)
+            else:
+                try:
+                    entries = [message_payload(root, attachment_id) for attachment_id in body.attachments]
+                except AttachmentError as exc:
+                    raise WorkbenchAPIError(status_code=422, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
+                for entry in entries:
+                    repository.append(session_id, "custom_message", entry)
+                await agent.prompt(body.question.strip(), budget=budget, tool_context=tool_context)
+    except TurnStoreError as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_TURN_RECOVERY_REQUIRED",
+            message="The durable turn needs recovery or reconciliation before continuing.",
+            details={"reason": str(exc), "session_id": session_id}) from exc
+    finally:
+        turn_registry.deactivate(turn_key, agent)
+    messages = _messages(repository, session_id)
+    assistant = next(
+        (message for message in reversed(messages) if message["role"] == "assistant"),
+        None,
+    )
+    if assistant is None:
+        raise WorkbenchAPIError(
+            status_code=502,
+            code="AGENT_NO_ASSISTANT_MESSAGE",
+            message="Agent completed without producing an assistant message.",
+        )
+    return {
+        "session": _public_session(repository, session_id, metadata, config, messages=messages),
+        "assistant": assistant,
+        "status": repository.get_metadata(session_id).get("status"),
+    }
+
+
+@router.get("/agent/sessions/{session_id}/turn-state")
+def get_agent_turn_state(session_id: str, project_root: str) -> AgentTurnStateResponse:
+    """Inspect compact durable state without executing tools or a provider."""
+    from ..agent.turn_store import TurnStore
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    return {"turns": [record.to_dict() for record in TurnStore(root).list_active()
+                      if record.session_id == session_id]}
+
+
+@router.post("/agent/sessions/{session_id}/resume")
+async def resume_agent_turn(session_id: str, project_root: str, body: AgentResumeRequest, http_request: Request = None) -> AgentTurn:
+    """Resume the original command, not a new prompt/continuation budget."""
+    from ..agent.turn_store import TurnStore, TurnStoreError
+
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    try:
+        record = TurnStore(root).get(body.turn_id)
+    except (TurnStoreError, OSError) as exc:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_TURN_NOT_FOUND",
+                                message="The durable turn was not found.") from exc
+    if record.session_id != session_id:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_TURN_NOT_FOUND",
+                                message="The durable turn was not found.")
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
+    turn_key = _reserve_turn(root, session_id)
+    request = AgentContinueRequest(execution_mode=record.execution_mode)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, request, repository, events, metadata, turn_key, resume_turn_id=body.turn_id, notebook_service=notebook_service))
+
+
+@router.post("/agent/sessions/{session_id}/abort")
+async def abort_agent_turn(
+    session_id: str,
+    project_root: str,
+) -> AgentTurnCancelling:
+    """Request cancellation of the one active provider/tool turn for a session."""
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    agent = turn_registry.get(root, session_id)
+    if agent is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_NOT_ACTIVE",
+            message="This Agent session has no active turn to stop.",
+            details={"session_id": session_id},
+        )
+    await agent.abort()
+    return {"status": "cancelling", "session_id": session_id}
+
+
+@router.post("/agent/sessions/{session_id}/steer")
+async def steer_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> AgentMessageQueued:
+    """Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1)."""
+
+    return await _queue_for_active_turn(project_root, session_id, body.text, "steer")
+
+
+@router.post("/agent/sessions/{session_id}/follow_up")
+async def follow_up_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> AgentMessageQueued:
+    """Queue a request to run after the current turn finishes (v1.9.1)."""
+
+    return await _queue_for_active_turn(project_root, session_id, body.text, "follow_up")
+
+
+async def _queue_for_active_turn(project_root: str, session_id: str, text: str, queue: str) -> dict[str, Any]:
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    agent = turn_registry.get(root, session_id)
+    if agent is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_NOT_ACTIVE",
+            message="This Agent session has no active turn; send it as a new message instead.",
+            details={"session_id": session_id},
+        )
+    await (agent.steer(text.strip()) if queue == "steer" else agent.follow_up(text.strip()))
+    return {"status": "queued", "queue": queue, "session_id": session_id}
+
+
+@router.get("/agent/sessions/{session_id}/events")
+def get_agent_events(
+    session_id: str,
+    project_root: str,
+    after_seq: int = Query(default=0, ge=0),
+) -> AgentEvents:
+    root = _project_root(project_root)
+    _repository, events, _metadata = _get_session(root, session_id)
+    return {
+        "events": [
+            event.to_dict()
+            for event in events.replay(session_id, after_seq=after_seq)
+        ]
+    }
+

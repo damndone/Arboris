@@ -1,0 +1,298 @@
+"""Who may run what without asking: the Agent's permission engine.
+
+The person chooses an execution mode -- ``ask`` (every step) or ``auto``
+(within an approved plan) -- and may add project rules and per-conversation
+grants. ``decide`` turns that, plus the operation's declared permission class,
+into allow / ask / deny. It reads declarations and settings only, never model
+text: "read-only" is an impact classification, not permission to skip a review
+the person asked for (v1.9.0 retrospective #30).
+
+The safety floor holds in every mode and under every rule: leaving the
+Workbench (export, egress, code, external tools), registered high-risk
+operations and anything that changes source data always ask. Rules and grants
+can tighten it, never loosen it. Precedence, as in Claude Code: deny rules,
+then the floor, then ask rules, then allow rules and grants, then the mode's
+default table.
+
+Design: ``docs/superpowers/specs/2026-10-18-v1.9.1-agent-autonomy-design.md`` §3.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
+from enum import Enum
+
+from ..analysis_ledger import step_category
+from ..native_research import NATIVE_RESEARCH_OPERATIONS
+
+
+class Mode(str, Enum):
+    ASK = "ask"
+    AUTO = "auto"
+
+
+class PermissionClass(str, Enum):
+    READ = "read"
+    ANALYZE = "analyze"
+    DERIVE = "derive"
+    MODIFY = "modify"
+    EXTERNAL = "external"
+    HIGH = "high"
+
+
+class Outcome(str, Enum):
+    ALLOW = "allow"
+    ASK = "ask"
+    DENY = "deny"
+
+
+#: Ledger categories (``analysis_ledger.step_category``) by permission class.
+_CATEGORY_CLASS = {
+    "descriptive": PermissionClass.ANALYZE,
+    "inferential": PermissionClass.ANALYZE,
+    "model": PermissionClass.DERIVE,
+    "data_change": PermissionClass.DERIVE,
+    "report": PermissionClass.DERIVE,
+    "metadata_change": PermissionClass.MODIFY,
+    "export": PermissionClass.EXTERNAL,
+    "deletion": PermissionClass.HIGH,
+}
+#: Operations whose impact their ledger category does not describe.
+_OVERRIDES = {
+    "code.execute": PermissionClass.EXTERNAL,
+    "graph.fork": PermissionClass.DERIVE,
+    # These steps publish a new result node even when their statistics are
+    # classified as descriptive in the disclosure ledger.
+    **dict.fromkeys(NATIVE_RESEARCH_OPERATIONS, PermissionClass.DERIVE),
+}
+#: Classes a per-conversation "don't ask again" may cover.
+GRANTABLE = frozenset({PermissionClass.ANALYZE, PermissionClass.DERIVE, PermissionClass.MODIFY})
+
+
+def permission_class(operation_id: str, *, risk_level: str | None = None) -> PermissionClass:
+    """The permission class of a workflow step or registered operation.
+
+    Unknown operations fail closed to ``modify`` (asks in every mode) rather
+    than to an allowing class.
+    """
+    if risk_level == "high":
+        return PermissionClass.HIGH
+    if operation_id in _OVERRIDES:
+        return _OVERRIDES[operation_id]
+    return _CATEGORY_CLASS.get(step_category(operation_id), PermissionClass.MODIFY)
+
+
+def request_for_operation(operation_id, changes, *, risk_level=None, within_budget=True, scope=None):
+    """Classify the declaration once for every execution entry point."""
+    components = ()
+    if operation_id == "operation.multi_step":
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+        steps = changes.get("steps") or ()
+        components = tuple(request_for_operation(step["operation_id"], step.get("spec", {}),
+            risk_level=WORKFLOW_STEP_SPEC_CONTRACTS[step["operation_id"]].risk_level,
+            within_budget=within_budget, scope=scope) for step in steps)
+        cls = strictest(part.permission_class for part in components) if steps else PermissionClass.MODIFY
+    else:
+        cls = permission_class(operation_id, risk_level=risk_level)
+    scope = scope or {}
+    return Request(operation_id=operation_id, permission_class=cls, components=components,
+        touches_source=operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"},
+        in_plan=bool(scope.get("in_plan")), class_allowed_by_plan=cls.value in set(scope.get("allowed_classes") or ()),
+        named_in_plan=bool(scope.get("named")), within_budget=within_budget and scope.get("within_budget") is not False)
+
+
+def request_for_proposal(repository, registry, proposal, *, within_budget=True, scope=None):
+    definition = registry.require(proposal.operation_id, proposal.operation_version)
+    request = request_for_operation(proposal.operation_id, proposal.changes,
+        risk_level=definition.risk_level, within_budget=within_budget, scope=scope)
+    run_id, node_ref = proposal.target.get("run_id"), proposal.target.get("node_ref")
+    if run_id and node_ref:
+        from ..analysis_loop.lifecycle import latest_target_correction
+
+        correction = latest_target_correction(repository, proposal.session_id, run_id, node_ref)
+        if correction is not None and not correction["confirmed"]:
+            request = replace(request, target_decision_required=True)
+    return request
+
+
+def strictest(classes: Iterable[PermissionClass]) -> PermissionClass:
+    """The class of a multi-step request: its most restrictive step."""
+    order = list(PermissionClass)
+    values = list(classes)
+    return max(values, key=order.index) if values else PermissionClass.READ
+
+
+@dataclass(frozen=True)
+class Rule:
+    """One project rule: a class, optionally narrowed to one operation id."""
+
+    permission_class: PermissionClass
+    operation_id: str | None = None
+
+    def matches(self, request: "Request") -> bool:
+        return self.permission_class == request.permission_class and (
+            self.operation_id is None or self.operation_id == request.operation_id
+        )
+
+
+@dataclass(frozen=True)
+class Rules:
+    allow: tuple[Rule, ...] = ()
+    ask: tuple[Rule, ...] = ()
+    deny: tuple[Rule, ...] = ()
+
+
+def with_execution_policy(rules: Rules, policy: str) -> Rules:
+    if policy == "auto_read_only":
+        return rules
+    return replace(rules, ask=(*rules.ask, Rule(PermissionClass.ANALYZE)))
+
+
+@dataclass(frozen=True)
+class Request:
+    operation_id: str
+    permission_class: PermissionClass
+    #: The step changes a source dataset (not a derived one on a branch).
+    touches_source: bool = False
+    #: Auto mode: the step belongs to the approved plan ...
+    in_plan: bool = False
+    #: ... whose allowed classes cover it ...
+    class_allowed_by_plan: bool = False
+    #: ... and the plan names this exact object (needed for ``modify``).
+    named_in_plan: bool = False
+    #: The plan's (Auto) or the conversation's (Ask) budget still covers it.
+    within_budget: bool = True
+    #: An unresolved estimand correction needs a specific human decision.
+    target_decision_required: bool = False
+    #: Preserve constituent declarations so composition cannot erase restrictions.
+    components: tuple["Request", ...] = ()
+
+
+@dataclass(frozen=True)
+class Grants:
+    """Per-conversation "don't ask again" answers."""
+
+    entries: frozenset[Rule] = field(default_factory=frozenset)
+
+    def covers(self, request: Request) -> bool:
+        return request.permission_class in GRANTABLE and not request.touches_source and not request.target_decision_required and any(
+            rule.matches(request) for rule in self.entries
+        )
+
+
+@dataclass(frozen=True)
+class Decision:
+    outcome: Outcome
+    reason: str
+    #: The safety floor decided it; nothing the person configured could change it.
+    floor: bool = False
+    #: Who allowed it, for the ledger: the mode's default ("default"), a project
+    #: rule ("project_rule"), a conversation grant ("session_grant") or the
+    #: approved plan ("approved_plan").
+    authority: str = "default"
+
+
+def on_floor(request: Request) -> bool:
+    return (request.permission_class in {PermissionClass.EXTERNAL, PermissionClass.HIGH}
+            or request.touches_source or request.target_decision_required
+            or any(on_floor(part) for part in request.components))
+
+
+def decide(mode: Mode, request: Request, rules: Rules = Rules(), grants: Grants = Grants()) -> Decision:
+    members = (request, *request.components)
+    if any(rule.matches(member) for rule in rules.deny for member in members):
+        return Decision(Outcome.DENY, "a project rule denies this operation")
+    if on_floor(request):
+        what = ("changes an unresolved analysis target" if request.target_decision_required
+                else "changes source data" if request.touches_source
+                else "leaves the Workbench" if request.permission_class == PermissionClass.EXTERNAL
+                else "is registered as high risk")
+        return Decision(Outcome.ASK, f"this operation {what}, which always needs your approval", floor=True)
+    if any(rule.matches(member) for rule in rules.ask for member in members):
+        return Decision(Outcome.ASK, "a project rule asks before this operation")
+    if any(rule.matches(request) for rule in rules.allow):
+        return Decision(Outcome.ALLOW, "a project rule allows this operation", authority="project_rule")
+    if grants.covers(request):
+        return Decision(Outcome.ALLOW, "you allowed this kind of operation for this conversation",
+                        authority="session_grant")
+    if request.components:
+        decisions = [decide(mode, replace(part, within_budget=part.within_budget and request.within_budget),
+                            rules, grants) for part in request.components]
+        for outcome in (Outcome.DENY, Outcome.ASK):
+            restricted = next((decision for decision in decisions if decision.outcome == outcome), None)
+            if restricted is not None:
+                return restricted
+        authority = next((decision.authority for decision in decisions if decision.authority != "default"), "default")
+        return Decision(Outcome.ALLOW, "every constituent operation is allowed", authority=authority)
+    return _default(mode, request)
+
+
+def _default(mode: Mode, request: Request) -> Decision:
+    cls = request.permission_class
+    if cls == PermissionClass.READ:
+        return Decision(Outcome.ALLOW, "reading results changes nothing")
+    if mode == Mode.ASK:
+        if cls == PermissionClass.ANALYZE:
+            if request.within_budget:
+                return Decision(Outcome.ALLOW, "read-only analysis changes no data or model")
+            return Decision(Outcome.ASK, "this conversation's budget of inferential steps is spent")
+        return Decision(Outcome.ASK, "every step that changes something is confirmed in Ask every step")
+    # Auto within plan.
+    if not request.in_plan:
+        return Decision(Outcome.ASK, "this step is not in the approved plan")
+    if not request.within_budget:
+        return Decision(Outcome.ASK, "the approved plan's budget is spent")
+    if cls in {PermissionClass.ANALYZE, PermissionClass.DERIVE}:
+        if request.class_allowed_by_plan:
+            return Decision(Outcome.ALLOW, "the approved plan covers this step", authority="approved_plan")
+        return Decision(Outcome.ASK, "the approved plan does not allow this kind of step")
+    if cls == PermissionClass.MODIFY and request.named_in_plan and request.class_allowed_by_plan:
+        return Decision(Outcome.ALLOW, "the approved plan names this change", authority="approved_plan")
+    return Decision(Outcome.ASK, "changes to existing objects are confirmed unless the plan names them")
+
+
+__all__ = [
+    "Decision", "GRANTABLE", "Grants", "Mode", "Outcome", "PermissionClass", "Request", "Rule", "Rules",
+    "decide", "on_floor", "permission_class", "rules_from_payload", "strictest",
+]
+
+
+def rules_from_payload(payload: object) -> Rules:
+    """Project rules from ``<project>/workbench/agent-permissions.json``.
+
+    Shape: ``{"allow": [{"class": "derive", "operation_id": "model.genesis"}], "ask": [...], "deny": [...]}``.
+    An omitted ``operation_id`` means the whole class. A supplied qualifier
+    must be a non-empty string; it is never coerced or removed. Malformed
+    documents raise ``ValueError`` as a whole, so invalid deny entries cannot
+    silently disappear while other entries grant authority.
+    """
+    if type(payload) is not dict:
+        raise ValueError("permission rules must be an object")
+    if payload.keys() - {"allow", "ask", "deny"}:
+        raise ValueError("permission rules contain unknown fields")
+
+    def entries(name: str) -> tuple[Rule, ...]:
+        items = payload.get(name, [])
+        if type(items) is not list:
+            raise ValueError(f"permission rules {name} must be a list")
+        out = []
+        for index, item in enumerate(items):
+            location = f"permission rules {name}[{index}]"
+            if type(item) is not dict:
+                raise ValueError(f"{location} must be an object")
+            if item.keys() - {"class", "operation_id"}:
+                raise ValueError(f"{location} contains unknown fields")
+            if type(item.get("class")) is not str:
+                raise ValueError(f"{location}.class must be a known permission class string")
+            try:
+                cls = PermissionClass(item["class"])
+            except ValueError as exc:
+                raise ValueError(f"{location}.class must be a known permission class string") from exc
+            operation_id = item.get("operation_id")
+            if "operation_id" in item and (type(operation_id) is not str or not operation_id):
+                raise ValueError(f"{location}.operation_id must be a non-empty string when supplied")
+            out.append(Rule(cls, operation_id))
+        return tuple(out)
+
+    return Rules(allow=entries("allow"), ask=entries("ask"), deny=entries("deny"))

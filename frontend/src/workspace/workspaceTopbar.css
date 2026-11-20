@@ -95,3 +95,30 @@
 .ws-topbar__end { margin-left: auto; flex-wrap: nowrap; }
 .ws-topbar__views { flex-shrink: 0; max-width: 100%; overflow-x: auto; }
 .ws-topbar__start { flex-wrap: nowrap; }
+.ws-topbar__start > * { flex-shrink: 0; }
+
+/* The name gives way before anything overlaps. No clipping on the column: the project menu opens from here. */
+.ws-topbar__start > div:has([data-testid="project-switcher"]) { flex-shrink: 1; min-width: 0; }
+.ws-topbar__start [data-testid="project-switcher"] { max-width: 100%; }
+.ws-topbar__start .wb-project-name { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Less room: the logo and the plus sign say the same as their words. */
+@media (max-width: 1240px) {
+  .ws-topbar__row { grid-template-columns: minmax(0, 1fr) auto max-content; }
+  .ws-topbar__brand-name,
+  .ws-topbar__rule { display: none; }
+  .ws-topbar__new-label { position: absolute; overflow: hidden; width: 1px; height: 1px; clip-path: inset(50%); white-space: nowrap; }
+}
+
+/* Too narrow for one line: the views take a line of their own. */
+@media (max-width: 1080px) {
+  .ws-topbar__row { grid-template-columns: minmax(0, 1fr) max-content; row-gap: var(--space-1); }
+  .ws-topbar__views { grid-row: 2; grid-column: 1 / -1; justify-self: center; }
+}
+
+/* A phone: the actions scroll on their own line too. */
+@media (max-width: 620px) {
+  .ws-topbar__row { grid-template-columns: minmax(0, 1fr); }
+  .ws-topbar__views { justify-self: stretch; }
+  .ws-topbar__end { justify-content: flex-start; margin-left: 0; overflow-x: auto; }
+}

@@ -157,9 +157,8 @@ def test_planning_agent_reads_the_injected_shared_vocabulary(monkeypatch) -> Non
         }
 
     monkeypatch.setattr(
-        NotebookPlanningAgent,
-        "_execution_pins",
-        staticmethod(_workflow_pins),
+        "workbench.agent.planning.normalize._execution_pins",
+        _workflow_pins,
     )
 
     contracts = NotebookPlanningAgent._typed_operation_contracts(object())
@@ -194,6 +193,7 @@ def test_context_inspection_reads_the_injected_shared_vocabulary(
             op_node_id="stage:source",
             active_head_run_id=run_id,
             operation_id="operation.multi_step",
+            step_operation_ids=(P7_OPERATION_ID,),
         ),
         operation_registry=OperationRegistry(),
     )

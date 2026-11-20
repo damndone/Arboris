@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {EngineProvenanceNotice} from "./runResult/EngineProvenanceNotice";
 import {
   ApiError,
   artifactDownloadUrl,
@@ -530,6 +531,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <PredictionResultCard result={predictionResult} />
       <PredictionResearchEvidenceCard evidence={detail?.prediction_evidence} />
       <IVDiagnosticsCard diagnostics={ivDiagnostics} />
+      {detail.model_results?.map(model => <EngineProvenanceNotice key={`engine:${model.model_id}`} modelId={model.model_id} value={model.engine_provenance}/>)}
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       <CSDiagnosticsCard diagnostics={csDiagnostics} />
       <DCDHResultCard result={dcdhResult} />

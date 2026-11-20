@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from ..exploration_log import ExplorationLog
 from ..contracts.common.errors import OperationValidationError
 from ..jsonl_store import append_jsonl_atomic, read_jsonl
+from ..native_research import NATIVE_RESEARCH_OPERATIONS
 from .workflow_contracts import WORKFLOW_TEMPLATE, validate_workflow_steps
+
+if TYPE_CHECKING:
+    from .workflow_timing import WorkflowTiming
 
 
 # Written into every plan and state record. Nothing compares it on read, so
@@ -267,11 +272,12 @@ class WorkflowExecutionState:
 class WorkflowStateStore:
     """Append-only workflow execution state used for resumable runs."""
 
-    def __init__(self, project_root: Path | str, workflow_id: str) -> None:
+    def __init__(self, project_root: Path | str, workflow_id: str, *, create: bool = True) -> None:
         if not workflow_id or Path(workflow_id).name != workflow_id:
             raise ValueError("workflow_id must be path-safe")
         self.path = Path(project_root) / "workbench" / "workflows" / f"{workflow_id}.jsonl"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if create:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def append(self, state: WorkflowExecutionState) -> None:
         append_jsonl_atomic(self.path, state.to_dict())
@@ -287,11 +293,23 @@ class WorkflowExecutor:
     def __init__(self, project_root: Path | str) -> None:
         self.project_root = Path(project_root)
 
-    def execute(self, draft: WorkflowDraft, step_executor) -> WorkflowExecutionState:
+    def execute(
+        self,
+        draft: WorkflowDraft,
+        step_executor,
+        *,
+        prepare_pair: Callable[
+            [WorkflowStep, WorkflowStep], dict[str, Callable[[], WorkflowStepResult]]
+        ] | None = None,
+        timing: WorkflowTiming | None = None,
+    ) -> WorkflowExecutionState:
         store = WorkflowStateStore(self.project_root, draft.workflow_id)
         existing = store.current()
         if existing is not None and existing.plan_fingerprint != draft.plan_fingerprint:
             raise WorkflowExecutionError("source fingerprint changed; workflow plan cannot resume")
+
+        from .specification_curves import freeze_workflow
+        freeze_workflow(self.project_root, draft, resumed=existing is not None)
 
         states: dict[str, WorkflowStepState] = {}
         if existing is not None:
@@ -345,7 +363,8 @@ class WorkflowExecutor:
             if step_state.status == "completed"
         }
 
-        for step in draft.steps:
+        prepared = {}
+        for index, step in enumerate(draft.steps):
             current = states[step.step_id]
             if current.status == "completed":
                 continue
@@ -374,7 +393,14 @@ class WorkflowExecutor:
             state = self._persist_state(store, draft, states, "running")
             self._log_transition(log, draft, step, running, states)
             try:
-                result = step_executor(step, completed_results)
+                if prepare_pair is not None and not prepared and index + 1 < len(draft.steps):
+                    following = draft.steps[index + 1]
+                    if states[following.step_id].status == "pending" and all(
+                        states[dependency].status == "completed" for dependency in following.depends_on
+                    ):
+                        prepared = prepare_pair(step, following)
+                publish = prepared.pop(step.step_id, None)
+                result = publish() if publish is not None else step_executor(step, completed_results)
                 if not isinstance(result, WorkflowStepResult):
                     raise WorkflowExecutionError(
                         f"workflow step {step.step_id} returned an invalid result"
@@ -398,6 +424,20 @@ class WorkflowExecutor:
                 completed_results[step.step_id] = result
                 state = self._persist_state(store, draft, states, "running")
                 self._log_transition(log, draft, step, completed, states)
+            except asyncio.CancelledError as exc:
+                cancelled = WorkflowStepState(step_id=step.step_id, fingerprint=step.fingerprint,
+                    status='cancelled', error=str(exc))
+                states[step.step_id] = cancelled
+                for following in draft.steps:
+                    if states[following.step_id].status == 'pending':
+                        not_executed = WorkflowStepState(step_id=following.step_id,
+                            fingerprint=following.fingerprint, status='cancelled',
+                            error='workflow_cancelled_before_execution')
+                        states[following.step_id] = not_executed
+                        self._log_transition(log, draft, following, not_executed, states)
+                self._persist_state(store, draft, states, 'cancelled')
+                self._log_transition(log, draft, step, cancelled, states)
+                raise
             except Exception as exc:
                 failed = WorkflowStepState(
                     step_id=step.step_id,
@@ -435,7 +475,10 @@ class WorkflowExecutor:
                 break
 
         status = "failed" if any(item.status in {"failed", "blocked"} for item in states.values()) else "completed"
-        return self._persist_state(store, draft, states, status)
+        state = self._persist_state(store, draft, states, status)
+        if status == "completed" and existing is None and timing is not None:
+            timing.record(draft.workflow_id)
+        return state
 
     @staticmethod
     def _persist_state(store, draft, states, status):
@@ -455,6 +498,12 @@ class WorkflowExecutor:
             for dependency in step.depends_on
             for artifact_id in states[dependency].artifact_ids
         ]
+        source_artifact_ids = [str(draft.target["artifact_id"])]
+        if step.operation_id in NATIVE_RESEARCH_OPERATIONS and "source" in step.spec:
+            upstream = states.get(step.spec["source"]["from_step"])
+            binding = upstream.produced_dataset if upstream is not None else None
+            artifact_id = binding.get("artifact_id") if binding is not None else None
+            source_artifact_ids = [artifact_id] if isinstance(artifact_id, str) and artifact_id else []
         log.append_event(
             {
                 "event_id": f"{step.step_id}:{state.status}:{state.fingerprint[:16]}",
@@ -462,7 +511,7 @@ class WorkflowExecutor:
                 "workflow_step_id": step.step_id,
                 "operation_id": f"{step.operation_id}@{step.operation_version}",
                 "spec_fingerprint": step.fingerprint,
-                "source_artifact_ids": [str(draft.target["artifact_id"])],
+                "source_artifact_ids": source_artifact_ids,
                 "dependency_artifact_ids": dependency_artifacts,
                 "row_counts": state.row_counts,
                 "status": state.status,
@@ -584,15 +633,24 @@ def execute_workflow(
     existing authorization and containment lifecycle.
     """
 
-    from .workflow_runtime import build_workflow_step_executor
+    from .workflow_runtime import _build_workflow_runtime
+    from .workflow_timing import begin_workflow_timing
 
+    root = Path(project_root).expanduser().resolve()
+    observation = begin_workflow_timing(root, draft) if custom_step_executor is None else None
+    timing = None
+
+    def verify_source(context):
+        nonlocal timing
+        if observation is not None and observation.matches_source(context):
+            timing = observation
+
+    step_executor, prepare_pair = _build_workflow_runtime(
+        project_root, draft, custom_step_executor=custom_step_executor,
+        on_source_resolved=verify_source if observation is not None else None,
+    )
     return WorkflowExecutor(project_root).execute(
-        draft,
-        build_workflow_step_executor(
-            project_root,
-            draft,
-            custom_step_executor=custom_step_executor,
-        ),
+        draft, step_executor, prepare_pair=prepare_pair, timing=timing
     )
 
 

@@ -1,0 +1,15 @@
+[package]
+name = "arboris-time-series"
+version = "0.1.0"
+edition = "2021"
+description = "Fixed-parameter Gaussian local-level filter with a C ABI"
+
+[lib]
+name = "arboris_time_series"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

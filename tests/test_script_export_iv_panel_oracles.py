@@ -31,6 +31,21 @@ def test_iv_native_runner_oracle(language,covariance):
 
 
 @pytest.mark.parametrize('language',LANGUAGES)
+@pytest.mark.parametrize('gap',('y','endog','z'))
+def test_iv_export_drops_incomplete_rows_as_the_runner_does(language,gap):
+    directory=fresh_directory();d=data()
+    d.loc[[3,90],gap]=np.nan
+    result,fit=runner.run_iv_2sls(d,'y',['x'],['endog'],['z'],'iv',covariance='robust')
+    assert result['nobs']==318
+    params={'model_type':'iv_2sls','y':'y','x':['x'],'covariance':'robust','model_options':{'endog':['endog'],'instruments':['z']}}
+    expected={'nobs':result['nobs'],'coefficients':{k:v['estimate'] for k,v in result['coefficients'].items()},'std_errors':{k:v['std_error'] for k,v in result['coefficients'].items()},'statistics':{k:{'value':float(fit.tstats[k]),'p_value':float(fit.pvalues[k]),'distribution':'z'} for k in fit.params.index}}
+    step=ScriptStep('iv','model','model.iv_2sls',params,('source',),expected=expected)
+    plan=ScriptPlan('iv','listwise_'+gap,(source(directory,d,'data.csv','source'),),(step,),'1.8.11','7'*64)
+    code,output=execute(renderer()(plan,language),directory,plan)
+    assert code==0,output
+
+
+@pytest.mark.parametrize('language',LANGUAGES)
 @pytest.mark.parametrize('model',('panel_ols','did'))
 @pytest.mark.parametrize('cluster_kind',('entity','coarse_string'))
 def test_panel_clustered_runner_oracle(language,model,cluster_kind):

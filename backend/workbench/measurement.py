@@ -171,6 +171,10 @@ def build_advisory(
         # Having answered, the user is not asked again.
         if declared.get(column, UNSPECIFIED) != UNSPECIFIED:
             continue
+        # assess() never raises a column with more levels than a scale has; counting them
+        # first spares sorting every distinct value of a continuous column (0.5 s at 1M rows).
+        if column in frame.columns and frame[column].nunique() > _MAX_SCALE_LEVELS:
+            continue
         evidence = collect_evidence(
             frame, column, value_labels=value_labels, variable_labels=variable_labels
         )

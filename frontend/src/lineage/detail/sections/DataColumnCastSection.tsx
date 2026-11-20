@@ -30,6 +30,7 @@ import {
   type FeatureRecipeOperation,
   type FeatureRecipePreview,
 } from "../../dataOperations";
+import "./operationForms.css";
 
 interface DataOperationAnnotation {
   operation_id: string;
@@ -154,9 +155,8 @@ function FeatureRecipeBuilder({
 
   const secondInputNeeded = operation === "interaction" || operation === "derived_variable" || operation === "ratio";
   return (
-    <div data-testid="feature-recipe-builder" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
-      <strong>Derived variable / recode</strong>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+    <div data-testid="feature-recipe-builder" className="op-form">
+      <div className="op-fields">
         <label>Operation <select aria-label="Feature operation" value={operation} onChange={(event) => { setOperation(event.target.value as FeatureRecipeOperation); setPreview(null); }}>
           <option value="derived_variable">add / subtract / multiply</option>
           <option value="recode">recode</option>
@@ -176,16 +176,15 @@ function FeatureRecipeBuilder({
         {operation === "recode" && <SchemaField label="Recode mapping" schema={scalarMapping} value={mapping} onChange={value => setMapping(value as Record<string, unknown>)}/> }
         <label>Output <input aria-label="Feature output" value={output} onChange={(event) => { setOutput(event.target.value); setPreview(null); }} /></label>
       </div>
-      <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>Preview is required. The source stays unchanged and downstream models are marked for rerun.</div>
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <button type="button" data-testid="feature-recipe-preview" disabled={!inputOne || !output || status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview transform"}</button>
+      <div className="op-actions">
+        <button type="button" className="op-primary" title="Nothing changes until you confirm. The source stays as it is." data-testid="feature-recipe-preview" disabled={!inputOne || !output || status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview transform"}</button>
         {preview?.status === "ready" && <button type="button" data-testid="feature-recipe-confirm" disabled={status === "confirming"} onClick={() => void handleConfirm()}>{status === "confirming" ? "Saving…" : "Confirm transform"}</button>}
       </div>
       {preview && <div data-testid="feature-recipe-preview-result">{preview.status} · {preview.row_count} rows · output: {preview.output_columns.join(", ")}</div>}
       {preview && (
         <details data-testid="feature-recipe-payload">
           <summary>View typed FeatureRecipe payload</summary>
-          <pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+          <pre className="op-pre">
             {JSON.stringify({ ...request, preview_fingerprint: preview.fingerprint }, null, 2)}
           </pre>
         </details>
@@ -368,9 +367,8 @@ function DataTransformBuilder({
   }
 
   return (
-    <div data-testid="data-transform-builder" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
-      <strong>Merge / append / reshape / subset</strong>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+    <div data-testid="data-transform-builder" className="op-form">
+      <div className="op-fields">
         <label>Operation <select aria-label="Data transform operation" value={operation} onChange={(event) => { setOperation(event.target.value as DataTransformOperation); setPreview(null); }}>
           <option value="subset">subset</option><option value="merge">merge</option><option value="append">append</option><option value="reshape">reshape</option>
         </select></label>
@@ -416,9 +414,8 @@ function DataTransformBuilder({
           <label>Right artifact <input aria-label="Secondary artifact" value={secondaryArtifactId} onChange={(event) => setSecondaryArtifactId(event.target.value)} /></label>
         </>}
       </div>
-      <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>All transforms are previewed, fingerprinted, confirmed, and written as a visible child node.</div>
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <button type="button" data-testid="data-transform-preview" disabled={status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview data transform"}</button>
+      <div className="op-actions">
+        <button type="button" className="op-primary" title="Nothing changes until you confirm. The result becomes a new data step." data-testid="data-transform-preview" disabled={status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>{status === "previewing" ? "Previewing…" : "Preview data transform"}</button>
         {preview?.status === "ready" && <button type="button" data-testid="data-transform-confirm" disabled={status === "confirming"} onClick={() => void handleConfirm()}>{status === "confirming" ? "Saving…" : "Confirm data transform"}</button>}
       </div>
       {preview && <div data-testid="data-transform-preview-result">{preview.status} · rows {preview.row_count_before} → {preview.row_count_after}</div>}
@@ -472,11 +469,8 @@ function DataNodeModelRunner({
 
   if (numericColumns.length < 2) {
     return (
-      <div data-testid="data-node-model-run-unavailable" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
-        <strong>Run OLS from this data node</strong>
-        <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>
-          Requires at least two numeric columns: one outcome and one predictor.
-        </div>
+      <div data-testid="data-node-model-run-unavailable" className="op-form">
+        <p className="op-note">Needs at least two numeric columns: one outcome and one predictor.</p>
       </div>
     );
   }
@@ -514,9 +508,8 @@ function DataNodeModelRunner({
   }
 
   return (
-    <div data-testid="data-node-model-runner" style={{ borderTop: "1px solid var(--separator)", paddingTop: 10, marginTop: 8 }}>
-      <strong>Run OLS from this data node</strong>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+    <div data-testid="data-node-model-runner" className="op-form">
+      <div className="op-fields">
         <label>
           Outcome <select aria-label="Model outcome" value={y} onChange={(event) => {
             const next = event.target.value;
@@ -536,10 +529,11 @@ function DataNodeModelRunner({
           </select>
         </label>
       </div>
-      <div style={{ marginTop: 6 }}>
-        <span>Predictors </span>
+      <div className="op-field">
+        <span className="op-field__label">Predictors</span>
+        <div className="op-checks">
         {predictors.map((column) => (
-          <label key={column} style={{ marginRight: 8 }}>
+          <label key={column}>
             <input
               type="checkbox"
               aria-label={`Predictor ${column}`}
@@ -549,11 +543,9 @@ function DataNodeModelRunner({
             {column}
           </label>
         ))}
+        </div>
       </div>
-      <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>
-        This reuses the normal OLS lifecycle. The source node stays unchanged; the new run keeps source run, node, artifact, and node hash lineage.
-      </div>
-      <button type="button" data-testid="data-node-model-run" disabled={!canRun || status === "submitting"} onClick={() => void handleRun()} style={{ marginTop: 6 }}>
+      <button type="button" className="op-primary" data-testid="data-node-model-run" title="The source stays as it is; the new run records where it came from." disabled={!canRun || status === "submitting"} onClick={() => void handleRun()}>
         {status === "submitting" ? "Starting…" : "Run OLS"}
       </button>
       {result && <div data-testid="data-node-model-run-result">Run {result.run_id} started · source {result.source_lineage.source_node_id}</div>}
@@ -562,7 +554,15 @@ function DataNodeModelRunner({
   );
 }
 
+const DATA_ACTIONS = [
+  { id: "type", label: "Change type" },
+  { id: "variable", label: "New variable" },
+  { id: "rows", label: "Reshape" },
+  { id: "model", label: "Fit a model" },
+] as const;
+
 export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
+  const [action, setAction] = useState<(typeof DATA_ACTIONS)[number]["id"]>("type");
   const isDatasetNode = node.kind === "dataset_stage";
   const projectRoot = useProjectRootOptional();
   const resolved = useResolvedNodeOperationContext();
@@ -601,7 +601,7 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
       cancelled = true;
     };
     // provenance is derived from node.raw; keying on childNodeId covers node switches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately partial dependency list.
   }, [projectRoot, childNodeId, provenance !== null]);
 
   useEffect(() => {
@@ -708,72 +708,41 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
     );
 
   return (
-    <section aria-label="Data column operation" data-testid="data-column-cast-section" style={{ marginTop: 18 }}>
-      <div className="ln-section-label" style={{ marginBottom: 6 }}>
-        Data operation
-      </div>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          padding: 10,
-          background: "var(--bg-card-2)",
-          borderRadius: 8,
-          fontSize: 12,
-        }}
-      >
+    <section aria-label="Data column operation" data-testid="data-column-cast-section" className="op-panel">
         {provenance && (
-          <div
-            data-testid="data-cast-provenance"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              paddingBottom: 8,
-              borderBottom: "1px solid var(--separator)",
-            }}
-          >
-            <div>
-              <strong>Created by {provenance.operation_id}</strong>
-              {record ? (
-                <>
-                  {" "}· Operation Record {record.record_id} · {record.status}
-                  {record.verification?.passed
-                    ? " · verification passed"
-                    : record.verification
-                      ? " · verification failed"
-                      : null}
-                </>
-              ) : recordError ? (
-                <span style={{ color: "var(--label-tertiary)" }}> · operation record unavailable</span>
-              ) : null}
-            </div>
+          <details data-testid="data-cast-provenance" className="op-advanced">
+            <summary>
+              Created by {provenance.operation_id}
+              {record ? ` · ${record.status}${record.verification?.passed ? " · verification passed" : record.verification ? " · verification failed" : ""}`
+                : recordError ? " · operation record unavailable" : null}
+            </summary>
+            {record && <div>Operation Record {record.record_id}</div>}
             {record && <ProvenanceDiff record={record} />}
-            <div style={{ color: "var(--label-tertiary)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              {provenance.execution_key}
-            </div>
-            {provenance.recipe_path && (
-              <div style={{ color: "var(--label-tertiary)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                Recipe: {provenance.recipe_path}
-              </div>
-            )}
-          </div>
+            <div className="op-mono">{provenance.execution_key}</div>
+            {provenance.recipe_path && <div className="op-mono">Recipe: {provenance.recipe_path}</div>}
+          </details>
         )}
         {sourceContext && (
-          <div data-testid="data-cast-source-artifact" style={{ color: "var(--label-tertiary)" }}>
-            Source artifact: <strong>{sourceContext.source_artifact_id}</strong> · {sourceContext.row_count} rows
+          <div data-testid="data-cast-source-artifact" className="op-note" title={sourceContext.source_artifact_id}>
+            {sourceContext.source_artifact_id} · {sourceContext.row_count} rows
           </div>
         )}
         {status === "loading" && <div>Loading typed data context…</div>}
         {status === "error" && <div data-testid="data-cast-error">{error}</div>}
         {sourceContext && (
-          <>
+          <div className="op-switch" role="tablist" aria-label="Data operation">
+            {DATA_ACTIONS.map((item) => (
+              <button key={item.id} type="button" role="tab" aria-selected={action === item.id} onClick={() => setAction(item.id)}>{item.label}</button>
+            ))}
+          </div>
+        )}
+        {sourceContext && (
+          <div className="op-form" hidden={action !== "type"}>
             {rows.map((row, index) => (
               <div
                 key={index}
                 data-testid={`data-cast-row-${index}`}
-                style={{ display: "flex", gap: 8, alignItems: "center" }}
+                className="op-cast-row"
               >
                 <select
                   aria-label={`Column ${index + 1}`}
@@ -812,7 +781,7 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
                 )}
               </div>
             ))}
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <div className="op-actions">
               <button
                 type="button"
                 data-testid="data-cast-add-column"
@@ -821,8 +790,8 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
               >
                 + Add column
               </button>
-              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ color: "var(--label-tertiary)" }}>Output</span>
+              <label className="op-inline">
+                <span className="op-field__label">Output</span>
                 <select
                   aria-label="Output format"
                   data-testid="data-cast-format"
@@ -837,13 +806,11 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
                 </select>
               </label>
             </div>
-            <div style={{ color: "var(--label-tertiary)" }}>
-              All selected columns are cast into one immutable child node. Preview is required; the source node
-              stays unchanged and downstream models require rerun.
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div className="op-actions">
               <button
                 type="button"
+                className="op-primary"
+                title="Nothing changes until you confirm. The source stays as it is; downstream models will need a rerun."
                 data-testid="data-cast-preview"
                 disabled={!request || status === "previewing" || status === "confirming"}
                 onClick={() => void handlePreview()}
@@ -857,6 +824,7 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
               {preview?.status === "ready" && (
                 <button
                   type="button"
+                  className="op-primary"
                   data-testid="data-cast-confirm"
                   disabled={status === "confirming"}
                   onClick={() => void handleConfirm()}
@@ -869,10 +837,8 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
                 </button>
               )}
             </div>
-          </>
-        )}
         {preview && (
-          <div data-testid="data-cast-preview-result" style={{ borderTop: "1px solid var(--separator)", paddingTop: 8 }}>
+          <div data-testid="data-cast-preview-result" className="op-preview" >
             <strong>Preview</strong> · {preview.row_count} rows · {preview.status}
             {preview.items.map((item) => (
               <div key={item.column} data-testid={`data-cast-preview-item-${item.column}`}>
@@ -887,35 +853,25 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
           </div>
         )}
         {status === "complete" && (
-          <div data-testid="data-cast-complete" style={{ color: "var(--status-holds-fg)" }}>
+          <div data-testid="data-cast-complete" className="op-success">
             Cast confirmed · Operation Record {operationId ?? "created"} · new child data node created
           </div>
         )}
-        {sourceContext && sourceRunId && sourceNodeId && projectRoot && (
-          <FeatureRecipeBuilder
-            projectRoot={projectRoot}
-            sourceRunId={sourceRunId}
-            sourceNodeId={sourceNodeId}
-            sourceContext={sourceContext}
-          />
+          </div>
         )}
         {sourceContext && sourceRunId && sourceNodeId && projectRoot && (
-          <DataTransformBuilder
-            projectRoot={projectRoot}
-            sourceRunId={sourceRunId}
-            sourceNodeId={sourceNodeId}
-            sourceContext={sourceContext}
-          />
+          <>
+            <div hidden={action !== "variable"}>
+              <FeatureRecipeBuilder projectRoot={projectRoot} sourceRunId={sourceRunId} sourceNodeId={sourceNodeId} sourceContext={sourceContext} />
+            </div>
+            <div hidden={action !== "rows"}>
+              <DataTransformBuilder projectRoot={projectRoot} sourceRunId={sourceRunId} sourceNodeId={sourceNodeId} sourceContext={sourceContext} />
+            </div>
+            <div hidden={action !== "model"}>
+              <DataNodeModelRunner projectRoot={projectRoot} sourceRunId={sourceRunId} sourceNodeId={sourceNodeId} sourceContext={sourceContext} />
+            </div>
+          </>
         )}
-        {sourceContext && sourceRunId && sourceNodeId && projectRoot && (
-          <DataNodeModelRunner
-            projectRoot={projectRoot}
-            sourceRunId={sourceRunId}
-            sourceNodeId={sourceNodeId}
-            sourceContext={sourceContext}
-          />
-        )}
-      </div>
     </section>
   );
 }

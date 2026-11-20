@@ -19,6 +19,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from jsonschema import Draft202012Validator
+
+from ..native_research import NATIVE_RESEARCH_OPERATIONS, compute_native_research
 
 
 MAX_WORKFLOW_ROWS = 100_000
@@ -31,12 +34,13 @@ class WorkflowCapabilityAdapterError(ValueError):
 
 @dataclass(frozen=True)
 class WorkflowCapabilityExecution:
-    """The bounded result plus an optional dataset for the generic runtime."""
+    """The bounded result and optional frame; quant.replay uses a local companion table."""
 
     payload: dict[str, Any]
     output_frame: pd.DataFrame | None = None
     dataset_kind: str | None = None
     artifact_type: str = "workflow_capability_result"
+    local_detail: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -203,55 +207,32 @@ def _binding_column(bindings: Mapping[str, Any], key: str, *, operation_id: str)
     return value
 
 
-def _validate_statistical_option_shapes(
-    operation_id: str,
-    columns: list[str],
-    options: Mapping[str, Any],
-) -> None:
-    reference_means = options.get("reference_means")
-    if reference_means is not None:
-        if not isinstance(reference_means, Mapping):
-            raise WorkflowCapabilityAdapterError(
-                f"{operation_id} reference_means must be an object mapping columns to finite numbers"
-            )
-        for column, value in reference_means.items():
-            if type(column) is not str or not column or column not in columns:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means columns must be present in the declared columns"
-                )
-            if type(value) not in (int, float):
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means values must be finite numbers"
-                )
-            try:
-                finite = math.isfinite(float(value))
-            except (OverflowError, TypeError):
-                finite = False
-            if not finite:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means values must be finite numbers"
-                )
+def _validate_statistical_option_shapes(operation_id, columns, options):
+    from ..statistical_tests import TEST_FAMILIES
 
-    paired_columns = options.get("paired_columns")
-    if paired_columns is not None:
-        if not isinstance(paired_columns, (list, tuple)):
-            raise WorkflowCapabilityAdapterError(
-                f"{operation_id} paired_columns must be a list of two-column pairs"
-            )
-        for pair in paired_columns:
-            if (
-                not isinstance(pair, (list, tuple))
-                or len(pair) != 2
-                or any(type(column) is not str or not column for column in pair)
-            ):
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} paired_columns entries must contain exactly two column names"
-                )
-            left, right = pair
-            if left == right or left not in columns or right not in columns:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} paired_columns entries must name two distinct declared columns"
-                )
+    try:
+        TEST_FAMILIES[operation_id.removeprefix("test.")].request.validate_options(operation_id, columns, options)
+    except ValueError as exc:
+        raise WorkflowCapabilityAdapterError(str(exc)) from exc
+
+
+def _with_role_columns(operation_id: str, columns: list[str], options: Mapping[str, Any]) -> list[str]:
+    """A family run only by declared roles reads exactly the columns its roles name.
+
+    test.proportions asked for each role column twice (option and column_bindings.columns); in the 3724e8b2
+    round two proposals named group_column only as a role and were refused. Columns are still never
+    inferred: these are the columns the caller wrote in its own role options.
+    """
+
+    from ..statistical_tests import TEST_FAMILIES
+
+    family = TEST_FAMILIES[operation_id.removeprefix("test.")]
+    if family.automatic:
+        return columns
+    request = family.request
+    named = [column for name, parameter in request.parameters.items()
+             for column in sorted(request._parameter_columns(parameter, options.get(name)))]
+    return list(dict.fromkeys([*columns, *named]))
 
 
 def _validate_statistical_request(operation_id: str, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -269,8 +250,42 @@ def _validate_statistical_request(operation_id: str, request: Mapping[str, Any])
         raise WorkflowCapabilityAdapterError(
             f"{operation_id} options contains unsupported field(s): {', '.join(unknown_options)}"
         )
+    if operation_id in {"test.t_tests", "test.nonparametric"} and options.get("paired_columns"):
+        raise WorkflowCapabilityAdapterError(
+            f"{operation_id} compares groups; paired_columns is read by test.evidence, which runs the paired "
+            "t-test and the Wilcoxon signed-rank test. Use operation_id test.evidence with the same spec."
+        )
+    pairs = options.get("paired_columns")
+    if (isinstance(pairs, (list, tuple)) and len(pairs) == 2
+            and all(type(column) is str and column for column in pairs)):
+        # One pair written flat, ["a", "b"]: it can only mean [["a", "b"]] (live turn and QRData 104 lost a step to it).
+        options = {**options, "paired_columns": [list(pairs)]}
+    columns = _with_role_columns(operation_id, columns, options)
     _validate_statistical_option_shapes(operation_id, columns, options)
-    return {**normalized, "column_bindings": {"columns": columns}}
+    return {**normalized, "column_bindings": {"columns": columns}, "options": options}
+
+
+def preflight_statistical(frame: pd.DataFrame, request: Mapping[str, Any]) -> None:
+    """Run a test family's own data checks on the source frame, before the person approves the plan.
+
+    A family without a preflight is checked when it runs; so is a step whose columns the frame lacks,
+    which the column checks report.
+    """
+
+    from ..statistical_tests import TEST_FAMILIES
+
+    operation_id = str(request["operation_id"])
+    family = TEST_FAMILIES.get(operation_id.removeprefix("test."))
+    if family is None or family.preflight is None:
+        return
+    normalized = _validate_statistical_request(operation_id, request)
+    columns = list(normalized["column_bindings"]["columns"])
+    if any(column not in frame.columns for column in columns):
+        return
+    try:
+        family.preflight(frame.loc[:, columns], family.request.kernel_arguments(normalized["options"], named=True))
+    except ValueError as exc:
+        raise WorkflowCapabilityAdapterError(f"{operation_id}: {exc}") from exc
 
 
 def _execute_statistical(frame: pd.DataFrame, request: Mapping[str, Any]) -> WorkflowCapabilityExecution:
@@ -305,23 +320,40 @@ def _execute_statistical(frame: pd.DataFrame, request: Mapping[str, Any]) -> Wor
             f"{operation_id} paired_columns requires numeric source column(s): "
             + ", ".join(non_numeric_pairs)
         )
-    from ..statistical_tests import run_statistical_tests
+    from ..statistical_tests import TEST_FAMILIES, run_named_statistical_test, run_statistical_tests
 
-    results = run_statistical_tests(
-        selected_frame,
-        analysis_columns=columns,
-        reference_means=options.get("reference_means"),
-        paired_columns=options.get("paired_columns"),
-    )
     family = operation_id.removeprefix("test.")
+    if not TEST_FAMILIES[family].automatic:
+        # Declared roles cannot come from the automatic matrix; this family runs only as named.
+        try:
+            results = {family: run_named_statistical_test(
+                selected_frame, family=family, analysis_columns=columns,
+                **_statistical_request(operation_id).kernel_arguments(options, named=True))}
+        except ValueError as exc:
+            raise WorkflowCapabilityAdapterError(f"{operation_id}: {exc}") from exc
+    else:
+        results = run_statistical_tests(
+            selected_frame,
+            analysis_columns=columns,
+            **_statistical_request(operation_id).kernel_arguments(options, named=False),
+        )
     payload = results.get(family)
     if not isinstance(payload, Mapping) or not isinstance(payload.get("results"), list):
         raise WorkflowCapabilityAdapterError(
             f"{operation_id} did not return its declared result shape"
         )
     if not payload["results"]:
+        elsewhere = sorted(
+            f"test.{name}" for name, other in results.items()
+            if name != family and isinstance(other, Mapping) and other.get("results")
+        )
         raise WorkflowCapabilityAdapterError(
-            f"{operation_id} has no estimable comparison for the declared columns"
+            f"{operation_id} has no estimable comparison for the declared columns ("
+            + ", ".join(f"{column}: {selected_frame[column].dtype}, {selected_frame[column].nunique()} values" for column in columns)
+            + "). "
+            + (f"These columns do give results under: {', '.join(elsewhere)}." if elsewhere else "No test family has a result for them.")
+            + (f" Two paired measurements go to test.evidence with options.paired_columns [[\"{columns[0]}\", \"{columns[1]}\"]]."
+               if family in {"t_tests", "nonparametric"} and len(columns) == 2 else "")
         )
     assumptions = sorted(
         {
@@ -888,6 +920,79 @@ def _validate_result(operation_id: str, result: Mapping[str, Any]) -> None:
         raise WorkflowCapabilityAdapterError(f"{operation_id} result is not JSON-safe: {exc}") from exc
 
 
+def _validate_network_request(operation_id: str, request: Mapping[str, Any]) -> dict[str, Any]:
+    from .network_capability import validate_network_request
+
+    return validate_network_request(operation_id, request, _validate_common_request, WorkflowCapabilityAdapterError)
+
+
+def _execute_network(frame: pd.DataFrame, request: Mapping[str, Any]) -> WorkflowCapabilityExecution:
+    from .network_capability import execute_network_request
+
+    return WorkflowCapabilityExecution(payload=execute_network_request(frame, request, WorkflowCapabilityAdapterError))
+
+
+def _validate_native_research(operation_id: str, request: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = _validate_common_request(operation_id, request)
+    declaration = NATIVE_RESEARCH_OPERATIONS[operation_id]
+    error = next(Draft202012Validator(declaration.schema()).iter_errors(normalized), None)
+    if error is not None:
+        field = ".".join(map(str, error.absolute_path))
+        raise WorkflowCapabilityAdapterError(f"{operation_id} {field}: {error.message}")
+    for name, value in normalized["options"].items():
+        if declaration.options[name].get("type") == "integer" and type(value) is not int:
+            raise WorkflowCapabilityAdapterError(f"{operation_id} options.{name} must be an integer")
+    bindings = normalized["column_bindings"]
+    if operation_id.startswith("prediction.") and operation_id != "prediction.native_forest_apply":
+        if bindings["outcome"] in bindings["predictors"] or bindings["outcome"] == bindings.get("time_col"):
+            raise WorkflowCapabilityAdapterError(f"{operation_id} outcome cannot be a predictor or time column")
+    else:
+        source_roles = bindings
+        if operation_id == "time_series.native_var":
+            from ..native_var import validate_granger_roles
+
+            validate_granger_roles(bindings["series_columns"], bindings.get("granger_effect"), bindings.get("granger_excluded"))
+            source_roles = {key: bindings[key] for key in ("time_col", "series_columns")}
+        columns = [column for value in source_roles.values() for column in ([value] if isinstance(value, str) else value)]
+        if len(set(columns)) != len(columns):
+            raise WorkflowCapabilityAdapterError(f"{operation_id} column roles must be distinct")
+    if operation_id in ("quant.replay", "quant.replay_tail_risk") and len(bindings["return_columns"]) != len(bindings["weight_columns"]):
+        raise WorkflowCapabilityAdapterError(f"{operation_id} requires one return and one target weight per asset")
+    if operation_id == "prediction.native_forest_apply":
+        from ..native_prediction_apply import CLASSIFICATION_OPERATION, apply_output_columns
+        from ..native_research import native_result_operation
+
+        classification = native_result_operation(normalized["options"]["model_artifact_id"]) == CLASSIFICATION_OPERATION
+        apply_output_columns(normalized["options"], classification=classification)
+    normalized["options"] = {
+        **{name: field["default"] for name, field in declaration.options.items() if "default" in field},
+        **normalized["options"],
+    }
+    if operation_id == "prediction.native_forest_apply" and not classification:
+        normalized["options"].pop("probability_column")
+    return normalized
+
+
+def _execute_native_research(frame: pd.DataFrame, request: Mapping[str, Any]) -> WorkflowCapabilityExecution:
+    if request["operation_id"] == "prediction.native_forest_apply":
+        raise WorkflowCapabilityAdapterError("FOREST_APPLY_PROJECT_REQUIRED: use the shared project workflow executor")
+    if request["operation_id"] == "quant.replay":
+        from ..checks.ar_cancellation import check_cancellation
+        from ..native_quant_replay import _verified_replay, _replay_result, _replay_ledger
+
+        check_cancellation()
+        _, receipt, output, times, inputs = _verified_replay(frame, **request["column_bindings"], **request["options"])
+        raw = _replay_result(receipt, output, times, inputs)
+        local = {"series": raw.pop("series")}
+        policy = raw.pop("assumptions")
+        result = {**raw, "policy": policy, "operation_id": "quant.replay", "n_rows": len(frame),
+                  "assumptions": list(NATIVE_RESEARCH_OPERATIONS["quant.replay"].assumptions)}
+        ledger = _replay_ledger(output, times, inputs["time_format"])
+        return WorkflowCapabilityExecution(payload=_json_safe(result), local_detail=_json_safe(local), output_frame=ledger)
+    result, local = compute_native_research(frame, request)
+    return WorkflowCapabilityExecution(payload=_json_safe(result), local_detail=_json_safe(local))
+
+
 _ADAPTERS: dict[str, WorkflowCapabilityAdapter] = {
     "statistical_test": WorkflowCapabilityAdapter(
         "statistical_test", _validate_statistical_request, _execute_statistical, _validate_result
@@ -909,6 +1014,12 @@ _ADAPTERS: dict[str, WorkflowCapabilityAdapter] = {
     ),
     "arma_garch": WorkflowCapabilityAdapter(
         "arma_garch", _validate_time_series_request, _execute_arma_garch, _validate_result
+    ),
+    "network": WorkflowCapabilityAdapter(
+        "network", _validate_network_request, _execute_network, _validate_result
+    ),
+    "native_research": WorkflowCapabilityAdapter(
+        "native_research", _validate_native_research, _execute_native_research, _validate_result
     ),
 }
 
@@ -959,10 +1070,7 @@ _ADAPTER_REQUEST_SCHEMAS: dict[str, dict[str, Any]] = {
     "statistical_test": _request_schema(
         {"columns": _columns_schema(minimum=2)},
         required_bindings=("columns",),
-        options={
-            "reference_means": {"type": "object"},
-            "paired_columns": {"type": "array"},
-        },
+        options={},
     ),
     "prediction_model": _request_schema(
         {"outcome": _string_schema(), "features": _columns_schema(minimum=1)},
@@ -1057,6 +1165,8 @@ def _adapter_key_for_operation(operation_id: str) -> str:
         return "imputation"
     if operation_id == "model.auto":
         return "auto_model"
+    if operation_id.startswith("network."):
+        return "network"
     if operation_id.startswith("model.time_series."):
         return operation_id.removeprefix("model.time_series.")
     raise WorkflowCapabilityAdapterError(
@@ -1064,7 +1174,14 @@ def _adapter_key_for_operation(operation_id: str) -> str:
     )
 
 
+def _statistical_request(operation_id):
+    from ..statistical_tests import TEST_FAMILIES
+    return TEST_FAMILIES[operation_id.removeprefix("test.")].request
+
+
 def _declared_request_properties(operation_id: str, field_name: str) -> set[str]:
+    if operation_id.startswith("test.") and field_name == "options":
+        return set(_statistical_request(operation_id).parameters)
     adapter_key = _adapter_key_for_operation(operation_id)
     try:
         properties = _ADAPTER_REQUEST_SCHEMAS[adapter_key]["properties"][field_name]["properties"]
@@ -1079,11 +1196,22 @@ def _declared_request_properties(operation_id: str, field_name: str) -> set[str]
     return {str(name) for name in properties}
 
 
-def workflow_capability_request_schema(adapter_key: str) -> dict[str, Any]:
+def workflow_capability_request_schema(adapter_key: str, *, operation_id: str | None = None) -> dict[str, Any]:
     """Return the adapter declaration used by Agent and workflow schemas."""
 
+    if adapter_key == "network":
+        from .network_capability import REQUEST_SCHEMA
+
+        return deepcopy(REQUEST_SCHEMA)
+    if adapter_key == "native_research":
+        return NATIVE_RESEARCH_OPERATIONS[operation_id].schema()
     try:
-        return deepcopy(_ADAPTER_REQUEST_SCHEMAS[adapter_key])
+        schema = deepcopy(_ADAPTER_REQUEST_SCHEMAS[adapter_key])
+        if adapter_key == "statistical_test":
+            from ..statistical_test_requests import DEFAULT_TEST_PARAMETERS, StatisticalTestRequest
+            declaration = _statistical_request(operation_id) if operation_id else StatisticalTestRequest(DEFAULT_TEST_PARAMETERS)
+            schema["properties"]["options"]["properties"] = declaration.option_schemas
+        return schema
     except KeyError as exc:
         raise KeyError(f"unknown workflow capability adapter schema: {adapter_key}") from exc
 

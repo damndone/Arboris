@@ -33,7 +33,7 @@ def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
     registry = ToolRegistry()
     registry.register(
         ToolDefinition(
-            tool_id="propose_analysis_loop",
+            tool_id="run_operation",
             version="v1",
             input_schema={"type": "object"},
             side_effect="proposal",
@@ -45,7 +45,7 @@ def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
         registry.execute(
             {
                 "tool_call_id": "call-analysis-loop",
-                "tool_id": "propose_analysis_loop",
+                "tool_id": "run_operation",
                 "arguments": {},
             },
             session_id="session-a",
@@ -124,7 +124,7 @@ class ProposalReadyAdapter:
             request.request_id,
             {
                 "tool_call_id": "call-propose",
-                "tool_id": "propose_operation",
+                "tool_id": "run_operation",
                 "arguments": {},
             },
         )
@@ -332,7 +332,7 @@ def test_unknown_tool_is_visible_to_the_agent_and_does_not_abort_the_turn(
         )
 
         assert await agent.prompt("inspect the workflow contract") == "recovered after tool feedback"
-        branch = repository.get_branch("session-a")
+        branch = [entry for entry in repository.get_branch("session-a") if entry.entry_type == "message"]
         tool_payload = json.loads(branch[2].payload["content"])
         assert tool_payload["error"] == "unknown_tool"
         assert len(adapter.requests) == 2
@@ -354,7 +354,7 @@ def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
         tools = ToolRegistry()
         tools.register(
             ToolDefinition(
-                tool_id="propose_operation",
+                tool_id="run_operation",
                 version="v1",
                 input_schema={"type": "object"},
                 side_effect="proposal",

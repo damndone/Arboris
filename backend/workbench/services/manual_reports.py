@@ -14,22 +14,24 @@ import stat
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Literal
 
 from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import analysis_disclosure
 from ..agent.family_evidence import bounded_model_family_evidence
+from ..agent.workflow import WorkflowExecutionError
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
 from ..api_errors import WorkbenchAPIError
 from ..artifacts import read_json, register_artifact, sha256_file, write_json
 from ..graph_store import GraphStore, graph_to_json
 from ..lineage.headset import forest_node_key
 from ..predictive_research.schema import default_v1_prediction_registry
-from .manual_report_text import draft_text, render_values, resolved_ids
+from .manual_report_text import agent_sample_size_error, draft_text, model_sample_size_bases, render_values, resolved_ids
 from ..report_contract import validate_report_packet, validate_report_response
 from ..report_export import export_report
+from ..egress import export_boundary
 from ..report_view_model import build_regression_table
 from ..repository.run_repository import _read_artifacts_index
 from .lmm_result_adapter import read_lmm_public_results
@@ -358,21 +360,35 @@ def _reports_dir(run_root: Path) -> Path:
     return path
 
 
-def _read_report(run_root: Path, report_id: str) -> dict:
+def _read_report(run_root: Path, report_id: str, *, export_entries: list[dict] | None = None) -> dict:
     if not REPORT_ID.fullmatch(report_id):
         raise _error("MANUAL_REPORT_NOT_FOUND", "Report revision was not found in this run.", 404)
     path = _reports_dir(run_root) / f"manual_report_{report_id}.json"
     if not path.is_file() or path.is_symlink():
         raise _error("MANUAL_REPORT_NOT_FOUND", "Report revision was not found in this run.", 404)
-    payload = read_json(path)
-    if payload.get("schema_version") != "workbench-manual-report/v1" or payload["record"]["run_id"] != run_root.name:
+    relative = f"reports/{path.name}"
+    data = _source_bytes(run_root, relative)
+    payload = _json_object(data)
+    if (payload.get("schema_version") != "workbench-manual-report/v1" or payload["record"]["run_id"] != run_root.name
+            or payload["record"]["id"] != report_id):
         raise _error("MANUAL_REPORT_SOURCE_INVALID", "Stored report identity is invalid.")
+    if export_entries is not None and payload["record"]["author"] == "agent":
+        matches = [entry for entry in export_entries if entry.get("artifact_id") == f"manual_report_{report_id}"]
+        if (len(matches) != 1 or matches[0].get("path") != relative or matches[0].get("artifact_type") != "manual_report"
+                or matches[0].get("sha256") != hashlib.sha256(data).hexdigest()):
+            raise _error("MANUAL_REPORT_SOURCE_CHANGED", "Agent report bytes do not match the registered revision.", 409)
     return payload
 
 
 def list_manual_reports(run_root: Path) -> list[dict]:
-    records = [_read_report(run_root, path.stem.removeprefix("manual_report_"))["record"]
-               for path in _reports_dir(run_root).glob("manual_report_mrpt_*.json")]
+    records = []
+    for path in _reports_dir(run_root).glob("manual_report_mrpt_*.json"):
+        payload = _read_report(run_root, path.stem.removeprefix("manual_report_"))
+        record = payload["record"]
+        if record["author"] == "agent" and "model_sample_size_scope" not in payload:
+            record = {**record, "limitations": [*record["limitations"],
+                      "Sample-size claims in this older Agent revision are checked at export."]}
+        records.append(record)
     return sorted(records, key=lambda item: (item["created_at"], item["id"]), reverse=True)
 
 
@@ -384,7 +400,30 @@ def _request_identity(record: dict) -> dict:
             "parent_report_id": record["parent_report_id"]}
 
 
-def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
+def _validate_agent_sample_sizes(run_root: Path, payload: dict, facts: dict) -> None:
+    record = payload["record"]
+    scope = payload.get("model_sample_size_scope")
+    inputs = record["title"], record["text"], facts, run_root.name
+    if scope is not None:
+        issue = agent_sample_size_error(*inputs, scope["bases"], require_model_id=scope["require_model_id"])
+    else:
+        bases = model_sample_size_bases(facts.values(), run_root.name, default_basis="unknown")
+        issue = agent_sample_size_error(*inputs, bases, require_model_id=True)
+    if issue and scope is None:
+        # Older versions can recover their complete scope only when the original
+        # verified snapshot is still available. The stored report stays immutable.
+        try:
+            snapshot = build_manual_report_draft(run_root)
+        except (OSError, ValueError, WorkbenchAPIError, WorkflowExecutionError):
+            snapshot = None
+        if snapshot is not None and snapshot["source_fingerprint"] == record["source_fingerprint"]:
+            bases = model_sample_size_bases(snapshot["facts"], run_root.name)
+            issue = agent_sample_size_error(*inputs, bases, require_model_id=len(bases) > 1)
+    if issue:
+        raise _error("REPORT_SAMPLE_SIZE_UNBOUND", issue)
+
+
+def save_manual_report(run_root: Path, request: ManualReportRequest, *, author: Literal["user", "agent"] = "user") -> dict:
     directory = _reports_dir(run_root)
     directory.mkdir(exist_ok=True)
     # All manual writers, including distinct server workers, serialize the
@@ -395,8 +434,10 @@ def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
             existing = _read_report(run_root, request.id)
             if _request_identity(existing["record"]) != request.model_dump():
                 raise _error("MANUAL_REPORT_CONFLICT", "Report id already exists with different content.", 409)
+            if author == "agent":
+                _validate_agent_sample_sizes(run_root, existing, {fact["id"]: fact for fact in existing["record"]["facts"]})
             _register_report(run_root, path, request.id)
-            return existing
+            return {"schema_version": existing["schema_version"], "record": existing["record"]}
         snapshot = build_manual_report_draft(run_root)
         if snapshot["source_fingerprint"] != request.source_fingerprint:
             raise _error("MANUAL_REPORT_SOURCE_CHANGED", "Evidence changed after this draft was read.", 409)
@@ -417,22 +458,32 @@ def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
         # Figure markers are generated during export; user prose may cite only
         # selected fact IDs and may not inject arbitrary image identities.
         validate_report_response(request.text, contract, require_figure_markers=False)
-        _shown, unknown = resolved_ids(request.text, {fact["id"]: fact for fact in selected["facts"]})
+        by_id = {fact["id"]: fact for fact in selected["facts"]}
+        _shown, unknown = resolved_ids(request.text, by_id)
         if unknown:
             raise _error("MANUAL_REPORT_SELECTION_INVALID",
                          "The text shows values of facts that are not in the selected evidence, or a marker that "
                          f"names more than one fact: {', '.join(sorted(set(unknown))[:5])}.")
-        record = {"id": request.id, "run_id": run_root.name, "author": "user", "draft_origin": "deterministic",
+        record = {"id": request.id, "run_id": run_root.name, "author": author, "draft_origin": "deterministic",
                   "created_at": datetime.now(timezone.utc).isoformat(), "document_id": parent["document_id"] if parent else request.id,
                   "revision_number": parent["revision_number"] + 1 if parent else 1, "parent_report_id": request.parent_report_id,
                   "title": request.title, "text": request.text, "source_fingerprint": request.source_fingerprint,
                   **selected, "limitations": snapshot["limitations"]}
+        payload = {"schema_version": "workbench-manual-report/v1", "record": record}
+        stored = payload
+        if author == "agent":
+            # Pin ownership and count basis from all verified facts, including
+            # whether other fitted models exist. Persist only selected owners.
+            bases = model_sample_size_bases(snapshot["facts"], run_root.name)
+            selected_owners = model_sample_size_bases(selected["facts"], run_root.name)
+            scope = {"bases": {owner: bases[owner] for owner in selected_owners}, "require_model_id": len(bases) > 1}
+            stored = {**payload, "model_sample_size_scope": scope}
+            _validate_agent_sample_sizes(run_root, stored, by_id)
         # Detect source writes during projection/validation too. Source writers
         # do not share the report lock, so this is optimistic snapshot control.
         if build_manual_report_draft(run_root)["source_fingerprint"] != request.source_fingerprint:
             raise _error("MANUAL_REPORT_SOURCE_CHANGED", "Evidence changed while saving the report.", 409)
-        payload = {"schema_version": "workbench-manual-report/v1", "record": record}
-        write_json(path, payload)
+        write_json(path, stored)
         _register_report(run_root, path, request.id)
         return payload
 
@@ -447,9 +498,14 @@ def _register_report(run_root: Path, path: Path, report_id: str) -> None:
         raise _error("MANUAL_REPORT_CONFLICT", "Stored report registration differs from the immutable revision.", 409)
 
 
+@export_boundary("report.export", run_root=True)
 def export_manual_report(run_root: Path, report_id: str, format: str) -> tuple[bytes, str, str]:
-    record = _read_report(run_root, report_id)["record"]
+    entries = _read_artifacts_index(run_root).get("artifacts", [])
+    payload = _read_report(run_root, report_id, export_entries=entries)
+    record = payload["record"]
     by_id = {fact["id"]: fact for fact in record["facts"]}
+    if record["author"] == "agent":
+        _validate_agent_sample_sizes(run_root, payload, by_id)
     # The text's own heading is the title when it starts with one.
     body = render_values(record["text"], by_id)
     markdown = body if body.lstrip().startswith("# ") else f"# {record['title']}\n\n{body}"
@@ -472,7 +528,6 @@ def export_manual_report(run_root: Path, report_id: str, format: str) -> tuple[b
             analysis_disclosure.disclosure(run_root.parent.parent, run_root.name), detail=settings["detail"])
     # Pin actual bytes before invoking the existing renderer. A concurrent
     # file replacement cannot change a figure between hash check and export.
-    entries = _read_artifacts_index(run_root).get("artifacts", [])
     with TemporaryDirectory(prefix="workbench-manual-report-") as temp:
         export_root = Path(temp)
         pinned = []

@@ -70,6 +70,8 @@ export async function generateReport(input: {
   capabilityManifest?: ReportCapabilityManifestEntry[];
   excludedFactIds?: string[];
   clientTimeoutMs?: number;
+  /** The project whose data-sharing policy governs the send. */
+  projectRoot?: string | null;
 }): Promise<ReportResponse> {
   const timeoutMs = input.clientTimeoutMs ?? REPORT_CLIENT_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -106,6 +108,7 @@ export async function generateReport(input: {
           citations_required: true,
           cite_marker_format: "[[c:ID]]",
         },
+        ...(input.projectRoot ? { project_root: input.projectRoot } : {}),
       }),
     });
   } catch (error) {

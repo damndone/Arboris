@@ -31,7 +31,7 @@ IDS = [declaration.operation for declaration in DECLARATIONS]
 def test_every_data_operation_is_declared() -> None:
     assert set(IDS) == {
         "aggregate", "append", "dedupe", "fill_missing", "lag", "merge", "recode",
-        "rename", "reshape", "subset", "tsset",
+        "rename", "reshape", "row_index", "subset", "tsset",
     }
 
 

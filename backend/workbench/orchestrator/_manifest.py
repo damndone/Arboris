@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from ..artifacts import read_json, write_json
+from ..artifacts import read_json, read_model_result_without_sample_rows, write_json
 from ..graph_recorder import GraphRecorder
 
 
@@ -35,7 +35,7 @@ def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     for model_file in ("ols_1.json", "logit_1.json", "poisson_1.json"):
         path = model_dir / model_file
         if path.is_file():
-            data = read_json(path)
+            data = read_model_result_without_sample_rows(path)
             return {
                 "model_id": data.get("model_id"),
                 "model_type": data.get("model_type"),
@@ -49,7 +49,7 @@ def _result_contract_summary(run_root: Path) -> dict[str, Any] | None:
     if not model_dir.is_dir():
         return None
     for path in sorted(model_dir.glob("*.json")):
-        data = read_json(path)
+        data = read_model_result_without_sample_rows(path)  # no field below is a sample row
         if not isinstance(data, dict) or data.get("contract_version") is None:
             continue
         if data.get("model") != "ols":

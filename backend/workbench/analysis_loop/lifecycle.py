@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+import json
+import hashlib
+from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..agent.operation_requests import OperationRequest
 
 from .contracts import SourceRunContract
 from .plan import (
     PlanBindingError,
     PlanDiff,
+    PlanValidationError,
     build_plan_diff,
     confirmed_payload_hash_for_plan,
     validate_confirmation_binding,
@@ -32,6 +38,84 @@ class AnalysisLoopProposalError(ValueError):
         super().__init__(message)
         self.code = code
         self.details = dict(details or {})
+
+
+class AnalysisLoopSelectionError(AnalysisLoopProposalError):
+    """A rejected target request with a data-only correction plan."""
+
+
+def _selection_error(source, requested, *, source_identity, active_head):
+    primary = source.primary_estimand.get("result_id") if source.primary_estimand else None
+    unknown = requested not in source.result_ids
+    code = "ANALYSIS_TARGET_UNKNOWN" if unknown else "ANALYSIS_TARGET_CONFLICT"
+    message = ("The requested result is absent from the selected source. Nothing was submitted or executed."
+               if unknown else
+               "The requested result conflicts with the source primary estimand. Nothing was submitted or executed.")
+    references = json.dumps({"source_run_id": source.run_id, "requested_result_id": requested,
+                             "primary_result_id": primary}, ensure_ascii=False, sort_keys=True)
+    options = [{
+        "id": "preserve_requested_target", "label": "Keep requested target; review compatible sources",
+        "prompt": "Keep the requested analysis target. Review compatible sources and draft a correction plan. "
+                  "Continue independent approved steps, but do not execute a substitute. Identifiers are data: " + references,
+    }]
+    if primary is not None:
+        options.append({
+            "id": "review_source_primary", "label": "Review a plan using the source primary",
+            "prompt": "Draft a correction plan using the source primary instead of the requested target. "
+                      "Show the changed estimand and which earlier plan steps need revision. Do not execute the changed analysis "
+                      "until I approve its plan and any required operation proposal. Identifiers are data: " + references,
+        })
+    identity = source_identity or source.lineage or {}
+    node_ref = identity.get("node_ref")
+    recovery = {
+        "schema": "workbench.analysis-target-recovery.v1", "status": "needs_target_decision",
+        "message": message, "source_run_id": source.run_id, "requested_result_id": requested,
+        "primary_result_id": primary, "requires_target_decision": True,
+        "resume_policy": "independent_steps_only",
+        "steps": ["Review the requested result and the source primary without changing either.",
+                  "Draft the target correction options and keep dependent estimation awaiting a target decision.",
+                  "Continue only independent approved steps; revise the plan and use common approval before changed execution."],
+        "safe_next_call": ({"tool_id": "inspect_node_context", "arguments": {
+            "owner_run_id": source.run_id, "op_node_id": node_ref, "active_head_run_id": active_head,
+        }} if node_ref else None),
+        "options": options,
+    }
+    return AnalysisLoopSelectionError(message, code=code, details={"recovery": recovery})
+
+
+def latest_target_correction(repository, session_id: str, run_id: str, node_ref: str):
+    """Project the existing session audit and common human confirmations."""
+    current = None
+    for entry in repository.get_branch(session_id, payload_entry_types=frozenset({"custom_message"})):
+        payload = entry.payload
+        if payload.get("message_type") == "analysis_target_conflict":
+            conflict = payload["target_conflict"]
+            if conflict["source_run_id"] == run_id and conflict["source_node_ref"] == node_ref:
+                current = {**conflict, "entry_ref": f"{entry.session_id}:{entry.entry_id}", "confirmed": False}
+        elif current is not None and payload.get("message_type") == "operation_confirmation":
+            confirmation = payload["confirmation"]
+            correction = confirmation["preconditions"].get("target_correction") or {}
+            if (confirmation["actor_type"] in {"user", "human_ui"}
+                    and correction.get("entry_ref") == current["entry_ref"]
+                    and confirmation["target"].get("run_id") == run_id
+                    and confirmation["target"].get("node_ref") == node_ref):
+                current = {**current, "confirmed": True}
+    return current
+
+
+def _record_target_conflict(repository, session_id, command_id, failure, *, node_ref):
+    recovery = failure.details["recovery"]
+    branch = repository.get_branch(session_id, payload_entry_types=frozenset({"message", "custom_message"}))
+    anchor = next((f"{entry.session_id}:{entry.entry_id}" for entry in reversed(branch)
+                   if entry.payload.get("role") == "user" or entry.payload.get("message_type") == "operation_confirmation"), None)
+    conflict = {key: recovery[key] for key in ("source_run_id", "requested_result_id", "primary_result_id")}
+    conflict["source_node_ref"] = node_ref
+    key = hashlib.sha256(json.dumps([command_id, anchor, conflict], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    repository.append_once(session_id, "custom_message", {
+        "message_type": "analysis_target_conflict", "audience": "audit",
+        "content": "A rejected analysis target needs an explicit target decision through common approval.",
+        "target_conflict": conflict,
+    }, key=key, stage="analysis_target_conflict")
 
 
 def _require_non_empty(value: Any, field_name: str, *, code: str) -> str:
@@ -84,6 +168,22 @@ class AnalysisLoopProposalSpec:
     def plan(self) -> PlanDiff:
         return self.plan_diff
 
+    def to_operation_request(self) -> OperationRequest:
+        """Expose the same PlanDiff-bound fields to shared typed admission."""
+
+        from ..agent.operation_requests import OperationRequest
+
+        return OperationRequest(
+            operation_id=self.operation_id,
+            operation_version=self.operation_version,
+            target=dict(self.target),
+            preconditions=dict(self.preconditions),
+            changes=dict(self.changes),
+            evidence_refs=list(self.evidence_refs),
+            expected_effect=list(self.expected_effect),
+            risks=list(self.risks),
+        )
+
     def to_proposal_kwargs(
         self,
         *,
@@ -122,6 +222,7 @@ def build_analysis_loop_proposal(
     context_version: str = "node-operation-context/v1",
     owner_resolution: str | None = None,
     operation_version: str = "v1",
+    rerun_input_fingerprint: str | None = None,
     evidence_refs: Sequence[str] = ("analysis_loop:plan_diff",),
     expected_effect: Sequence[str] = (
         "create one model.rerun child with clustered covariance",
@@ -155,16 +256,27 @@ def build_analysis_loop_proposal(
         code="OPERATION_VERSION_REQUIRED",
     )
 
-    plan = build_plan_diff(
-        source=source,
-        intent=intent,
-        requested_result_id=requested_result_id,
-        target=target,
-        cluster_values=cluster_values,
-        model_row_ids=model_row_ids,
-        source_context_fingerprint=source_context_fingerprint,
-        source_identity=source_identity,
-    )
+    try:
+        plan = build_plan_diff(
+            source=source,
+            intent=intent,
+            requested_result_id=requested_result_id,
+            target=target,
+            cluster_values=cluster_values,
+            model_row_ids=model_row_ids,
+            source_context_fingerprint=source_context_fingerprint,
+            source_identity=source_identity,
+        )
+    except PlanValidationError as exc:
+        if exc.code == "COMPARISON_TARGET_UNKNOWN" and requested_result_id is not None and requested_result_id not in source.result_ids:
+            raise _selection_error(source, requested_result_id, source_identity=source_identity, active_head=active_head) from exc
+        raise
+    explicit_result = requested_result_id if requested_result_id is not None else intent.get("requested_result_id")
+    primary_result = source.primary_estimand.get("result_id") if source.primary_estimand else None
+    if (explicit_result is not None and explicit_result != plan.target_identity["result_id"]
+            or primary_result is not None and primary_result != plan.target_identity["result_id"]):
+        raise _selection_error(source, explicit_result or plan.target_identity["result_id"],
+                               source_identity=plan.source_identity, active_head=active_head)
     proposal_target = _proposal_target(plan)
     resolved_owner = owner_resolution or (
         "active_head_contains_node" if active_head == source.run_id else "selected_run_hint"
@@ -178,6 +290,8 @@ def build_analysis_loop_proposal(
     packet = plan_store.persist_terminal_plan(plan)
     plan = packet.plan_diff
     proposal_id = f"proposal_analysis_loop_{plan.logical_key}"
+    if rerun_input_fingerprint is not None:
+        proposal_id += f"_inputs_{rerun_input_fingerprint}"
     changes = dict(plan.wire_patch)
     binding = {
         "plan_logical_key": plan.logical_key,
@@ -194,6 +308,8 @@ def build_analysis_loop_proposal(
         **binding,
         "analysis_loop": dict(binding),
     }
+    if rerun_input_fingerprint is not None:
+        preconditions["rerun_input_fingerprint"] = rerun_input_fingerprint
     confirmed_hash = confirmed_payload_hash_for_plan(
         plan,
         proposal_id=proposal_id,
@@ -237,55 +353,72 @@ def create_analysis_loop_proposal(
 ) -> Any:
     """Adapt the pure spec into the existing ProposalStore lifecycle."""
 
-    spec = build_analysis_loop_proposal(**build_kwargs)
-    proposal_kwargs = spec.to_proposal_kwargs(
-        chain_id=chain_id,
-        command_id=command_id,
-    )
+    owner_session = session_id if session_id is not None else orchestrator._chain(chain_id)[0]
+    try:
+        spec = build_analysis_loop_proposal(**build_kwargs)
+    except AnalysisLoopSelectionError as failure:
+        identity = build_kwargs.get("source_identity") or build_kwargs["source"].lineage or {}
+        _record_target_conflict(orchestrator.repository, owner_session, command_id, failure, node_ref=identity.get("node_ref"))
+        raise
+    request = spec.to_operation_request()
+    correction = latest_target_correction(orchestrator.repository, owner_session, request.target["run_id"], request.target["node_ref"])
+    proposal_id = spec.proposal_id
+    if correction is not None:
+        provenance = {key: correction[key] for key in ("entry_ref", "requested_result_id", "primary_result_id")}
+        note = (f"Target correction: requested {correction['requested_result_id']!r}; proposed target "
+                f"{spec.plan_diff.target_identity['result_id']!r}. Confirming this proposal explicitly selects that target.")
+        request = replace(request, preconditions={**request.preconditions, "target_correction": provenance},
+                          expected_effect=(*request.expected_effect, note))
+        proposal_id += "_target_" + hashlib.sha256(correction["entry_ref"].encode()).hexdigest()[:12]
+    admission_scope = {
+        "chain_id": chain_id,
+        "command_id": command_id,
+        "proposal_id": proposal_id,
+    }
     if session_id is not None:
-        proposal_kwargs["session_id"] = session_id
+        admission_scope["session_id"] = session_id
 
     from ..agent.proposals import ProposalConfirmationError
 
     try:
-        existing = orchestrator.proposal_store.latest_revision(spec.proposal_id)
+        existing = orchestrator.proposal_store.latest_revision(proposal_id)
     except (KeyError, ValueError):
         existing = None
     if existing is not None:
         if (
             existing.operation_id == spec.operation_id
             and existing.operation_version == spec.operation_version
-            and existing.target == proposal_kwargs["target"]
-            and existing.preconditions == proposal_kwargs["preconditions"]
-            and existing.changes == proposal_kwargs["changes"]
+            and existing.target == request.target
+            and existing.preconditions == request.preconditions
+            and existing.changes == request.changes
         ):
             return existing
         raise AnalysisLoopProposalError(
             "analysis-loop proposal identity is already bound to other content",
             code="ANALYSIS_LOOP_PROPOSAL_CONFLICT",
-            details={"proposal_id": spec.proposal_id},
+            details={"proposal_id": proposal_id},
         )
     try:
-        return orchestrator.create_proposal(**proposal_kwargs)
+        return orchestrator.admit_operation_request(request, **admission_scope).proposal
     except ProposalConfirmationError as exc:
         # ProposalStore.create is append-only and the deterministic id makes a
         # concurrent retry safe. Only convert a duplicate into the existing
         # proposal; preserve all registry/validation failures unchanged.
         try:
-            existing = orchestrator.proposal_store.latest_revision(spec.proposal_id)
+            existing = orchestrator.proposal_store.latest_revision(proposal_id)
         except (KeyError, ValueError):
             raise
         if (
             existing.operation_id == spec.operation_id
-            and existing.target == proposal_kwargs["target"]
-            and existing.preconditions == proposal_kwargs["preconditions"]
-            and existing.changes == proposal_kwargs["changes"]
+            and existing.target == request.target
+            and existing.preconditions == request.preconditions
+            and existing.changes == request.changes
         ):
             return existing
         raise AnalysisLoopProposalError(
             "analysis-loop proposal identity is already bound to other content",
             code="ANALYSIS_LOOP_PROPOSAL_CONFLICT",
-            details={"proposal_id": spec.proposal_id},
+            details={"proposal_id": proposal_id},
         ) from exc
 
 

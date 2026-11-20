@@ -20,6 +20,7 @@ from ..api_errors import WorkbenchAPIError
 from ..artifacts import read_json
 from ..canonical import sha256_canonical
 from ..contracts.common.errors import OperationValidationError
+from ..native_research import NATIVE_RESEARCH_OPERATIONS, validate_native_research_size
 from ..statistical_exploration import resolve_statistical_source
 
 
@@ -94,6 +95,16 @@ def _compile(root: Path, request: Mapping[str, Any], token: str):
             "proposal_authorization", "proposal_confirmation",
         }:
             raise _error("AUTHORIZED_GATEWAY_REQUIRED", "The declared authorization policy requires a dedicated confirmation gateway.")
+        # A compiled source reference uses a producer's future output, not the selected frame.
+        if step.operation_id in NATIVE_RESEARCH_OPERATIONS and "source" not in step.spec:
+            try:
+                validate_native_research_size(step.operation_id, step.spec, len(frame))
+                if step.operation_id == "prediction.native_forest_apply":
+                    from .native_prediction_apply import preview_saved_forest
+
+                    preview_saved_forest(root, frame, step.spec["options"])
+            except ValueError as exc:
+                raise OperationValidationError(f"{step.operation_id}: {exc}") from exc
     # Upload materialization is itself a mutation even for a read-only step.
     requires_confirmation = upload is not None or any(
         WORKFLOW_STEP_SPEC_CONTRACTS[step.operation_id].effect_level != "read_only"
@@ -143,7 +154,10 @@ def _result(root: Path, proposal, request_id: str, record=None) -> dict[str, Any
                     item.get("artifact_id") in stored.artifact_ids
                     or f"{run_id}:{item.get('artifact_id')}" in stored.artifact_ids
                 )}
-                artifacts.extend({"run_id": run_id, "artifact_id": item} for item in sorted(owned))
+                ordered = sorted(owned)
+                if step["operation_id"] == "quant.replay":
+                    ordered.sort(key=lambda item: owned[item].get("artifact_type") == "quant_replay_ledger")
+                artifacts.extend({"run_id": run_id, "artifact_id": item} for item in ordered)
                 graph_path = run_root / "graph.json"
                 graph = read_json(graph_path) if graph_path.is_file() else {}
                 paths = {item.get("path") for item in owned.values()}
@@ -243,12 +257,18 @@ def run_manual_operation(
             preconditions = {**draft.preconditions, "manual_request": semantic,
                              "manual_request_hash": sha256_canonical(semantic),
                              "manual_confirmation_required": requires_confirmation, "manual_origin": origin}
+            risks = ["Creates immutable analysis artifacts and declared dataset/model outputs."]
+            native_steps = [step for step in draft.steps if step.operation_id in NATIVE_RESEARCH_OPERATIONS]
+            if native_steps:
+                risks.append("Preview checks known row limits. Execution validates data values and the local native build.")
+                if any("source" in step.spec for step in native_steps):
+                    risks.append("A dataset from an earlier step is checked after it is produced.")
             proposal = store.create(
                 session_id=session_id, chain_id=chain_id, command_id=request_id,
                 operation_id="operation.multi_step", target=draft.target, preconditions=preconditions,
                 changes={"steps": steps}, evidence_refs=[evidence_ref],
                 expected_effect=[WORKFLOW_STEP_SPEC_CONTRACTS[step.operation_id].summary for step in draft.steps],
-                risks=["Creates immutable analysis artifacts and declared dataset/model outputs."],
+                risks=risks,
                 proposal_id=proposal_id,
             )
         if mode == "preview" or (mode == "execute" and requires_confirmation):

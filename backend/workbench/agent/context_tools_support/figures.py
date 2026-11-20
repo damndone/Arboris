@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 import re
 from typing import Any
-from ...artifacts import read_json
+from ..context_compiler import read_context_artifact_index
 from ...services.results_service import read_model_results
 from .summaries import (
     _bounded_public_result_value,
@@ -25,9 +25,12 @@ def _bounded_run_figure_evidence(
     try:
         from ...figure_context import FigureContextError, resolve_figure_ai_context
 
+        from ...figure_plans import ensure_figures
+
         run_root = project_root / "runs" / run_id
+        ensure_figures(run_root)
         try:
-            index = read_json(run_root / "artifacts_index.json")
+            index = read_context_artifact_index(run_root)
         except (FileNotFoundError, OSError, ValueError):
             return []
         records = index.get("artifacts") if isinstance(index, dict) else None
@@ -256,7 +259,7 @@ def _figure_artifact_suffix(column: str) -> str:
 
 def _read_cleaned_dataset_for_figure_context(run_root: Path) -> Any | None:
     try:
-        index = read_json(run_root / "artifacts_index.json")
+        index = read_context_artifact_index(run_root)
         records = index.get("artifacts") if isinstance(index, dict) else None
         if not isinstance(records, list):
             return None

@@ -214,7 +214,7 @@ def test_numeric_derived_columns_are_typed_and_available_to_later_steps(tmp_path
                 "input_columns": ["headcount"],
                 "output_name": "derived_value",
             },
-            "operator must be natural_log or multiply",
+            "operator must be one of: natural_log, multiply",
         ),
         (
             {

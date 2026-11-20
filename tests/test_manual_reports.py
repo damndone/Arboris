@@ -1,4 +1,5 @@
 """Offline manual reporting uses persisted evidence, never provider output."""
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
@@ -106,6 +107,244 @@ def test_offline_draft_edit_save_history_and_export(report_case):
         else:
             assert zipfile.is_zipfile(io.BytesIO(exported.content))
     assert __import__('json').loads((run.root / "model_results/ols_1.json").read_text()) == result
+
+
+def test_agent_report_requires_the_registered_sample_size_marker(tmp_path, monkeypatch):
+    from workbench.agent.context_tools import NodeOperationContextProvider
+    from workbench.agent.session import JsonlSessionRepository
+    from workbench.agent.tools import ToolRegistry
+    from workbench.artifacts import read_json, sha256_file
+    from workbench.http.manual_report_routes import router
+    from workbench.orchestrator import run_workflow
+
+    def no_provider(*args, **kwargs):
+        raise AssertionError("report validation must never invoke a provider")
+
+    monkeypatch.setattr("workbench.llm.client.chat_completion", no_provider)
+    source = tmp_path / "source.csv"
+    source.write_text("x,outcome\n" + "".join(f"{x},{23*x + 7*((x*17 % 19) - 9)}\n" for x in range(1, 38)))
+    project = create_project(tmp_path, "registered_sample_size")
+    run = run_workflow(project.root, [source], mode="auto", y="outcome", x=["x"], model_type="ols",
+                       covariance="unadjusted")
+    assert run["status"] == "completed", run
+    run_id = run["run_id"]
+    run_root = project.root / "runs" / run_id
+    model = run_root / "model_results/ols_1.json"
+    model_digest = sha256_file(model)
+    kernel = read_json(run_root / "model_results/inference_kernels/ols_1.json")
+    assert read_json(model)["nobs"] == 37 and kernel["df_resid"] == 35
+
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(router)
+    client = TestClient(app)
+    route = f"/runs/{run_id}/manual-reports"
+    params = {"project_root": str(project.root)}
+    snapshot = client.get(f"{route}/draft", params=params).json()
+    count = next(fact for fact in snapshot["facts"] if fact["field"] == "model/nobs")
+    wrong_field = next(fact for fact in snapshot["facts"] if fact["field"] == "coefficient/x/estimate")
+    assert count["value"] == 37 and count["source"]["result_ref"] == "model_results:ols_1"
+
+    repository = JsonlSessionRepository(project.root / "workbench")
+    repository.create_session("s", chain_id="c", role="chain")
+    # Conversation values, even the actual residual df, do not bind a report's sample size.
+    repository.append("s", "message", {"role": "tool", "name": "inspect_operation_artifact",
+                                         "content": {"df_resid": kernel["df_resid"], "some_other_count": 38}})
+    tools = ToolRegistry()
+    provider = NodeOperationContextProvider(project.root)
+    for definition in provider.tool_definitions(chain_id="c", session_id="s"):
+        tools.register(definition)
+
+    def call(tool_id, call_id, **args):
+        return asyncio.run(tools.execute({"tool_id": tool_id, "tool_call_id": call_id,
+                                          "arguments": {"run_id": run_id, **args}}, session_id="s"))
+
+    cases = {
+        "cited_literal": ("OLS sample size", f"The OLS fit used 38 observations [[c:{count['id']}]]."),
+        "other_field_literal": ("OLS sample size", "The OLS fit used 35 observations."),
+        "explicit_nobs": ("OLS sample size", "The fit reported nobs = **35**."),
+        "expanded_label": ("OLS sample size", "Number of observations (N): 35."),
+        "sample_of": ("OLS sample size", "The model was fit on a sample of 35."),
+        "wrong_marker": ("OLS sample size", f"The fit used [[v:{wrong_field['id']}]] observations."),
+        "literal_title": ("OLS fit (N = 38)", "The reported fit is discussed below."),
+    }
+    receipts = {name: call("save_report_version", name, title=title, text=body) for name, (title, body) in cases.items()}
+    assert not any(receipt.ok for receipt in receipts.values()), {name: receipt.ok for name, receipt in receipts.items()}
+    assert all("REPORT_SAMPLE_SIZE_UNBOUND" in receipt.error_details[0]["message"] for receipt in receipts.values())
+    assert client.get(route, params=params).json()["reports"] == []
+    assert not any(entry["artifact_type"] == "manual_report"
+                   for entry in read_json(run_root / "artifacts_index.json")["artifacts"])
+
+    read = call("read_reports", "read")
+    assert read.ok, read.error_details
+    published_count = next(fact for fact in read.output["facts"] if fact["id"] == count["id"])
+    assert published_count["field"] == "model/nobs" and published_count["source"]["run_id"] == run_id
+    good = call("save_report_version", "bound", title="OLS sample size",
+                text=f"The OLS fit used [[v:{count['id']}]] observations.")
+    assert good.ok, good.error_details
+    report_id = good.output["report_id"]
+    exported = client.get(f"{route}/{report_id}/export", params={**params, "format": "html"})
+    assert exported.status_code == 200, exported.text
+    assert "The OLS fit used 37 observations." in exported.text
+    assert f"model_results:ols_1; {count['id']}" in exported.text
+    history = client.get(route, params=params).json()["reports"]
+    assert len(history) == 1 and history[0]["id"] == report_id and history[0]["author"] == "agent"
+    assert sha256_file(model) == model_digest
+    entry = next(entry for entry in read_json(run_root / "artifacts_index.json")["artifacts"]
+                 if entry["artifact_id"] == f"manual_report_{report_id}")
+    assert sha256_file(run_root / entry["path"]) == entry["sha256"]
+
+
+def test_human_report_prose_remains_editable_with_a_count_citation(report_case):
+    snapshot = draft(report_case)
+    count = next(fact for fact in snapshot["facts"] if fact["field"] == "model/nobs")
+    text = f"I expected 25 observations, but the registered sample size is [[v:{count['id']}]]."
+    saved = post(report_case, request_for(snapshot, text=text))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["record"]["text"] == text
+    client, project, run, _ = report_case
+    exported = client.get(f"/runs/{run.run_id}/manual-reports/mrpt_first/export",
+                          params={"project_root": str(project.root), "format": "html"})
+    assert exported.status_code == 200, exported.text
+    assert "I expected 25 observations, but the registered sample size is 24." in exported.text
+
+
+def test_agent_report_binds_each_count_to_its_model_in_a_multi_model_run(report_case):
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.services.manual_reports import ManualReportRequest, save_manual_report
+
+    _, _, run, model = report_case
+    other = run.root / "model_results/ols_2.json"
+    write_json(other, {**model, "model_id": "ols_2", "nobs": 22})
+    register_artifact(run.root, "ols_2", other, "model_result", "econometrics", [])
+    snapshot = draft(report_case)
+    facts = {(fact["source"]["node_key"], fact["field"]): fact["id"] for fact in snapshot["facts"]}
+    primary = f"[[v:{facts['model:ols_1', 'model/id']}]]"
+    wrong_count = f"[[v:{facts['model:ols_2', 'model/nobs']}]]"
+    for bad in (f"{primary} used {wrong_count} observations.", f"The fit used {wrong_count} observations."):
+        request = ManualReportRequest(**request_for(snapshot, text=bad))
+        with pytest.raises(WorkbenchAPIError, match="model/id") as failure:
+            save_manual_report(run.root, request, author="agent")
+        assert failure.value.code == "REPORT_SAMPLE_SIZE_UNBOUND"
+
+    request = ManualReportRequest(**request_for(snapshot, text=snapshot["text"]))
+    saved = save_manual_report(run.root, request, author="agent")
+    assert saved["record"]["id"] == "mrpt_first" and saved["record"]["author"] == "agent"
+    client, project, _, _ = report_case
+    exported = client.get(f"/runs/{run.run_id}/manual-reports/mrpt_first/export",
+                          params={"project_root": str(project.root), "format": "html"})
+    assert exported.status_code == 200, exported.text
+    assert "ols_1 was estimated on 24 observations" in exported.text
+    assert "ols_2 was estimated on 22 observations" in exported.text
+
+
+def test_agent_report_checks_the_run_models_when_a_parent_selected_one_count(report_case):
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.artifacts import read_json
+    from workbench.services.manual_reports import ManualReportRequest, save_manual_report
+
+    _, _, run, model = report_case
+    other = run.root / "model_results/ols_2.json"
+    write_json(other, {**model, "model_id": "ols_2", "nobs": 22})
+    register_artifact(run.root, "ols_2", other, "model_result", "econometrics", [])
+    snapshot = draft(report_case)
+    count = next(fact for fact in snapshot["facts"]
+                 if fact["source"]["node_key"] == "model:ols_2" and fact["field"] == "model/nobs")
+    selected = request_for(snapshot, fact_ids=[count["id"]])
+    parent = post(report_case, selected)
+    assert parent.status_code == 200, parent.text
+    request = ManualReportRequest(**{**selected, "id": "mrpt_child", "parent_report_id": selected["id"],
+                                    "text": f"ols_1 used [[v:{count['id']}]] observations."})
+    with pytest.raises(WorkbenchAPIError, match="model/id") as failure:
+        save_manual_report(run.root, request, author="agent")
+    assert failure.value.code == "REPORT_SAMPLE_SIZE_UNBOUND"
+    model_id = next(fact for fact in snapshot["facts"]
+                    if fact["source"]["node_key"] == "model:ols_2" and fact["field"] == "model/id")
+    new = ManualReportRequest(**request_for(snapshot, id="mrpt_scoped", fact_ids=[model_id["id"], count["id"]],
+                                          text=f"[[v:{model_id['id']}]] used [[v:{count['id']}]] observations."))
+    save_manual_report(run.root, new, author="agent")
+    saved = read_json(run.root / "reports/manual_report_mrpt_scoped.json")
+    assert saved["model_sample_size_scope"] == {"bases": {"model:ols_2": "rows"}, "require_model_id": True}
+
+
+def test_unit_based_model_sample_size_uses_its_registered_basis(report_case):
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.engine.stages.report import _refresh_artifact_checksum
+    from workbench.services.manual_reports import ManualReportRequest, save_manual_report
+    from workbench.services.manual_report_text import render_values
+
+    client, project, run, model = report_case
+    model_path = run.root / "model_results/ols_1.json"
+    write_json(model_path, {**model, "model_type": "cs_did", "nobs_basis": "units", "n_rows": 96})
+    _refresh_artifact_checksum(run.root, "ols_1", model_path)
+    snapshot = draft(report_case)
+    facts = {fact["id"]: fact for fact in snapshot["facts"]}
+    count = next(fact for fact in facts.values() if fact["field"] == "model/nobs")
+    marker = f"[[v:{count['id']}]]"
+    estimate = next(fact for fact in facts.values() if fact["field"] == "coefficient/x/estimate")
+    bad = ManualReportRequest(**request_for(snapshot, fact_ids=[count["id"], estimate["id"]],
+                                          text=f"The fit used {marker} observations."))
+    with pytest.raises(WorkbenchAPIError, match="units") as failure:
+        save_manual_report(run.root, bad, author="agent")
+    assert failure.value.code == "REPORT_SAMPLE_SIZE_UNBOUND"
+    assert "Estimated on 24 units" in render_values(snapshot["text"], facts)
+    assert "Units 24" in render_values(snapshot["text"], facts)
+
+    good = bad.model_copy(update={"text": f"The fit used {marker} units. The change was [[v:{estimate['id']}]] index units."})
+    first = save_manual_report(run.root, good, author="agent")
+    assert save_manual_report(run.root, good, author="agent") == first
+    assert list(first) == ["schema_version", "record"]
+    # A source update cannot reinterpret a saved version's count basis.
+    write_json(model_path, {**model, "nobs": 96})
+    _refresh_artifact_checksum(run.root, "ols_1", model_path)
+    exported = client.get(f"/runs/{run.run_id}/manual-reports/mrpt_first/export",
+                          params={"project_root": str(project.root), "format": "html"})
+    assert exported.status_code == 200, exported.text
+    assert "The fit used 24 units." in exported.text
+    report_path = run.root / "reports/manual_report_mrpt_first.json"
+    report_path.write_bytes(report_path.read_bytes() + b"\n")
+    changed = client.get(f"/runs/{run.run_id}/manual-reports/mrpt_first/export",
+                         params={"project_root": str(project.root), "format": "html"})
+    assert changed.status_code == 409 and "registered revision" in changed.text
+
+
+def test_legacy_agent_report_history_preserves_text_and_rechecks_export(report_case):
+    from workbench.engine.stages.report import _refresh_artifact_checksum
+
+    snapshot = draft(report_case)
+    count = next(fact for fact in snapshot["facts"] if fact["field"] == "model/nobs")
+    client, project, run, _ = report_case
+    route = f"/runs/{run.run_id}/manual-reports"
+    params = {"project_root": str(project.root)}
+    archived_requests = {}
+    archived_bytes = {}
+    for status, text in (("bound", f"The fit used [[v:{count['id']}]] observations."),
+                         ("unbound", "Number of observations (N): 25.")):
+        request = request_for(snapshot, id=f"mrpt_{status}", text=text)
+        saved = post(report_case, request)
+        assert saved.status_code == 200, saved.text
+        # Reproduce a registered revision from before Agent sample-size validation.
+        payload = saved.json()
+        payload["record"]["author"] = "agent"
+        path = run.root / "reports" / f"manual_report_{request['id']}.json"
+        write_json(path, payload)
+        _refresh_artifact_checksum(run.root, f"manual_report_{request['id']}", path)
+        archived_requests[status] = request
+        archived_bytes[path] = path.read_bytes()
+
+    history = client.get(route, params=params).json()["reports"]
+    assert {item["text"] for item in history} == {request["text"] for request in archived_requests.values()}
+    assert all(any("older Agent revision" in line for line in item["limitations"]) for item in history)
+    exported = client.get(f"{route}/mrpt_bound/export", params={**params, "format": "html"})
+    refused = client.get(f"{route}/mrpt_unbound/export", params={**params, "format": "html"})
+    assert exported.status_code == 200 and "The fit used 24 observations." in exported.text
+    assert refused.status_code == 422 and "REPORT_SAMPLE_SIZE_UNBOUND" in refused.text
+
+    previous = archived_requests["unbound"]
+    successor = post(report_case, {**previous, "id": "mrpt_repaired", "parent_report_id": previous["id"],
+                                  "text": f"Number of observations (N): [[v:{count['id']}]]."})
+    assert successor.status_code == 200 and successor.json()["record"]["author"] == "user"
+    assert all(path.read_bytes() == data for path, data in archived_bytes.items())
 
 
 def test_draft_reads_as_prose_with_every_number_bound_to_a_fact(report_case):

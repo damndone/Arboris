@@ -3,9 +3,10 @@
 // in the classic shell, where callers simply do not offer the action.
 
 import { createContext, useContext } from "react";
+import type { AnalysisReplay } from "../manual/OperationsPanel";
 
 export interface WorkspaceCommands {
-  analyze(search?: string): void;
+  analyze(search?: string, replay?: AnalysisReplay): void;
   showAgent(): void;
 }
 

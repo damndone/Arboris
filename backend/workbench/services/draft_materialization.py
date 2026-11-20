@@ -480,6 +480,13 @@ def _genesis_model_editor_schema(
                         if key == "did_mode"
                         else list(columns)
                     ),
+                    # An any-of requirement (panel_ols: entity or time) is met by
+                    # any member; each alone is not required.
+                    **(
+                        {"satisfied_by": [f for f in family.required_spec_fields if f != field_name]}
+                        if family.required_spec_field_mode == "any" and field_name in family.required_spec_fields
+                        else {}
+                    ),
                 }
             )
         for field_name in family.model_options_column_fields:
@@ -617,12 +624,13 @@ def bind_genesis_recipe_server_owned_options(
 
 
 def _backfill_schema_values(editable_schema: list[dict[str, Any]], form: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Overlay saved values, preserving server-owned candidates for column roles."""
     out: list[dict[str, Any]] = []
     for param in editable_schema:
         copy = dict(param)
         key = copy.get("key")
         if key in form and form[key] not in (None, ""):
-            if key == "x" and copy.get("kind") == "columns":
+            if copy.get("kind") == "columns":
                 raw = form[key]
                 if isinstance(raw, list):
                     columns = [str(item).strip() for item in raw if str(item).strip()]
@@ -638,7 +646,9 @@ def _backfill_schema_values(editable_schema: list[dict[str, Any]], form: Mapping
                 else:
                     columns = [str(raw).strip()]
                 copy["value"] = columns
-                copy["options"] = columns
+                # X remains drop-only; other roles retain explicit server options.
+                if key == "x" or not copy.get("options"):
+                    copy["options"] = columns
             else:
                 copy["value"] = form[key]
         out.append(copy)

@@ -4,7 +4,7 @@ import warnings
 import pandas as pd
 import pytest
 
-from workbench.statistical_tests import run_statistical_tests
+from workbench.statistical_tests import run_named_statistical_test, run_statistical_tests
 
 
 def test_correlation_reports_pearson_p_value():
@@ -22,6 +22,24 @@ def test_correlation_reports_pearson_p_value():
     assert row["statistic"] > 0.99
     assert row["p_value"] < 0.001
     assert row["source_id"] == "statistical_tests.correlations.y.x"
+
+
+def test_default_correlations_prepare_each_numeric_pair_once(monkeypatch):
+    from workbench import statistical_test_pairs
+
+    frame = pd.DataFrame({"x": [1.0, 2.0, None, 3.0, 5.0], "y": [4.0, 1.0, 2.0, 8.0, 3.0]})
+    original = statistical_test_pairs._pairwise
+    calls = []
+
+    def counted(frame, columns):
+        calls.append(tuple(columns))
+        return original(frame, columns)
+
+    monkeypatch.setattr(statistical_test_pairs, "_pairwise", counted)
+    results = run_statistical_tests(frame, analysis_columns=["x", "y"])
+    assert [row["nobs"] for row in results["correlations"]["results"]] == [4]
+    assert [row["nobs"] for row in results["rank_correlations"]["results"]] == [4, 4]
+    assert calls == [("x", "y")]
 
 
 def test_constant_correlation_is_typed_without_numeric_warning():
@@ -91,6 +109,64 @@ def test_chi_square_reports_contingency_table_and_p_value():
     assert row["effect"]["contingency_table"]["control"]["north"] == 8
     assert row["effect"]["contingency_table"]["treated"]["south"] == 8
     assert row["p_value"] < 0.05
+
+
+def test_default_contingency_tests_prepare_each_pair_once(monkeypatch):
+    from workbench import statistical_test_pairs
+
+    frame = pd.DataFrame({
+        "group": pd.Categorical(["b", "a", "b", "a", "b", "a", "c", None, None, None],
+                                categories=["b", "a", "c", "unused"], ordered=True),
+        "response": pd.array(["yes", "yes", "no", "no", "yes", "no", None, "no", None, None], dtype="string"),
+        "region": ["east", "north", "south", "north", "south", "east", "west", "west", "north", "east"],
+        "sparse": [None] * 7 + ["x", "y", "x"],
+    }, index=[4, 8, 1, 7, 2, 5, 3, 0, 9, 6])
+    pairwise, crosstab = statistical_test_pairs._pairwise, pd.crosstab
+    pairwise_calls, table_calls = [], []
+
+    def prepare(data, columns):
+        pairwise_calls.append(tuple(columns))
+        return pairwise(data, columns)
+
+    def tabulate(left, right):
+        table_calls.append((left.name, right.name))
+        return crosstab(left, right)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(statistical_test_pairs, "_pairwise", prepare)
+        patch.setattr(pd, "crosstab", tabulate)
+        results = run_statistical_tests(frame, analysis_columns=list(frame.columns))
+
+    chi_square = results["chi_square"]["results"]
+    fisher = results["fisher_exact"]["results"]
+    assert [row["variables"] for row in chi_square] == [
+        ["group", "response"], ["group", "region"], ["response", "region"], ["region", "sparse"],
+    ]
+    assert [row["variables"] for row in fisher] == [["group", "response"]]
+    for family in ("chi_square", "fisher_exact"):
+        named = run_named_statistical_test(frame, family=family, analysis_columns=list(frame.columns))
+        for automatic_row, named_row in zip(results[family]["results"], named["results"], strict=True):
+            assert automatic_row["statistic"].hex() == named_row["statistic"].hex()
+            assert automatic_row["p_value"].hex() == named_row["p_value"].hex()
+            assert automatic_row["effect"] == named_row["effect"]
+    for row in (chi_square[0], fisher[0]):
+        assert row["nobs"] == 6
+        assert list(row["effect"]["contingency_table"].items()) == [
+            ("b", {"no": 1, "yes": 2}), ("a", {"no": 2, "yes": 1}),
+        ]
+    assert pairwise_calls == [
+        ("group", "response"), ("group", "region"), ("group", "sparse"),
+        ("response", "region"), ("response", "sparse"), ("region", "sparse"),
+    ]
+    assert table_calls == [tuple(row["variables"]) for row in chi_square]
+
+
+def test_contingency_scan_preserves_pandas_duplicate_index_error():
+    frame = pd.DataFrame({"group": ["a", "b", "a", "b"], "response": ["x", "y", "y", "x"]},
+                         index=[0, 0, 1, 2])
+
+    with pytest.raises(ValueError, match="cannot reindex on an axis with duplicate labels"):
+        run_statistical_tests(frame, analysis_columns=list(frame.columns))
 
 
 def test_invalid_pairs_are_skipped_without_nan_output():

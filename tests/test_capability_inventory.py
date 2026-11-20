@@ -265,7 +265,13 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (136, 5, 129, 134, 2, 0)  # v1.8.10: +5 postestimation.* steps (wald, lincom, nlcom, lr, margins), composable
+    ) == (181, 5, 174, 179, 2, 0)  # v1.9.1: explicit AR joins the shared workflow; treatment_effects.estimate; test.proportions; data.row_index; network.centrality; 39 native research operations (30 packs, 8 prediction models, prediction.native_forest_apply).
+    [ar] = [item for item in report.composition_reachable if item.capability_id == "iv.ar_confidence"]
+    assert ar.composition_reachable_by == ("iv.ar_confidence",)
+    assert ar.directly_reachable_by == ()
+    [external] = [item for item in report.composition_reachable if item.capability_id == "external.query"]
+    assert external.composition_reachable_by == ("external.query",)
+    assert external.directly_reachable_by == ()
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",
@@ -458,6 +464,15 @@ def test_every_surface_judged_a_capability_actually_reaches_the_inventory() -> N
             assert kind in listed_kinds, decision.surface
 
 
+def _native_research_ids(kind: str) -> set[str]:
+    """Prediction models also publish through the native research declarations, which run as
+    workflow steps rather than through the run form's prediction protocol."""
+
+    from workbench.native_research import NATIVE_RESEARCH_OPERATIONS
+
+    return {operation_id for operation_id, operation in NATIVE_RESEARCH_OPERATIONS.items() if operation.kind == kind}
+
+
 def test_every_prediction_model_is_in_the_inventory() -> None:
     """A fourth prediction model joins by being published, not by being typed
     into this file."""
@@ -473,7 +488,7 @@ def test_every_prediction_model_is_in_the_inventory() -> None:
     published = {
         f"prediction.{entry['key']}"
         for entry in build_capabilities()["prediction_models"]
-    }
+    } | _native_research_ids("prediction_model")
 
     assert published == listed
     assert "prediction.prediction_lasso" in listed
@@ -522,7 +537,7 @@ def test_prediction_and_preparation_capabilities_have_typed_workflow_routes() ->
     expected = sum(
         len(manifest[surface])
         for surface in ("prediction_models", "imputation_methods", "sampling_methods")
-    )
+    ) + len(_native_research_ids("prediction_model"))
     assert expected
     assert len(subject) == expected
 

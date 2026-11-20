@@ -8,7 +8,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from collections.abc import Mapping
 
 try:
@@ -23,6 +23,13 @@ _CONFIG_PATH_ENV = "WORKBENCH_LLM_CONFIG_PATH"
 _STORE_VERSION = 1
 _DEFAULT_CONFIG_DIR = Path(".config") / "econometrics-workbench"
 _DEFAULT_CONFIG_FILENAME = "llm-providers.json"
+DataLocation = Literal["local", "remote"]
+
+
+def parse_data_location(value: Any) -> DataLocation:
+    if value not in ("local", "remote"):
+        raise ValueError("data_location must be local or remote")
+    return value
 
 
 class ProviderStoreError(Exception):
@@ -37,6 +44,27 @@ class ProviderStoreInvalidError(ProviderStoreError):
     """The provider store exists but contains invalid JSON or schema."""
 
 
+#: Thinking efforts a provider may name (DeepSeek maps minimal/medium/xhigh onto
+#: low/high/max); ``none`` sends no thinking at all.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+#: DeepSeek V4's documented efforts, with thinking off: the default for its ids.
+DEEPSEEK_V4_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "low", "high", "max")
+
+
+def takes_reasoning_effort(request_model: str) -> bool:
+    """DeepSeek V4 by its id, also behind a gateway that prefixes a vendor
+    (Magpie/WorkBuddy: ``workbuddy-ai/deepseek-v4.1-flash``); the default when a
+    stored model does not declare its efforts."""
+
+    name = request_model.casefold().rsplit("/", 1)[-1]
+    return name.startswith(("deepseek-v4", "deepseek-flash"))
+
+
+def default_efforts(request_model: str) -> tuple[ReasoningEffort, ...]:
+    return DEEPSEEK_V4_EFFORTS if takes_reasoning_effort(request_model) else ()
+
+
 @dataclass(frozen=True)
 class ModelRecord:
     display_name: str
@@ -46,6 +74,24 @@ class ModelRecord:
     # v1.7 G2: whether this model accepts image content. Gates the opt-in that
     # sends a rendered chart to the provider; default False = text-only.
     supports_vision: bool = False
+    # v1.9.1: the efforts the model accepts (detected from the provider's model
+    # list, else by id), and the one chosen in the Agent's model menu
+    # (None = the model's default). An empty tuple: no thinking control.
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
+    reasoning_effort: ReasoningEffort | None = None
+    # The person's cap below the model's window: when the conversation is compacted.
+    context_limit_tokens: int | None = None
+
+    @property
+    def supports_reasoning_effort(self) -> bool:
+        return bool(self.reasoning_efforts)
+
+    @property
+    def effective_window_tokens(self) -> int | None:
+        window = self.context_window_tokens or (1_000_000 if self.supports_1m else None)
+        if self.context_limit_tokens is None:
+            return window
+        return min(window, self.context_limit_tokens) if window else self.context_limit_tokens
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +100,9 @@ class ModelRecord:
             "context_window_tokens": self.context_window_tokens,
             "supports_1m": self.supports_1m,
             "supports_vision": self.supports_vision,
+            "reasoning_efforts": list(self.reasoning_efforts),
+            "reasoning_effort": self.reasoning_effort,
+            "context_limit_tokens": self.context_limit_tokens,
         }
 
 
@@ -69,6 +118,7 @@ class ProviderRecord:
     website_url: str = ""
     icon: str = ""
     notes: str = ""
+    data_location: DataLocation = "remote"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "models", list(self.models))
@@ -81,6 +131,7 @@ class ProviderRecord:
             "notes": self.notes,
             "website_url": self.website_url,
             "base_url": self.base_url,
+            "data_location": self.data_location,
             "model": self.model,
             "api_key": self.api_key,
             "timeout_s": self.timeout_s,
@@ -240,6 +291,7 @@ def environment_provider_from_env() -> ProviderRecord | None:
         api_key=api_key,
         timeout_s=timeout_s,
         models=models,
+        data_location=parse_data_location(os.environ.get("WORKBENCH_LLM_DATA_LOCATION", "remote")),
     )
 
 
@@ -252,6 +304,7 @@ def provider_public_dict(provider: ProviderRecord) -> dict[str, Any]:
         "notes": provider.notes,
         "website_url": provider.website_url,
         "base_url": provider.base_url,
+        "data_location": provider.data_location,
         "model": provider.model,
         "timeout_s": provider.timeout_s,
         "models": [model.to_dict() for model in provider.models],
@@ -290,7 +343,7 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
     models_raw = raw.get("models", [])
     if not isinstance(models_raw, list):
         raise ValueError("models must be a list")
-    models = [_model_from_dict(item) for item in models_raw]
+    models = [model_from_dict(item) for item in models_raw]
     request_models = [model.request_model for model in models]
     if len(request_models) != len(set(request_models)):
         raise ValueError("model request_model values must be unique")
@@ -301,6 +354,7 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
         notes=_optional_string(raw, "notes"),
         website_url=_optional_string(raw, "website_url"),
         base_url=_required_string(raw, "base_url"),
+        data_location=parse_data_location(raw.get("data_location", "remote")),
         model=_required_string(raw, "model"),
         api_key=_optional_string(raw, "api_key"),
         timeout_s=_timeout_value(raw.get("timeout_s", DEFAULT_TIMEOUT_S)),
@@ -308,7 +362,9 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
     )
 
 
-def _model_from_dict(raw: Any) -> ModelRecord:
+def model_from_dict(raw: Any) -> ModelRecord:
+    """A validated model record; undeclared thinking support follows the model id."""
+
     if not isinstance(raw, Mapping):
         raise ValueError("model must be an object")
     context_window_tokens = raw.get("context_window_tokens")
@@ -324,12 +380,31 @@ def _model_from_dict(raw: Any) -> ModelRecord:
     supports_vision = raw.get("supports_vision", False)
     if not isinstance(supports_vision, bool):
         raise ValueError("supports_vision must be a boolean")
+    request_model = _required_nonblank_string(raw, "request_model")
+    efforts = raw.get("reasoning_efforts")
+    if efforts is None:
+        # Before v1.9.1 records carried no efforts; a short-lived boolean said whether any.
+        efforts = default_efforts(request_model) if raw.get("supports_reasoning_effort", True) else ()
+    if not isinstance(efforts, (list, tuple)) or any(item not in REASONING_EFFORTS for item in efforts):
+        raise ValueError(f"reasoning_efforts must list values from {', '.join(REASONING_EFFORTS)}")
+    efforts = tuple(dict.fromkeys(efforts))
+    reasoning_effort = raw.get("reasoning_effort")
+    if reasoning_effort is not None and reasoning_effort not in efforts:
+        reasoning_effort = None  # a choice the model no longer offers falls back to its default
+    context_limit_tokens = raw.get("context_limit_tokens")
+    if context_limit_tokens is not None and (
+        isinstance(context_limit_tokens, bool) or not isinstance(context_limit_tokens, int) or context_limit_tokens <= 0
+    ):
+        raise ValueError("context_limit_tokens must be a positive integer or null")
     return ModelRecord(
         display_name=_required_nonblank_string(raw, "display_name"),
-        request_model=_required_nonblank_string(raw, "request_model"),
+        request_model=request_model,
         context_window_tokens=context_window_tokens,
         supports_1m=supports_1m,
         supports_vision=supports_vision,
+        reasoning_efforts=efforts,
+        reasoning_effort=reasoning_effort,
+        context_limit_tokens=context_limit_tokens,
     )
 
 

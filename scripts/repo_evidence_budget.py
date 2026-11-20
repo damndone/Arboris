@@ -12,6 +12,10 @@ reachable from HEAD and reports, by path:
   evidence stays where it is (user decision, 2026-10-07), and new evaluation
   sources go to evaluations/<version>/ with large raw output in local/.
 
+A version may carry a higher net-growth limit only through the allowlist's
+``versions`` entry for its baseline tag, with a reason; the entry stops
+applying once the next release tag becomes the baseline.
+
 Calibration (net growth, added files, largest added file): v1.8.9 1.3 MiB,
 113, 0.09 MiB; v1.8.10 2.0 MiB, 343, 0.09 MiB; v1.8.11 52.4 MiB, 6461,
 2.7 MiB.
@@ -94,17 +98,31 @@ def _index_sizes(repo: Path) -> dict[str, int]:
     return {path: int(size) for (path, _), size in zip(entries, batch.split())}
 
 
-def _allowlist(repo: Path, violations: list[str]) -> dict[str, int]:
+def _allowlist(repo: Path, violations: list[str]) -> dict:
     path = repo / ALLOWLIST
     if not path.is_file():
         return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _allowed_files(listed: dict, violations: list[str]) -> dict[str, int]:
     allowed = {}
-    for name, entry in json.loads(path.read_text(encoding="utf-8")).get("files", {}).items():
+    for name, entry in listed.get("files", {}).items():
         if not str(entry.get("reason", "")).strip() or not isinstance(entry.get("max_bytes"), int):
             violations.append(f"{ALLOWLIST}: {name} needs a reason and an integer max_bytes")
             continue
         allowed[name] = entry["max_bytes"]
     return allowed
+
+
+def _growth_limit(listed: dict, tag: str, violations: list[str]) -> int:
+    entry = listed.get("versions", {}).get(tag)
+    if entry is None:
+        return BUDGET["net_growth_bytes"]
+    if not str(entry.get("reason", "")).strip() or not isinstance(entry.get("net_growth_bytes"), int):
+        violations.append(f"{ALLOWLIST}: versions.{tag} needs a reason and an integer net_growth_bytes")
+        return BUDGET["net_growth_bytes"]
+    return entry["net_growth_bytes"]
 
 
 def check(repo: Path) -> Report:
@@ -115,11 +133,13 @@ def check(repo: Path) -> Report:
     added = sorted(path for path in now if path not in before)
     grown = sorted(((now[path] - before.get(path, 0), path) for path in now if now[path] > before.get(path, 0)), reverse=True)
 
+    listed = _allowlist(repo, report.violations)
+    limit = _growth_limit(listed, tag, report.violations)
     growth = sum(now.values()) - sum(before.values())
-    if growth > BUDGET["net_growth_bytes"]:
+    if growth > limit:
         largest = ", ".join(f"{path} (+{_size(delta)})" for delta, path in grown[:_LISTED])
         report.violations.append(
-            f"net growth {_size(growth)} since {tag} exceeds {_size(BUDGET['net_growth_bytes'])}; largest: {largest}"
+            f"net growth {_size(growth)} since {tag} exceeds {_size(limit)}; largest: {largest}"
         )
     if len(added) > BUDGET["added_files"]:
         directories: dict[str, int] = {}
@@ -130,7 +150,7 @@ def check(repo: Path) -> Report:
         report.violations.append(
             f"{len(added)} files added since {tag} (limit {BUDGET['added_files']}); most in: {busiest}"
         )
-    allowed = _allowlist(repo, report.violations)
+    allowed = _allowed_files(listed, report.violations)
     for path in sorted(set(allowed) - set(now)):
         report.violations.append(f"{ALLOWLIST}: {path} is not in the repository; remove or update the exception")
     for delta, path in grown:

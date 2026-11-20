@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..artifacts import read_json
 from ..domain import GuardrailIssue, Severity
+from ..estimation_engine import engine_provenance
 from ..term_parser import is_q_quoted_dummy, parse_term
 from .lmm_result_adapter import read_lmm_public_results
 
@@ -106,7 +107,13 @@ def read_model_coefficient_view(run_root: Path, results: list[dict]) -> dict | N
 def _model_results(run_root: Path) -> list[dict]:
     """Compatibility wrapper for the existing HTTP route import."""
 
-    return read_model_results(run_root)
+    results = read_model_results(run_root)
+    # Keep the existing full selection available to API readers. UI/context
+    # consumers use the additive bounded receipt, only for opted-in results.
+    return [
+        {**result, "engine_provenance": provenance} if (provenance := engine_provenance(result)) is not None else result
+        for result in results
+    ]
 
 
 def _normalize_issue_stream(errors: dict, model_results: list[dict]) -> dict:

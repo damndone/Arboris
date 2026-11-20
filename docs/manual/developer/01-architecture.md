@@ -64,7 +64,7 @@ Agent** answers across the whole project from read-only evidence tools.
   any output is retried twice with backoff; each retry is an event.
 - `agent/context_tools.py` — the evidence and action tools, each a
   `ToolDefinition` with a JSON schema and a declared side effect.
-- `agent/orchestrator.py` — proposals and their lifecycle. `propose_operation`
+- `agent/orchestrator.py` — proposals and their lifecycle. `run_operation`
   creates a proposal; anything that changes data, metadata, a model or a
   report waits for the user's confirmation, then executes as an auditable
   operation record.

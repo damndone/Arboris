@@ -31,6 +31,7 @@ from workbench.qa.witness import (
     WITNESS_CHALLENGE_TTL_SECONDS,
     verify_witness_attestation,
 )
+from ..jsonl_store import jsonl_lines
 
 
 FixtureStatus = Literal["ready", "blocked"]
@@ -2047,7 +2048,7 @@ class AttemptLedger:
             raise AttemptLedgerError("attempt ledger has a truncated final record")
         events: list[AttemptEvent] = []
         physical_mode: AcceptanceRunMode | None = None
-        for line_no, raw_line in enumerate(raw.splitlines(), start=1):
+        for line_no, raw_line in enumerate(jsonl_lines(raw), start=1):
             if not raw_line:
                 raise AttemptLedgerError(
                     f"attempt ledger contains a blank record at line {line_no}"

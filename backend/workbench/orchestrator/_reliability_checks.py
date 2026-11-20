@@ -165,7 +165,7 @@ def _detect_binary_vars(frame: pd.DataFrame, x_vars: list[str]) -> set[str]:
     for var in x_vars:
         if var not in frame.columns:
             continue
-        unique = sorted(frame[var].dropna().unique())
+        unique = frame[var].dropna().unique()  # only the set matters; sorting 1M floats cost 0.5 s
         if len(unique) == 2:
             try:
                 if set(unique) <= {0, 1, 0.0, 1.0, True, False}:

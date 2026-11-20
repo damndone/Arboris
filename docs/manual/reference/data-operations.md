@@ -113,6 +113,17 @@ Reshape the current dataset with an explicitly declared direction.
 
 Example, as a proposal reads it: *Reshape wide to long: stack y2020, y2021 into year / income, one row per id and column*
 
+## `data.row_index`
+
+Add a column holding each row's position in the dataset's current order (1, 2, ..., n). When the rows are already in time order and the data has no time column, use it as the time column of a time-series operation, and say in the answer that row order was taken as time.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `output` | yes | Name of the new position column; must not exist yet. |
+| `start` |  | Optional integer position of the first row (default 1). |
+
+Example, as a proposal reads it: *Add period: each row's position in the current order, from 1*
+
 ## `data.subset`
 
 Subset rows and columns with closed comparison operators.
@@ -123,6 +134,7 @@ Subset rows and columns with closed comparison operators.
 | `filters` |  | ANDed closed filters with column, op, and operator value. |
 | `equals` |  | Legacy equality map retained for compatibility. |
 | `row_indices` |  | Explicit zero-based row indices. |
+| `exclude_row_indices` |  | Zero-based row indices to leave out; every other row is kept. |
 | `row_index_range` |  | Bounded half-open row range. |
 | `row_range` |  | Legacy alias for row_index_range. |
 

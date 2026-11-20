@@ -69,7 +69,7 @@ export function releaseLayout(
 }
 
 /** Data, Tables, Report and Plans need width: in lineage first they borrow the wide stage. */
-export const WIDE_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["data", "table", "report", "notebook"]);
+export const WIDE_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["data", "table", "report", "plans"]);
 
 export function effectiveLayout(chosen: Layout, view: ViewMode): Layout {
   return chosen === "lineage" && WIDE_VIEWS.has(view) ? "results" : chosen;
@@ -135,12 +135,13 @@ export function writeAgentMode(mode: AgentMode): void {
   }
 }
 
-export const DEFAULT_AGENT_WIDTH = 380;
+export const DEFAULT_AGENT_WIDTH = 440;
+export const MIN_AGENT_WIDTH = 320;
 
 export function readAgentWidth(): number {
   try {
     const stored = Number(localStorage.getItem(AGENT_WIDTH_KEY));
-    return Number.isFinite(stored) && stored >= 240 && stored <= 960 ? stored : DEFAULT_AGENT_WIDTH;
+    return Number.isFinite(stored) && stored >= MIN_AGENT_WIDTH && stored <= 960 ? stored : DEFAULT_AGENT_WIDTH;
   } catch {
     return DEFAULT_AGENT_WIDTH;
   }

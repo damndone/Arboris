@@ -82,6 +82,27 @@ def test_payload_carries_no_compilation_metadata_into_the_hash(project: Path) ->
     assert "compiled_at" not in payload["content"]
 
 
+@pytest.mark.parametrize("name", ["graph.json", "artifacts_index.json"])
+def test_bounded_context_index_ready_requires_small_regular_files(tmp_path: Path, name: str) -> None:
+    from workbench.agent.context_compiler import bounded_context_index_ready
+
+    for filename in ("graph.json", "artifacts_index.json"):
+        (tmp_path / filename).write_bytes(b"{}")
+    assert bounded_context_index_ready(tmp_path, max_bytes=2)
+
+    candidate = tmp_path / name
+    candidate.write_bytes(b"{}\n")
+    assert not bounded_context_index_ready(tmp_path, max_bytes=2)
+
+    candidate.unlink()
+    assert not bounded_context_index_ready(tmp_path, max_bytes=2)
+
+    target = tmp_path / "otherwise_valid.json"
+    target.write_bytes(b"{}")
+    candidate.symlink_to(target)
+    assert not bounded_context_index_ready(tmp_path, max_bytes=2)
+
+
 def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
     """Structural guard, in the spirit of Gate 1 Task 6 Step 2.
 

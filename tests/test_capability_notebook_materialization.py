@@ -278,6 +278,8 @@ def test_authorized_notebook_gateway_runs_real_local_darwin_adapter(tmp_path) ->
         risk_level="high",
     )
     auth_store = OptionExecutionAuthorizationStore(tmp_path, clock=lambda: now)
+    from tests.operation_approval_fixtures import with_operation_approval
+    authorization = with_operation_approval(tmp_path, authorization)
     auth_store.issue(authorization)
     control_store = ExecutionControlStore(clock=lambda: now)
     _store_subjects(control_store, intent, authorization.authorization_id, now)

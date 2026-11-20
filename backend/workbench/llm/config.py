@@ -5,16 +5,17 @@ lets a running server pick up key changes without restart.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
 
 from .provider_store import (
+    DataLocation,
     ProviderRecord,
     ProviderStoreError,
     environment_provider_from_env,
     explicit_config_path,
-    load_provider_store,
     load_provider_store_strict,
 )
 
@@ -35,6 +36,7 @@ ConfigSource = Literal[
     "explicit_config_missing",
     "explicit_config_invalid",
     "explicit_config_unconfigured",
+    "config_invalid",
 ]
 
 
@@ -75,7 +77,12 @@ class LLMConfig:
     source: ConfigSource = "none"
     context_window_tokens: int | None = None
     supports_1m: bool = False
+    context_limit_tokens: int | None = None
     supports_vision: bool = False
+    data_location: DataLocation = "remote"
+    #: The efforts the model accepts; None: decided by the model id (DeepSeek V4).
+    reasoning_efforts: tuple[str, ...] | None = None
+    reasoning_effort: str | None = None
 
     def is_configured(self) -> bool:
         return all(value.strip() for value in (self.base_url, self.api_key, self.model))
@@ -88,6 +95,11 @@ class LLMConfig:
         unreadable, and no fallback was consulted on purpose.
         """
 
+        if self.source == "config_invalid":
+            return (
+                "LLM provider store is invalid or unreadable. Refusing to fall "
+                "back to the environment; repair the provider configuration."
+            )
         if self.source == SOURCE_EXPLICIT_CONFIG_MISSING:
             return (
                 "WORKBENCH_LLM_CONFIG_PATH is set but the file does not exist. "
@@ -133,7 +145,10 @@ def load_llm_config() -> LLMConfig:
                 source=SOURCE_EXPLICIT_CONFIG_INVALID,
             )
     else:
-        store = load_provider_store()
+        try:
+            store = load_provider_store_strict()
+        except ProviderStoreError:
+            return LLMConfig(base_url="", api_key="", model="", source="config_invalid")
 
     provider = next(
         (
@@ -171,23 +186,37 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
     else:
         base_url = provider.base_url
 
+    model = provider.model
+    # Evaluation runs compare models of one provider without changing the
+    # person's selection: WORKBENCH_AGENT_MODEL names another of its models.
+    # A name the provider does not list leaves the config unconfigured.
+    override = os.environ.get("WORKBENCH_AGENT_MODEL", "").strip()
+    if override:
+        if not any(item.request_model == override for item in provider.models):
+            return LLMConfig(base_url="", api_key="", model="", source=source)
+        model = override
     model_record = next(
-        (model for model in provider.models if model.request_model == provider.model),
+        (item for item in provider.models if item.request_model == model),
         None,
     )
     return LLMConfig(
         base_url=base_url,
         api_key=provider.api_key,
-        model=provider.model,
+        model=model,
         timeout_s=provider.timeout_s,
         provider_id=provider.id,
         provider_name=provider.name,
+        data_location=provider.data_location,
         source=source,
+        # The window the Agent works within: the model's, capped by the person's limit.
         context_window_tokens=(
-            model_record.context_window_tokens if model_record is not None else None
+            model_record.effective_window_tokens if model_record is not None else None
         ),
+        context_limit_tokens=model_record.context_limit_tokens if model_record is not None else None,
         supports_1m=model_record.supports_1m if model_record is not None else False,
         supports_vision=(
             model_record.supports_vision if model_record is not None else False
         ),
+        reasoning_efforts=model_record.reasoning_efforts if model_record is not None else None,
+        reasoning_effort=model_record.reasoning_effort if model_record is not None else None,
     )

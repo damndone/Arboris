@@ -40,11 +40,11 @@ describe("WorkspaceTopbar", () => {
       ["Analysis", "graph"],
       ["Tables", "table"],
       ["Report", "report"],
-      ["Plans", "notebook"],
+      ["Compare", "plans"],
     ]);
     const { onView } = renderTopbar();
     const tabs = within(screen.getByRole("tablist", { name: "View" })).getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["Home", "Data", "Analysis", "Tables", "Report", "Plans"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["Home", "Data", "Analysis", "Tables", "Report", "Compare"]);
     expect(screen.getByRole("tab", { name: "Analysis" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("tab", { name: "Tables" }));
     expect(onView).toHaveBeenCalledWith("table");

@@ -20,7 +20,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { AgentMode } from "./layoutModel";
+import { DEFAULT_AGENT_WIDTH, MIN_AGENT_WIDTH, type AgentMode } from "./layoutModel";
 import {
   BUBBLE,
   MARGIN,
@@ -139,7 +139,7 @@ export function AgentWindow({
   const previous = useRef<{ mode: AgentMode; rect: DOMRect | null }>({ mode, rect: null });
 
   const maximumWidth = Math.min(maxWidth, bounds.width - 2 * MARGIN);
-  const minimumWidth = Math.min(280, maximumWidth);
+  const minimumWidth = Math.min(MIN_AGENT_WIDTH, maximumWidth);
   const panelWidth = Math.min(width, Math.max(180, bounds.width - 2 * MARGIN));
   const fullHeight = Math.min(FULL_HEIGHT, Math.max(120, (bounds.height - bounds.top - 2 * MARGIN) * 0.82));
   const windowSize = { width: panelWidth, height: compact ? Math.min(COMPACT_HEIGHT, fullHeight) : fullHeight };
@@ -338,6 +338,8 @@ export function AgentWindow({
           aria-valuemin={minimumWidth}
           aria-valuemax={maximumWidth}
           {...gestureProps("resize")}
+          title="Drag to resize · double-click to reset"
+          onDoubleClick={() => setWidth(clamp(DEFAULT_AGENT_WIDTH, minimumWidth, maximumWidth))}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();

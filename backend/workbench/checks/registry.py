@@ -18,6 +18,7 @@ from .fit_checks import (
     CLUSTER_COUNT,
     EVENTS_PER_VARIABLE,
     HETEROSKEDASTICITY,
+    OUTCOME_TYPE_SERVED,
     OVERDISPERSION,
     PERFECT_FIT,
     SEPARATION,
@@ -25,6 +26,7 @@ from .fit_checks import (
 
 CHECKS: tuple[CheckSpec, ...] = (
     ROWS_PER_PARAMETER,
+    OUTCOME_TYPE_SERVED,
     COLLINEARITY,
     CLUSTER_COUNT,
     FIRST_STAGE_STRENGTH,

@@ -156,7 +156,7 @@ def compute_context_fingerprint(
     request: NodeWriteOperationRequestV1,
 ) -> str:
     family = scan_family(runs_root, request.owner_run_id)
-    headset = build_headset(runs_root, family)
+    headset = build_headset(runs_root, family, include_card_previews=False)
     node_key, node = _find_headset_node(headset, request)
     if node is None:
         raise ValueError("context_stale: node_index")

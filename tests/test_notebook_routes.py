@@ -480,6 +480,12 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
     assert confirmed.status_code == 200, confirmed.text
     workflow = confirmed.json()["workflow_execution"]
     assert workflow["status"] == "completed"
+    # Notebook execution uses the same durable operation record as Agent cards.
+    operation = confirmed.json()["operation"]
+    assert operation["operation_id"] == "operation.multi_step"
+    assert operation["status"] == "completed"
+    from workbench.agent.operations import OperationRecordStore
+    assert OperationRecordStore(project / "workbench").get(operation["record_id"]).to_dict() == operation
     assert len(workflow["branch_runs"]) == 2
     assert {item["branch_id"] for item in workflow["branch_runs"]} == {
         "linear",
@@ -1119,6 +1125,335 @@ def test_real_planner_catalog_matches_model_family_covariance_contract(
             "forbidden_fields": ["covariance", "model_options"],
             "submission_rule": "omit_model_options",
         }
+
+
+def test_compare_from_intake_run_corrects_native_iv_to_the_published_workflow(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from tests.test_data_column_cast import _register_source_node_identity, _source_project
+    from workbench.agent.model import ModelStreamEvent
+    from workbench.lineage.run_inputs import write_run_inputs
+    from workbench.llm.config import LLMConfig
+
+    frame = pd.DataFrame({
+        "wage": [11, 14, 18, 24, 28, 35], "school": [9, 10, 11, 11, 14, 15],
+        "near_college": [0, 0, 1, 0, 1, 1], "experience": [3, 2, 1, 2, 4, 5],
+    })
+    project, run_id, _ = _source_project(tmp_path, frame)
+    _register_source_node_identity(project, run_id)
+    upload = store_upload_bytes(project, frame.to_csv(index=False).encode(), filename="source.csv")
+    write_run_inputs(
+        project / "runs" / run_id, form={"model_type": "auto"},
+        upload={"sha256": upload, "filename": "source.csv"},
+        rerun_of=None, from_node=None, rerun_reason="initial",
+        override_hash=None, dag_hash="source-fixture",
+    )
+    packets = []
+    corrections = []
+
+    class FakeProvider:
+        async def stream(self, request):
+            if not packets:
+                packets.append(json.loads(request.messages[1]["content"]))
+            else:
+                corrections.append(request.messages[-1]["content"])
+            packet = packets[0]
+            workflow = packet["context"]["typed_operation_contracts"]["operation.multi_step"]
+            profile = next(
+                row for row in packet["evidence"]["records"] if row["inspection_id"] == "profile.v1"
+            )
+            spec = {
+                "model_family": "iv_2sls", "covariance": "robust",
+                "iv_endog": ["school"], "iv_instruments": ["near_college"],
+                "branches": [{"branch_id": "estimate", "outcome": "wage", "predictors": ["experience"]}],
+            }
+            # Reproduce the provider's standalone envelope first. The second
+            # submission wraps the original specification in the published workflow.
+            corrected = bool(corrections)
+            proposal = {
+                "proposal_id": "iv_candidate", "proposal_revision": 1, "operation_version": "v1",
+                "target": workflow["target_exact"], "preconditions": workflow["preconditions_exact"],
+                "operation_id": "operation.multi_step" if corrected else "model.genesis",
+                "changes": {"steps": [{"step_id": "estimate", "operation_id": "model.genesis", "spec": spec}]}
+                if corrected else {"model_params": spec},
+            }
+            option = {
+                "rank": 1, "rationale": "Estimate the association using a declared instrument.",
+                "capability_id": "iv_2sls", "option_id": "iv_option", "proposal": proposal,
+                "assumptions": ["Near-college residence must satisfy the exclusion restriction."],
+                "expected_artifacts": [{"artifact_id": "iv_2sls_1", "artifact_type": "model_result",
+                                        "required": True, "count": 1, "step": None}],
+                "evidence_refs": [{field: profile[field] for field in ("evidence_id", "result_hash", "source_refs")}],
+                "comparative_claims": [],
+            }
+            yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                "tool_call_id": f"draft-{len(corrections)}", "tool_id": "submit_notebook_option_batch",
+                "arguments": {"options": [option]},
+            })
+            yield ModelStreamEvent.done(request.request_id, "tool_calls")
+
+    monkeypatch.setattr(
+        notebook_routes, "load_llm_config",
+        lambda: LLMConfig(base_url="https://provider.invalid", api_key="test-key", model="offline"),
+    )
+    monkeypatch.setattr(notebook_routes, "CancellableOpenAICompatibleModelAdapter", lambda _config: FakeProvider())
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    created = client.post(
+        "/notebooks/projection", params=params, json={"from_run_id": run_id, "created_by": "ui"}
+    )
+    assert created.status_code == 200, created.text
+    notebook_id = created.json()["notebook_id"]
+    response = client.post(f"/notebooks/{notebook_id}/options/propose", params=params, json={"count": 1})
+    assert response.status_code == 200, response.text
+    packet = packets[0]
+    catalog = packet["capability_catalog"]
+    for capability in ("iv_2sls", "ols", "iv.gmm"):
+        assert catalog[capability]["notebook_proposal_adapters"] == ["operation.multi_step"]
+    assert {"time_series.ets", "time_series.arma_garch"}.isdisjoint(catalog)
+    assert packet["context"]["comparison_policy"]["profile"] == "result-blind-comparison/v1"
+    assert packet["context"]["content"]["diagnostics"] == []
+    assert packet["context"]["content"]["artifact_summaries"] == []
+    assert len(corrections) == 1
+    assert "changes.steps" in corrections[0] and "operation.multi_step" in corrections[0]
+    option = NotebookService(project).store.read_option(notebook_id, "iv_option")
+    assert option.lifecycle_status == "proposed"
+    admitted = option.current_stored_revision.proposal
+    assert admitted.operation_id == "operation.multi_step"
+    assert admitted.target == packet["context"]["typed_operation_contracts"]["operation.multi_step"]["target_exact"]
+    assert list((project / "runs").iterdir()) == [project / "runs" / run_id]
+
+
+@pytest.mark.parametrize(
+    ("layout", "rejection"),
+    [
+        ("single", None),
+        ("identical", None),
+        ("different", "apply to the whole model.genesis step"),
+        ("partial", "apply to the whole model.genesis step"),
+        ("step_conflict", "apply to the whole model.genesis step"),
+        ("overlap", "IV_INVALID_PARTITION"),
+    ],
+)
+def test_compare_admits_only_unambiguous_iv_step_context(
+    tmp_path: Path, monkeypatch, layout: str, rejection: str | None
+) -> None:
+    from tests.test_data_column_cast import _register_source_node_identity, _source_project
+    from workbench.agent.model import ModelStreamEvent
+    from workbench.lineage.run_inputs import write_run_inputs
+    from workbench.llm.config import LLMConfig
+
+    frame = pd.DataFrame({
+        "log_wage": [11, 14, 18, 24, 28, 35],
+        "education": [9, 10, 11, 11, 14, 15],
+        "near_college": [0, 0, 1, 0, 1, 1],
+        "mother_educ": [10, 10, 12, 8, 13, 14],
+        "experience": [3, 2, 1, 2, 4, 5],
+    })
+    project, run_id, _ = _source_project(tmp_path, frame)
+    _register_source_node_identity(project, run_id)
+    upload = store_upload_bytes(project, frame.to_csv(index=False).encode(), filename="source.csv")
+    write_run_inputs(
+        project / "runs" / run_id, form={"model_type": "auto"},
+        upload={"sha256": upload, "filename": "source.csv"},
+        rerun_of=None, from_node=None, rerun_reason="initial",
+        override_hash=None, dag_hash="source-fixture",
+    )
+    iv_fields = {"iv_endog": ["education"], "iv_instruments": ["near_college"]}
+    branches = [{
+        "branch_id": "main", "outcome": "log_wage",
+        "predictors": ["education"] if layout == "overlap" else ["experience"],
+        "covariance": "robust", **iv_fields,
+    }]
+    if layout in {"identical", "different", "partial"}:
+        alternate = {"branch_id": "no_controls", "outcome": "log_wage", "predictors": []}
+        if layout != "partial":
+            alternate.update(iv_fields)
+        if layout == "different":
+            alternate["iv_instruments"] = ["mother_educ"]
+        branches.append(alternate)
+    spec = {"model_family": "iv_2sls", "branches": branches}
+    if layout == "step_conflict":
+        spec["iv_instruments"] = ["mother_educ"]
+    packets = []
+    corrections = []
+
+    class FakeProvider:
+        async def stream(self, request):
+            if not packets:
+                packets.append(json.loads(request.messages[1]["content"]))
+            else:
+                corrections.append(request.messages[-1]["content"])
+            packet = packets[0]
+            workflow = packet["context"]["typed_operation_contracts"]["operation.multi_step"]
+            profile = next(
+                row for row in packet["evidence"]["records"] if row["inspection_id"] == "profile.v1"
+            )
+            option = {
+                "rank": 1, "option_id": "iv_option", "capability_id": "iv_2sls",
+                "rationale": "Estimate the effect of education using a declared instrument.",
+                "proposal": {
+                    "proposal_id": "iv_candidate", "proposal_revision": 1,
+                    "operation_id": "operation.multi_step", "operation_version": "v1",
+                    "target": workflow["target_exact"], "preconditions": workflow["preconditions_exact"],
+                    "changes": {
+                        "steps": [{"step_id": "estimate", "operation_id": "model.genesis", "spec": spec}],
+                    },
+                },
+                "evidence_refs": [
+                    {field: profile[field] for field in ("evidence_id", "result_hash", "source_refs")}
+                ],
+                "comparative_claims": [],
+            }
+            yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                "tool_call_id": f"draft-{len(corrections)}", "tool_id": "submit_notebook_option_batch",
+                "arguments": {"options": [option]},
+            })
+            yield ModelStreamEvent.done(request.request_id, "tool_calls")
+
+    monkeypatch.setattr(
+        notebook_routes, "load_llm_config",
+        lambda: LLMConfig(base_url="https://provider.invalid", api_key="test-key", model="offline"),
+    )
+    monkeypatch.setattr(notebook_routes, "CancellableOpenAICompatibleModelAdapter", lambda _config: FakeProvider())
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    created = client.post(
+        "/notebooks/projection", params=params, json={"from_run_id": run_id, "created_by": "ui"}
+    )
+    assert created.status_code == 200, created.text
+    notebook_id = created.json()["notebook_id"]
+    response = client.post(f"/notebooks/{notebook_id}/options/propose", params=params, json={"count": 1})
+    assert packets[0]["context"]["comparison_policy"]["profile"] == "result-blind-comparison/v1"
+    assert packets[0]["context"]["content"]["artifact_summaries"] == []
+    assert list((project / "runs").iterdir()) == [project / "runs" / run_id]
+    store = NotebookService(project).store
+
+    if rejection is not None:
+        assert response.status_code == 422, response.text
+        assert rejection in response.text
+        assert store.option_ids(notebook_id) == []
+        if layout == "overlap":
+            assert "spec.branches[].predictors" in corrections[0]
+            assert "exogenous controls" in corrections[0]
+        return
+
+    assert response.status_code == 200, response.text
+    assert not corrections
+    option = store.read_option(notebook_id, "iv_option")
+    assert option.lifecycle_status == "proposed"
+    admitted = option.current_stored_revision.proposal.changes["steps"][0]["spec"]
+    assert admitted == {
+        "model_family": "iv_2sls",
+        **iv_fields,
+        "branches": [{key: value for key, value in branch.items() if key not in iv_fields} for branch in branches],
+    }
+    assert {key: branches[0][key] for key in iv_fields} == iv_fields
+
+
+@pytest.mark.parametrize("unrelated_manual_artifact", [False, True])
+def test_mixed_model_compare_persists_only_artifacts_supported_by_its_steps(
+    tmp_path: Path, monkeypatch, unrelated_manual_artifact: bool
+) -> None:
+    from tests.test_data_column_cast import _register_source_node_identity, _source_project
+    from workbench.agent.model import ModelStreamEvent
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.lineage.run_inputs import write_run_inputs
+    from workbench.llm.config import LLMConfig
+
+    frame = pd.DataFrame({
+        "log_wage": [11, 14, 18, 24, 28, 35],
+        "education": [9, 10, 11, 11, 14, 15],
+        "near_college": [0, 0, 1, 0, 1, 1],
+        "mother_educ": [10, 10, 12, 8, 13, 14],
+        "experience": [3, 2, 1, 2, 4, 5],
+    })
+    project, run_id, _ = _source_project(tmp_path, frame)
+    _register_source_node_identity(project, run_id)
+    upload = store_upload_bytes(project, frame.to_csv(index=False).encode(), filename="source.csv")
+    write_run_inputs(
+        project / "runs" / run_id, form={"model_type": "auto"},
+        upload={"sha256": upload, "filename": "source.csv"},
+        rerun_of=None, from_node=None, rerun_reason="initial",
+        override_hash=None, dag_hash="mixed-model-fixture",
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    created = client.post(
+        "/notebooks/projection", params=params, json={"from_run_id": run_id, "created_by": "ui"}
+    )
+    assert created.status_code == 200, created.text
+    notebook_id = created.json()["notebook_id"]
+    service = NotebookService(project)
+    workflow = NotebookPlanningAgent._typed_operation_contracts(service.compile_context(notebook_id))[
+        "operation.multi_step"
+    ]
+    steps = [{
+        "step_id": "explore_data", "operation_id": "statistical.explore",
+        "spec": {"operation": "summarize_detail", "selected_columns": list(frame.columns)},
+    }]
+    for step_id, instrument in (("ols_baseline", None), ("iv_near", "near_college"), ("iv_mother", "mother_educ")):
+        spec = {
+            "model_family": "ols" if instrument is None else "iv_2sls",
+            "branches": [{
+                "branch_id": step_id, "outcome": "log_wage",
+                "predictors": ["education", "experience"] if instrument is None else ["experience"],
+            }],
+        }
+        if instrument is not None:
+            spec.update(iv_endog=["education"], iv_instruments=[instrument])
+        steps.append({"step_id": step_id, "operation_id": "model.genesis", "spec": spec})
+    draft = {
+        "rank": 1,
+        "rationale": "Compare the baseline association to two proposed instrumental-variable fits.",
+        "option_id": "mixed_option",
+        "capability_id": "iv_2sls",
+        "proposal": {
+            "proposal_id": "mixed_candidate", "proposal_revision": 1,
+            "operation_id": "operation.multi_step", "operation_version": "v1",
+            "target": workflow["target_exact"], "preconditions": workflow["preconditions_exact"],
+            "changes": {"steps": steps},
+        },
+    }
+    endpoint = f"/notebooks/{notebook_id}/options/propose"
+    if unrelated_manual_artifact:
+        invalid = {
+            **draft, "capability_id": "logit",
+            "expected_artifacts": [{
+                "artifact_id": "logit_1", "artifact_type": "model_result",
+                "count": 1, "required": True,
+            }],
+        }
+        refused = client.post(endpoint, params=params, json={"drafts": [invalid]})
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["error"]["code"] == "ARTIFACT_REQUIRED_NOT_DECLARABLE"
+        assert service.store.option_ids(notebook_id) == []
+    else:
+        class FakeProvider:
+            async def stream(self, request):
+                yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                    "tool_call_id": "submit-mixed", "tool_id": "submit_notebook_option_batch",
+                    "arguments": {"options": [draft]},
+                })
+                yield ModelStreamEvent.done(request.request_id, "tool_calls")
+
+        monkeypatch.setattr(
+            notebook_routes, "load_llm_config",
+            lambda: LLMConfig(base_url="https://provider.invalid", api_key="test-key", model="offline"),
+        )
+        monkeypatch.setattr(
+            notebook_routes, "CancellableOpenAICompatibleModelAdapter", lambda _config: FakeProvider()
+        )
+        proposed = client.post(endpoint, params=params, json={"count": 1})
+        assert proposed.status_code == 200, proposed.text
+        option = service.store.read_option(notebook_id, "mixed_option")
+        assert option.lifecycle_status == "proposed"
+        assert {
+            item.artifact_id: (item.artifact_type, item.count, item.required)
+            for item in option.current_revision.artifact_contract.expected
+        } == {"ols_1": ("model_result", 1, True), "iv_2sls_1": ("model_result", 2, True)}
+
+    assert list((project / "runs").iterdir()) == [project / "runs" / run_id]
 
 
 def test_real_planner_uses_builtin_artifact_vocabulary_for_native_family(
@@ -1947,8 +2282,9 @@ def test_projection_route_rejects_ambiguous_source(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "NOTEBOOK_PROJECTION_SOURCE_INVALID"
 
 
-def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize("revalidate_during_confirm", [False, True])
+def test_materialize_route_creates_genesis_draft_and_keeps_confirmation_pins(
+    tmp_path: Path, monkeypatch, revalidate_during_confirm: bool
 ) -> None:
     project = make_project(tmp_path)
     upload_sha = store_upload_bytes(
@@ -2096,6 +2432,30 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
         json={"decision": "selected", "actor": "ui"},
     )
     assert selected.status_code == 200, selected.text
+
+    if revalidate_during_confirm:
+        from workbench.lineage.pipeline_drafts import PipelineDraftStore
+
+        materialize_option = NotebookService.materialize_option
+
+        def replace_revision_before_materialization(self, notebook_id, option_id, *, context, **kwargs):
+            self.revalidate_option(notebook_id, option_id, context=context, draft=option)
+            return materialize_option(self, notebook_id, option_id, context=context, **kwargs)
+
+        monkeypatch.setattr(NotebookService, "materialize_option", replace_revision_before_materialization)
+        refused = client.post(
+            f"/notebooks/{notebook_id}/options/{option.option_id}/confirm",
+            params=params,
+            json={"option_revision": 1, "proposal_id": "p_genesis_route", "proposal_revision": 1},
+        )
+        assert refused.status_code == 409, refused.text
+        error = refused.json()["error"]
+        assert error["code"] == "OPTION_REVISION_STALE"
+        assert error["details"]["current_revision"] == 2
+        assert error["details"]["reason"] == "proposal_pin_mismatch", refused.text
+        assert service.store.read_option(notebook_id, option.option_id).lifecycle_status == "selected"
+        assert PipelineDraftStore(project).list() == []
+        return
 
     materialized = client.post(
         f"/notebooks/{notebook_id}/options/{option.option_id}/materialize",

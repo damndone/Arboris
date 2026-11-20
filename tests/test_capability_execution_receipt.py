@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from tests.operation_approval_fixtures import with_operation_approval
 
 from workbench.capability_factory.control import (
     ControlCursorExpectation,
@@ -161,6 +162,7 @@ def _fixture(
         risk_level=risk_level,
     )
     auth_store = OptionExecutionAuthorizationStore(tmp_path, clock=lambda: now)
+    authorization = with_operation_approval(tmp_path, authorization)
     auth_store.issue(authorization)
     control_store = ExecutionControlStore(clock=lambda: now)
     _store_subjects(control_store, intent, authorization.authorization_id, now)
@@ -203,7 +205,8 @@ def test_coordinator_claims_reserves_and_replays_one_attempt(tmp_path) -> None:
     assert len(control_store.records()) == 1
 
 
-def test_coordinator_spawns_then_acknowledges_the_same_trusted_handle(tmp_path) -> None:
+@pytest.mark.parametrize("revoked", [False, True])
+def test_coordinator_spawns_then_acknowledges_the_same_trusted_handle(tmp_path, revoked) -> None:
     from types import SimpleNamespace
 
     from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
@@ -258,14 +261,24 @@ def test_coordinator_spawns_then_acknowledges_the_same_trusted_handle(tmp_path) 
         def terminate(self, spawned):
             calls.append(("terminate", spawned))
 
-    running = coordinator.spawn_and_acknowledge(
-        receipt=receipt,
-        owner_id="supervisor.coordinator",
-        executor=StubExecutor(),
-        request=request,
-        policy=policy,
-        canary=CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED"),
-    )
+    def spawn():
+        return coordinator.spawn_and_acknowledge(
+            receipt=receipt,
+            owner_id="supervisor.coordinator",
+            executor=StubExecutor(),
+            request=request,
+            policy=policy,
+            canary=CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED"),
+        )
+    if revoked:
+        from workbench.operation_approvals import OperationApprovalStore
+        OperationApprovalStore(tmp_path / "workbench").revoke(authorization.approval_id, actor_type="user")
+        with pytest.raises(ValueError, match="revoked"):
+            spawn()
+        assert calls == []
+        assert supervisor.read(receipt.attempt_id).status == "reserved"
+        return
+    running = spawn()
 
     assert running.status == "running"
     assert len(calls) == 1

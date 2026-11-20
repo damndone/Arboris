@@ -1,0 +1,254 @@
+/* frontend/src/workspace/agent/composerMenu.css — v1.9.1 mode and model menus.
+   Quiet buttons in the composer bar; a small sheet opens above them. */
+
+.ws-menu {
+  position: relative;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.ws-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 26px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ws-menu__button:hover:not(:disabled),
+.ws-menu__button[aria-expanded="true"] {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.ws-menu__button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ws-menu__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-menu__chevron {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+.ws-menu__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ws-menu__label-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Reserved for the longest level, so changing it never moves the model name. */
+.ws-menu__label-sub {
+  flex: 0 0 auto;
+  min-width: 7ch;
+  text-align: right;
+  color: var(--label-tertiary);
+  font-weight: 400;
+}
+
+/* The mode the Agent is in, tinted when it acts without asking. */
+.ws-mode-menu .ws-menu__label-main[data-mode="auto"] {
+  color: var(--tint-label);
+}
+
+/* At any width the mode keeps its word; the model name gives way first. */
+.ws-mode-menu {
+  flex: 0 0 auto;
+}
+
+.ws-model-menu {
+  flex: 0 1 auto;
+}
+
+.ws-menu__sheet {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 6px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
+  color: var(--label);
+  font-size: var(--text-small);
+}
+
+.ws-mode-menu .ws-menu__sheet { left: 0; }
+.ws-model-menu .ws-menu__sheet { right: 0; }
+
+.ws-menu__section + .ws-menu__section {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: var(--hairline) solid var(--separator, var(--border));
+}
+
+.ws-menu__section--settings {
+  display: grid;
+  gap: 10px;
+  padding: 8px 6px 4px;
+}
+
+.ws-menu__item {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  gap: 6px;
+  width: 100%;
+  min-height: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-menu__item:hover,
+.ws-menu__item:focus-visible {
+  outline: none;
+  background: var(--bg-elev);
+}
+
+.ws-menu__check {
+  color: var(--tint-label);
+  font-weight: 600;
+}
+
+.ws-menu__item-name {
+  display: block;
+  font-weight: 500;
+}
+
+.ws-menu__item-description {
+  display: block;
+  margin-top: 1px;
+  color: var(--label-secondary);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.ws-menu__item--described .ws-menu__item-description {
+  max-width: 260px;
+}
+
+
+
+
+
+
+
+
+.ws-menu__hint {
+  margin: 4px 8px 2px;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  line-height: 1.35;
+}
+
+/* An unfinished turn, and the line that says what a message does mid-turn. */
+.ws-composer__banner,
+.ws-composer__queue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 var(--space-1) var(--space-2);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.ws-composer__banner {
+  padding: 6px 6px 6px 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.ws-composer__banner button,
+.ws-composer__queue button {
+  min-height: 0;
+  height: 24px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ws-composer__queue button[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--tint) 45%, transparent);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+}
+
+/* The sheet never outgrows the window; a long model list scrolls inside it. */
+.ws-model-menu .ws-menu__sheet { max-height: calc(100vh - 140px); overflow-y: auto; width: 320px; }
+.ws-menu__scroll { max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+.ws-menu__search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--label);
+  font: inherit;
+}
+.ws-menu__slider { display: grid; gap: 4px; }
+.ws-menu__slider-head { display: flex; justify-content: space-between; color: var(--label-secondary); }
+.ws-menu__slider-value { color: var(--label); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ws-menu__slider-track { position: relative; height: 20px; cursor: pointer; touch-action: none; outline: none; }
+.ws-menu__slider-rail, .ws-menu__slider-fill {
+  position: absolute; top: 7px; left: 0; height: 6px; border-radius: 3px;
+}
+.ws-menu__slider-rail { right: 0; background: var(--bg-elev); box-shadow: inset 0 0 0 var(--hairline) var(--border); }
+.ws-menu__slider-fill { background: var(--tint); transition: width 160ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease; }
+.ws-menu__slider-stop {
+  position: absolute; top: 8px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+  background: var(--label-tertiary); pointer-events: none;
+}
+.ws-menu__slider-stop[data-passed] { background: var(--bg-card); }
+.ws-menu__slider-thumb {
+  position: absolute; top: 2px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%;
+  background: var(--bg-card); box-shadow: 0 0 0 var(--hairline) var(--border), var(--shadow-pop);
+  transition: left 160ms cubic-bezier(.2,.8,.2,1), transform 120ms ease;
+}
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-fill,
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-thumb { transition: none; }
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-thumb { transform: scale(1.1); }
+.ws-menu__slider-track:focus-visible .ws-menu__slider-thumb { box-shadow: 0 0 0 2px var(--focus-ring); }
+@media (prefers-reduced-motion: reduce) {
+  .ws-menu__slider-fill, .ws-menu__slider-thumb { transition: none; }
+}

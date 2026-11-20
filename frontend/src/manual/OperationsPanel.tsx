@@ -18,6 +18,13 @@ import "./manual.css";
 import "./operations/operations.css";
 
 export type { ModelChoice };
+/** A graph selection names its owner and node; the dataset API supplies the artifact. */
+export type AnalysisTarget = Target | Omit<Extract<Target, { kind: "dataset_node" }>, "artifact_id">;
+export type AnalysisReplay = {
+  target: Extract<Target, { kind: "dataset_node" }>;
+  operationId: string;
+  spec: Step["spec"];
+};
 
 const uid = () => crypto.randomUUID();
 
@@ -27,6 +34,7 @@ export function OperationsPanel({
   models,
   initialSearch = "",
   initialTarget,
+  replay,
   onClose,
   onRefresh,
   onOpenRun,
@@ -35,23 +43,28 @@ export function OperationsPanel({
   projectRoot: string;
   runId: string;
   initialSearch?: string;
-  initialTarget?: Target;
+  /** null means an explicit selection could not be resolved; never choose a substitute. */
+  initialTarget?: AnalysisTarget | null;
+  replay?: AnalysisReplay;
   models: ModelChoice[];
   onClose: () => void;
   onRefresh: () => void;
-  onOpenRun: (runId: string) => void;
+  onOpenRun: (runId: string, nodeId: string) => void;
   /** An operation with its own place in the workbench (its `execution.surface`). */
   onDedicated: (op: Operation, target?: Target) => void;
 }) {
   // A run produced here can become the active run while Analyze is open; this
   // session stays bound to the run it was opened on.
-  const [sourceRunId] = useState(runId);
+  const [sourceRunId] = useState(() => replay?.target.run_id
+    ?? (initialTarget === null ? "" : initialTarget && "run_id" in initialTarget ? initialTarget.run_id : runId));
   const [revision, setRevision] = useState(0);
   const { choices, error: targetError } = useTargetChoices(projectRoot, sourceRunId, models, revision);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [catalogBusy, setCatalogBusy] = useState(true);
-  const [steps, setSteps] = useState<Step[]>([]);
+  const [steps, setSteps] = useState<Step[]>(() => replay ? [{
+    step_id: "saved_analysis", operation_id: replay.operationId, spec: structuredClone(replay.spec),
+  }] : []);
   const [picking, setPicking] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [busy, setBusy] = useState(false);
@@ -71,19 +84,31 @@ export function OperationsPanel({
     requestId.current = uid();
   };
 
-  // First load picks the requested target (or the first); a refresh that
+  // Only an absent request picks the first target; a refresh that
   // drops the selected target discards the work built on it.
   useEffect(() => {
     if (!choices) return;
     if (selectedKey === null) {
-      const wanted = initialTarget ? JSON.stringify(initialTarget) : undefined;
-      setSelectedKey(choices.find((c) => c.key === wanted)?.key ?? choices[0]?.key ?? "");
+      const requested = replay?.target ?? initialTarget;
+      const wanted = requested ? JSON.stringify(requested) : undefined;
+      const matched = requested?.kind === "dataset_node" && !("artifact_id" in requested)
+        ? choices.find((c) => c.target.kind === "dataset_node"
+          && c.target.run_id === requested.run_id && c.target.node_id === requested.node_id)
+        : choices.find((c) => c.key === wanted);
+      if (requested !== undefined && !matched) {
+        setError(replay
+          ? "Saved analysis source is unavailable. Select data before starting a new analysis."
+          : "The selected analysis target is unavailable. Select data or a model before starting an analysis.");
+        setSelectedKey("");
+      } else {
+        setSelectedKey(matched?.key ?? choices[0]?.key ?? "");
+      }
     } else if (selectedKey && !choices.some((c) => c.key === selectedKey)) {
       invalidate();
       setSteps([]);
       setSelectedKey("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately partial dependency list.
   }, [choices]);
 
   useEffect(() => {
@@ -98,7 +123,7 @@ export function OperationsPanel({
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately partial dependency list.
   }, [projectRoot, targetKey, selectedKey === null]);
 
   const chooseTarget = (key: string) => {

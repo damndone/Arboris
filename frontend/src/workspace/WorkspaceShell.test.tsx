@@ -113,19 +113,21 @@ describe("WorkspaceShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse conversation history" }));
     expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "true");
     fireEvent.click(screen.getByRole("button", { name: "Dock the Agent" }));
-    expect(shell().style.getPropertyValue("--ws-agent")).toBe("380px");
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("440px");
     expect(screen.getByTestId("agent-state")).toHaveTextContent("1");
     expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "false");
   });
   test("width is adjustable in both docked and floating modes", () => {
     renderShell();
     fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowLeft" });
-    expect(shell().style.getPropertyValue("--ws-agent")).toBe("400px");
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("460px");
     fireEvent.click(screen.getByRole("button", { name: "Float the Agent" }));
     fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowRight" });
-    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "380");
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "440");
     for (let i = 0; i < 40; i++) fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowRight" });
-    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "280");
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "320");
+    fireEvent.doubleClick(screen.getByRole("separator", { name: "Agent width" }));
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "440");
   });
   test("docked resizing reserves space for the map and results", () => {
     const previous = window.innerWidth;
@@ -185,7 +187,7 @@ describe("WorkspaceShell", () => {
     unmount();
     renderShell();
     expect(agent()).toHaveAttribute("data-mode", "floating");
-    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "400");
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "460");
   });
 
   test("a dragged bubble comes to rest on the nearer side edge", () => {

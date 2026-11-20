@@ -37,7 +37,7 @@ export function OutcomeView({
   operations: Operation[];
   busy: boolean;
   onConfirm: () => void;
-  onOpenRun: (runId: string) => void;
+  onOpenRun: (runId: string, nodeId: string) => void;
 }) {
   const [shown, setShown] = useState<Shown | null>(null);
   const name = (id: string) => operations.find((op) => op.id === id)?.name ?? id.replace(/[._]/g, " ");
@@ -79,20 +79,21 @@ export function OutcomeView({
                 <span className="op-chip" data-status={step.status}>{statusLabel(step.status)}</span>
                 <span className="op-outcome__actions">
                   {step.node_refs.map((node) => (
-                    <button key={`${node.run_id}:${node.node_id}`} type="button" className="op-link" title={node.run_id} onClick={() => onOpenRun(node.run_id)}>
+                    <button key={`${node.run_id}:${node.node_id}`} type="button" className="op-link" title={node.run_id} onClick={() => onOpenRun(node.run_id, node.node_id)}>
                       Open result
                     </button>
                   ))}
-                  {step.artifact_refs.map((artifact) => (
-                    <span key={`${artifact.run_id}:${artifact.artifact_id}`}>
-                      <button type="button" className="op-link" aria-expanded={shown?.key === `${artifact.run_id}:${artifact.artifact_id}`} onClick={() => void show(artifact.run_id, artifact.artifact_id)}>
+                  {step.artifact_refs.map((artifact) => {
+                    const isLedger = step.operation_id === "quant.replay" && artifact.artifact_id.startsWith("quant_replay_ledger_");
+                    return <span key={`${artifact.run_id}:${artifact.artifact_id}`}>
+                      {!isLedger && <button type="button" className="op-link" aria-expanded={shown?.key === `${artifact.run_id}:${artifact.artifact_id}`} onClick={() => void show(artifact.run_id, artifact.artifact_id)}>
                         View saved result
-                      </button>
+                      </button>}
                       <a className="op-link" href={artifactUrl(projectRoot, artifact.run_id, artifact.artifact_id)} target="_blank" rel="noreferrer">
-                        Download
+                        {isLedger ? "Download full ledger CSV" : "Download"}
                       </a>
-                    </span>
-                  ))}
+                    </span>;
+                  })}
                 </span>
               </div>
               {step.error && <p role="alert">{step.error}</p>}

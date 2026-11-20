@@ -28,6 +28,16 @@ class OperationExecution(TypedDict):
     surface: NotRequired[Literal["graph", "data", "table", "notebook", "new_analysis", "analyze", "agent"]]
 
 
+class SavedNativePredictionModel(TypedDict):
+    run_id: str
+    node_id: str
+    artifact_id: str
+    sha256: str
+    label: str
+    predictors: list[str]
+    model_type: Literal["native_random_forest_regression", "native_random_forest_classification"]
+
+
 class OperationCatalogEntry(TypedDict):
     id: str
     version: str
@@ -49,6 +59,7 @@ class OperationCatalogEntry(TypedDict):
     column_resolver: str | None
     execution: OperationExecution
     availability: OperationAvailability
+    saved_models: NotRequired[list[SavedNativePredictionModel]]
 
 
 class OperationCatalog(TypedDict):

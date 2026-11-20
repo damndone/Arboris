@@ -9,6 +9,8 @@ inspectable AI-operation record targeted for the report slice and v1.7.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from dataclasses import dataclass, field, replace
 
 import json
@@ -19,7 +21,7 @@ import time
 from contextlib import contextmanager
 from threading import RLock
 from urllib.parse import urlparse
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Path, Request
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +30,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from ..api_errors import WorkbenchAPIError
+from ..egress import CONTEXT_PACKET_KEY
 from ..llm import (
     LLMNotConfiguredError,
     LLMUpstreamError,
@@ -40,6 +43,8 @@ from ..llm.provider_store import (
     DEFAULT_TIMEOUT_S,
     MAX_TIMEOUT_S,
     ModelRecord,
+    ReasoningEffort,
+    model_from_dict,
     ProviderRecord,
     ProviderStore,
     load_provider_store,
@@ -322,6 +327,7 @@ def llm_config() -> LlmConfig:
         "context_window_tokens": config.context_window_tokens,
         "supports_1m": config.supports_1m,
         "supports_vision": config.supports_vision,
+        "data_location": config.data_location,
     }
 
 
@@ -333,6 +339,9 @@ class ProviderModelRequest(BaseModel):
     context_window_tokens: int | None = Field(default=None, ge=1)
     supports_1m: bool = False
     supports_vision: bool = False
+    reasoning_efforts: list[ReasoningEffort] | None = None
+    reasoning_effort: ReasoningEffort | None = None
+    context_limit_tokens: int | None = Field(default=None, ge=1)
 
     @field_validator("display_name", "request_model")
     @classmethod
@@ -356,6 +365,7 @@ class ProviderUpsertRequest(BaseModel):
     timeout_s: float | None = Field(default=None, gt=0, le=MAX_TIMEOUT_S)
     models: list[ProviderModelRequest] | None = None
     clear_api_key: bool = False
+    data_location: Literal["local", "remote"] = "remote"
 
     @field_validator("id", "name", "model")
     @classmethod
@@ -531,7 +541,8 @@ def _to_provider_record(
             model=request.model,
             api_key=_stored_api_key(request.api_key),
             timeout_s=request.timeout_s or DEFAULT_TIMEOUT_S,
-            models=[ModelRecord(**model.model_dump()) for model in request.models or []],
+            data_location=request.data_location,
+            models=[model_from_dict(model.model_dump()) for model in request.models or []],
         )
 
     if request.id is not None and request.id != provider_id:
@@ -562,8 +573,9 @@ def _to_provider_record(
         model=request.model if request.model is not None else existing.model,
         api_key=api_key,
         timeout_s=request.timeout_s if request.timeout_s is not None else existing.timeout_s,
+        data_location=(request.data_location if "data_location" in request.model_fields_set else existing.data_location),
         models=(
-            [ModelRecord(**model.model_dump()) for model in request.models]
+            [model_from_dict(model.model_dump()) for model in request.models]
             if request.models is not None
             else existing.models
         ),
@@ -746,6 +758,9 @@ def _provider_config(provider: ProviderRecord):
         api_key=provider.api_key,
         model=provider.model,
         timeout_s=provider.timeout_s,
+        data_location=provider.data_location,
+        provider_id=provider.id,
+        provider_name=provider.name,
     )
 
 
@@ -789,28 +804,9 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
             )
 
         existing_models = {model.request_model: model for model in current_provider.models}
+        # Operator metadata and the person's choices survive a refresh unchanged.
         refreshed_models = [
-            ModelRecord(
-                display_name=existing_models.get(
-                    model["id"], ModelRecord(model["id"], model["id"])
-                ).display_name,
-                request_model=model["id"],
-                context_window_tokens=(
-                    existing_models[model["id"]].context_window_tokens
-                    if model["id"] in existing_models
-                    else None
-                ),
-                supports_1m=(
-                    existing_models[model["id"]].supports_1m
-                    if model["id"] in existing_models
-                    else False
-                ),
-                supports_vision=(
-                    existing_models[model["id"]].supports_vision
-                    if model["id"] in existing_models
-                    else False
-                ),
-            )
+            existing_models.get(model["id"]) or model_from_dict({"display_name": model["id"], "request_model": model["id"]})
             for model in models
         ]
         refreshed = ProviderRecord(
@@ -823,6 +819,7 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
             model=current_provider.model,
             api_key=current_provider.api_key,
             timeout_s=current_provider.timeout_s,
+            data_location=current_provider.data_location,
             models=refreshed_models,
         )
         updated_store = (
@@ -832,6 +829,56 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
         )
         _save_provider_store_or_error(updated_store)
         return _public_provider_dict(refreshed)
+
+
+def detected_model(model: ModelRecord, reported: dict[str, Any]) -> ModelRecord:
+    """A configured model with the capabilities its provider reports; the person's
+    choices are kept unless the model no longer offers them."""
+
+    changes: dict[str, Any] = {}
+    window = reported.get("context_window_tokens")
+    if window:
+        changes.update(context_window_tokens=window, supports_1m=window >= 1_000_000)
+    if "supports_vision" in reported:
+        changes["supports_vision"] = reported["supports_vision"]
+    if "reasoning_efforts" in reported:
+        efforts = list(reported["reasoning_efforts"])
+        # Turning thinking off is a request field, not a listed level: keep it where the model had it.
+        if efforts and "none" in model.reasoning_efforts and "none" not in efforts:
+            efforts.insert(0, "none")
+        changes["reasoning_efforts"] = efforts
+    if not changes:
+        return model
+    return model_from_dict({**model.to_dict(), **changes})
+
+
+@router.post("/llm/providers/{provider_id}/models/detect")
+def detect_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
+    """Read the provider's model list and update what it reports about the models already
+    configured (context window, thinking efforts, image input). No model is added or removed;
+    a provider whose list reports nothing leaves its models as they are."""
+
+    with _provider_store_mutation_lock():
+        provider = _provider_or_error(provider_id)
+    try:
+        reported = {model["id"]: model for model in fetch_models(_provider_config(provider))}
+    except LLMNotConfiguredError as exc:
+        raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED", message=str(exc)) from exc
+    except LLMUpstreamError as exc:
+        raise _upstream_error(exc) from exc
+    with _provider_store_mutation_lock():
+        current_store = _load_provider_store_for_mutation()
+        current = next((item for item in current_store.providers if item.id == provider_id), None)
+        if current is None:
+            raise WorkbenchAPIError(status_code=404, code="LLM_PROVIDER_NOT_FOUND",
+                                    message=f"LLM provider {provider_id!r} was not found.")
+        models = [detected_model(model, reported[model.request_model]) if model.request_model in reported else model
+                  for model in current.models]
+        if models == current.models:
+            return _public_provider_dict(current)
+        updated = dataclasses.replace(current, models=models)
+        _save_provider_store_or_error(_replace_provider(current_store, updated))
+        return _public_provider_dict(updated)
 
 
 @router.post("/llm/providers/{provider_id}/probe")
@@ -889,10 +936,31 @@ class AskAIChatRequest(BaseModel):
     # PNG data URL after the user explicitly agreed to send it to the provider.
     # Absent by default: the standing policy is binaries-excluded.
     image_data_url: str | None = Field(default=None, max_length=MAX_IMAGE_DATA_URL_CHARS)
+    # The project whose data-sharing policy governs this send and records its audit.
+    project_root: str | None = Field(default=None, max_length=4096)
 
 
 @router.post("/llm/chat")
 def llm_chat(request: AskAIChatRequest) -> ChatReply:
+    if request.project_root is None:
+        return _llm_chat(request)
+    from pathlib import Path as FilePath
+
+    from ..egress import egress_project
+
+    root = FilePath(request.project_root).expanduser().resolve()
+    if not root.is_dir():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code="PROJECT_NOT_FOUND",
+            message="Workbench project was not found.",
+            details={"project_root": str(root)},
+        )
+    with egress_project(root):
+        return _llm_chat(request)
+
+
+def _llm_chat(request: AskAIChatRequest) -> ChatReply:
     if request.mode not in (SUPPORTED_MODE, REPORT_MODE, FIGURE_MODE):
         raise WorkbenchAPIError(
             status_code=422,
@@ -923,7 +991,7 @@ def llm_chat(request: AskAIChatRequest) -> ChatReply:
     config = _timeout_for_mode(request.mode, config)
     _validate_image_optin(request, config)
     messages = [
-        {"role": "system", "content": _build_system_prompt(request)},
+        {"role": "system", "content": _build_system_prompt(request), CONTEXT_PACKET_KEY: request.packet},
         {"role": "user", "content": _build_user_content(request)},
     ]
     report_retry_budget = _ReportRetryBudget() if report_contract is not None else None
@@ -1282,9 +1350,9 @@ def _build_system_prompt(request: AskAIChatRequest) -> str:
             "Client-declared guardrails (all must hold):\n"
             + json.dumps(guardrails, ensure_ascii=False, sort_keys=True)
         )
-    sections.append(
-        "Context packet:\n" + json.dumps(request.packet, ensure_ascii=False)
-    )
+    # The packet itself travels beside this prose, so the egress checkpoint
+    # filters it as structure (CONTEXT_PACKET_KEY).
+    sections.append("Context packet:\n")
     return "\n\n".join(sections)
 
 

@@ -245,6 +245,7 @@ def test_a_workflow_proposal_binds_the_real_source_artifact_id(
             }
         ),
     )
+    _seed_node_index(project, run_id)
     orchestrator = _orchestrator(project)
 
     canonical = orchestrator._canonicalize_proposal_arguments(

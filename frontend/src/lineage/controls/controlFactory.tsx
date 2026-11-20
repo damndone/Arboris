@@ -14,6 +14,7 @@ import type { ReactElement } from "react";
 import type { EditableControl } from "../api/graphViewTypes";
 import { SchemaField } from "../../manual/SchemaFields";
 import { validateValue, type JsonSchema } from "../../manual/schemaModel";
+import "../tokens/lineage.css";
 
 export type ControlChange = (key: string, value: unknown) => void;
 
@@ -122,12 +123,14 @@ function CheckboxListControl(
       data-testid={testid}
       aria-label={control.label}
       style={{
+        alignContent: "start",
         border: 0,
         display: "grid",
-        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-        gap: "6px 10px",
+        gridAutoRows: "max-content",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+        columnGap: 10,
         margin: 0,
-        maxHeight: 180,
+        maxHeight: 192,
         minWidth: 0,
         overflowY: "auto",
         padding: 0,
@@ -138,17 +141,15 @@ function CheckboxListControl(
           key={o.value}
           title={o.label}
           style={{
-            alignItems: "center",
+            alignItems: "flex-start",
             color: "var(--label-secondary)",
             display: "flex",
-            fontSize: 11,
+            fontSize: "var(--text-small)",
             fontWeight: 500,
             gap: 6,
             lineHeight: "18px",
             minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            paddingBlock: 3,
           }}
         >
           <input
@@ -160,13 +161,13 @@ function CheckboxListControl(
               accentColor: "var(--tint)",
               flex: "0 0 auto",
               height: 14,
-              margin: 0,
+              margin: "2px 0 0",
               minHeight: 0,
               padding: 0,
               width: 14,
             }}
           />
-          {o.label}
+          <span className="ln-control-option-label">{o.label}</span>
         </label>
       ))}
     </fieldset>

@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlparse
 from uuid import uuid4
 
 from workbench.llm.client import (
+    LLMRequestBudgetExceeded,
     LLMToolCallArgumentsError,
     LLMUpstreamError,
     async_stream_chat_completion,
     deepseek_v4_request_config,
+    is_nvidia_ultra,
+    provider_stream_wait_s,
 )
 from workbench.llm.config import LLMConfig
 
@@ -24,6 +27,8 @@ _TRANSIENT_UPSTREAM_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 def _to_openai_wire_messages(
     messages: list[dict[str, Any]],
+    *,
+    reasoning_source: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert internal session messages to the OpenAI chat wire format.
 
@@ -37,6 +42,10 @@ def _to_openai_wire_messages(
     and never crossed this boundary). Proposal/confirmation audit messages can
     be appended while a tool is executing; they are deferred until the
     assistant's contiguous tool-result block is complete.
+
+    An assistant message's private reasoning is sent back only to the provider
+    and model that produced it (``reasoning_source``); DeepSeek's thinking mode
+    requires it on every later request that carries tools.
     """
 
     converted: list[dict[str, Any]] = []
@@ -65,6 +74,10 @@ def _to_openai_wire_messages(
                     }
                     for call in internal_calls
                 ]
+            reasoning = message.get("reasoning_content")
+            if (reasoning_source is not None and isinstance(reasoning, str) and reasoning
+                    and message.get("reasoning_source") == dict(reasoning_source)):
+                wire["reasoning_content"] = reasoning
             return wire
         if role == "tool":
             return {
@@ -133,6 +146,11 @@ class ModelRequest:
     response_schema: dict[str, Any] | None = None
     model_config: Mapping[str, Any] = field(default_factory=dict)
     abort_event: Any | None = None
+    #: The person's turn this request belongs to; bounds stall retries per turn.
+    turn_key: str | None = None
+    #: Core-owned admission and first-send checkpoint, never part of the wire body.
+    check_request_budget: Callable[[], None] | None = field(default=None, repr=False, compare=False)
+    on_request_start: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -145,6 +163,8 @@ class ModelStreamEvent:
     provider_request_id: str | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
+    #: For a ``reasoning`` event: the provider and model that produced it.
+    reasoning_source: dict[str, Any] | None = None
 
     @classmethod
     def text_delta(cls, request_id: str, delta: str) -> "ModelStreamEvent":
@@ -155,6 +175,12 @@ class ModelStreamEvent:
         cls, request_id: str, tool_call: dict[str, Any]
     ) -> "ModelStreamEvent":
         return cls(type="tool_call_delta", request_id=request_id, tool_call=tool_call)
+
+    @classmethod
+    def reasoning(cls, request_id: str, text: str, source: dict[str, Any]) -> "ModelStreamEvent":
+        """The provider's private reasoning for this response; never user-visible."""
+
+        return cls(type="reasoning", request_id=request_id, delta=text, reasoning_source=source)
 
     @classmethod
     def done(cls, request_id: str, finish_reason: str = "stop") -> "ModelStreamEvent":
@@ -211,6 +237,19 @@ async def _next_stream_item_or_signal(
             await asyncio.gather(abort_waiter, return_exceptions=True)
 
 
+async def _wait_or_abort(seconds: float, abort_event: Any | None) -> bool:
+    """Wait, unless the person stops the turn first; True when stopped."""
+
+    if abort_event is None:
+        await asyncio.sleep(seconds)
+        return False
+    try:
+        await asyncio.wait_for(abort_event.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        return False
+    return True
+
+
 def _error_label(exc: LLMUpstreamError) -> str:
     label = type(exc).__name__
     if exc.upstream_status is not None:
@@ -230,26 +269,61 @@ class ModelAdapter(Protocol):
 class OpenAICompatibleModelAdapter:
     """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
 
+    defer_request_start = True
+
     # Seconds to wait before each retry of a request that failed before any
     # output (a dropped connection, a stream cut short, 429/5xx).
     retry_delays_s: tuple[float, ...] = (1.0, 3.0)
+    # A request that sent nothing within the idle bound is abandoned, as before
+    # (no waiting on the same stalled stream); then a fresh request is sent after
+    # each of these waits, at most this many times per turn. Free-route rounds
+    # (2026-10-23): 26 of 92 Hy3 turns and 22 of 54 Step-5 turns ended on a stall
+    # and needed the person to say "continue".
+    stall_retry_delays_s: tuple[float, ...] = (5.0, 15.0)
 
-    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
+    def __init__(self, config: LLMConfig, *, idle_timeout_s: float | None = None) -> None:
         self.config = config
+        if idle_timeout_s is None:
+            idle_timeout_s = provider_stream_wait_s(config, default_s=90.0)
         if idle_timeout_s <= 0:
             raise ValueError("idle_timeout_s must be positive")
         self.idle_timeout_s = float(idle_timeout_s)
+        self._stall_retries: dict[str, int] = {}
+
+    def _take_stall_retry(self, request: ModelRequest) -> float | None:
+        """The wait before the next fresh request after a stall, while this turn has one left."""
+
+        key = request.turn_key or request.request_id
+        used = self._stall_retries.get(key, 0)
+        if used >= len(self.stall_retry_delays_s):
+            return None
+        if len(self._stall_retries) > 64:
+            self._stall_retries.pop(next(iter(self._stall_retries)))
+        self._stall_retries[key] = used + 1
+        return self.stall_retry_delays_s[used]
+
+    @property
+    def request_wait_s(self) -> float:
+        # An evaluation recovery wrapper may extend the adapter's aggregate idle
+        # window. Admission concerns one HTTP attempt's configured wait only.
+        return provider_stream_wait_s(self.config, default_s=self.idle_timeout_s)
+
+    def reasoning_source(self) -> dict[str, Any]:
+        """Which provider and model private reasoning belongs to; it is sent to no other."""
+
+        return {"provider_id": self.config.provider_id, "base_url": self.config.base_url, "model": self.config.model}
 
     def supports_named_tool_choice(self) -> bool:
         """Return whether this provider accepts a named ``tool_choice``.
 
-        DeepSeek V4 thinking models accept function tools but reject the
-        ``tool_choice`` request field.  The planner still publishes only the
-        single typed submission tool for those models; omitting this optional
-        field preserves the same tool-surface restriction without turning a
-        provider capability mismatch into a planning failure.
+        DeepSeek V4 thinking models reject the field. The official NVIDIA
+        Ultra route compiles named tools into a grammar that rejects schema
+        constraints such as ``not``. Both routes accept tool declarations in
+        automatic mode, so the planner can still publish the single typed tool.
         """
 
+        if is_nvidia_ultra(self.config):
+            return False
         provider = self.config.provider_name.casefold()
         host = (urlparse(self.config.base_url).hostname or "").casefold()
         model = self.config.model.casefold()
@@ -273,7 +347,8 @@ class OpenAICompatibleModelAdapter:
         if abort_event is not None and abort_event.is_set():
             yield ModelStreamEvent.from_error(request.request_id, "aborted")
             return
-        wire_messages = _to_openai_wire_messages(request.messages)
+        source = self.reasoning_source()
+        wire_messages = _to_openai_wire_messages(request.messages, reasoning_source=source)
         wire_tools = _to_openai_tool_descriptors(request.tools)
         # A provider cannot act: a tool runs only after Workbench receives the
         # call. So a request that failed before any public output -- no text,
@@ -281,20 +356,39 @@ class OpenAICompatibleModelAdapter:
         # not. Each retry is yielded as an event so the failure stays on the
         # record. After public output began, nothing is replayed.
         attempt_budget = 1 + len(self.retry_delays_s)
-        for attempt in range(attempt_budget):
-            if attempt:
-                await asyncio.sleep(self.retry_delays_s[attempt - 1])
-                if abort_event is not None and abort_event.is_set():
+        attempt = -1
+        stall_wait: float | None = None
+        while attempt + 1 < attempt_budget or stall_wait is not None:
+            if stall_wait is not None:
+                # A fresh request after a stall does not use the failure retries.
+                if await _wait_or_abort(stall_wait, abort_event):
                     yield ModelStreamEvent.from_error(request.request_id, "aborted")
                     return
+                stall_wait = None
+            else:
+                attempt += 1
+                if attempt:
+                    await asyncio.sleep(self.retry_delays_s[attempt - 1])
+                    if abort_event is not None and abort_event.is_set():
+                        yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                        return
             received_event = False
+            reported_activity = False
             public_progress = False
+            meaningful_deadline = (asyncio.get_running_loop().time() + self.idle_timeout_s
+                                   if is_nvidia_ultra(self.config) else None)
+            reasoning_parts: list[str] = []  # this attempt's only; a retry starts over
             try:
+                if request.check_request_budget is not None:
+                    request.check_request_budget()
                 request_config = (
                     {"model_config": request.model_config}
                     if request.model_config
                     else {}
                 )
+                if request.check_request_budget is not None or request.on_request_start is not None:
+                    request_config.update(check_request_budget=request.check_request_budget,
+                                          on_request_start=request.on_request_start)
                 stream = async_stream_chat_completion(
                     wire_messages,
                     self.config,
@@ -302,10 +396,19 @@ class OpenAICompatibleModelAdapter:
                     **request_config,
                 )
                 while True:
-                    signal, item = await _next_stream_item_or_signal(
-                        stream, abort_event, self.idle_timeout_s
-                    )
+                    remaining = (max(0.0, meaningful_deadline - asyncio.get_running_loop().time())
+                                 if meaningful_deadline is not None else self.idle_timeout_s)
+                    if meaningful_deadline is not None and remaining <= 0:
+                        signal, item = "timeout", None
+                    else:
+                        signal, item = await _next_stream_item_or_signal(stream, abort_event, remaining)
                     if signal == "timeout":
+                        if meaningful_deadline is not None:
+                            await stream.aclose()
+                        if not public_progress and (wait := self._take_stall_retry(request)) is not None:
+                            yield ModelStreamEvent.retrying(request.request_id, "provider_no_progress")
+                            stall_wait = wait
+                            break
                         yield ModelStreamEvent.from_error(
                             request.request_id, "provider_no_progress"
                         )
@@ -319,6 +422,15 @@ class OpenAICompatibleModelAdapter:
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
                     event_type = item.get("type")
+                    if meaningful_deadline is not None and (
+                        event_type == "text_delta" and isinstance(item.get("delta"), str) and item["delta"].strip()
+                        or event_type == "tool_call"
+                        or event_type == "provider_activity" and (
+                            item.get("meaningful") is True
+                            or isinstance(item.get("reasoning"), str) and item["reasoning"].strip()
+                        )
+                    ):
+                        meaningful_deadline = asyncio.get_running_loop().time() + self.idle_timeout_s
                     if event_type == "text_delta":
                         delta = item.get("delta")
                         if isinstance(delta, str) and delta:
@@ -337,9 +449,17 @@ class OpenAICompatibleModelAdapter:
                         # user-visible Agent content. If that is the *only*
                         # progress before a disconnect, a single retry is safe:
                         # no public answer or typed tool call has been emitted.
+                        if not reported_activity and (item.get("meaningful") is True
+                                or isinstance(item.get("reasoning"), str) and item["reasoning"].strip()):
+                            # Only the fact of receipt is public. The provider's
+                            # reasoning stays in its private buffer below.
+                            yield ModelStreamEvent(type="activity", request_id=request.request_id)
+                            reported_activity = True
                         received_event = True
                         if item.get("public") is True:
                             public_progress = True
+                        if isinstance(item.get("reasoning"), str):
+                            reasoning_parts.append(item["reasoning"])
                     elif event_type == "done":
                         # Close the provider stream here, in this task: left
                         # suspended inside ``client.stream(...)`` it holds the
@@ -347,14 +467,21 @@ class OpenAICompatibleModelAdapter:
                         # another task.
                         await stream.aclose()
                         finish_reason = item.get("finish_reason")
+                        if reasoning_parts:
+                            yield ModelStreamEvent.reasoning(request.request_id, "".join(reasoning_parts), source)
                         yield ModelStreamEvent(
                             type="done",
                             request_id=request.request_id,
                             finish_reason=finish_reason if isinstance(finish_reason, str) else "stop",
-                            provider_request_id=request.request_id,
+                            provider_request_id=item.get("provider_request_id"),
+                            usage=item.get("usage"),
                         )
                         return
+                if stall_wait is not None:
+                    continue
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
+            except LLMRequestBudgetExceeded:
+                raise
             except LLMToolCallArgumentsError:
                 # The provider completed a typed call, but the arguments are
                 # not executable JSON. Preserve the failed first turn and let

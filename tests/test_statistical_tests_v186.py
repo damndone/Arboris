@@ -192,3 +192,34 @@ def test_paired_test_request_fails_closed_when_pair_columns_are_not_declared() -
             analysis_columns=["before", "after"],
             paired_columns=[("before", "missing_id")],
         )
+
+
+def test_paired_differences_are_first_minus_second_as_in_stata_r_and_scipy() -> None:
+    from scipy import stats
+
+    first, second = [5.0, 6.5, 7.0, 9.0, 4.5], [4.0, 6.0, 6.0, 7.5, 4.0]
+    paired = paired_t_test(first, second)
+    assert paired["statistic"] == pytest.approx(stats.ttest_rel(first, second).statistic, abs=1e-12)
+    assert paired["statistic"] > 0 and paired["effect_size"]["value"] == pytest.approx(0.9)
+    assert wilcoxon_signed_rank(first, second)["effect_size"]["value"] == pytest.approx(1.0)
+
+
+def test_t_tests_report_the_t_interval_of_the_mean_like_scipy():
+    """QRData 106 (3f281a47 round): the paired result had no interval, so the model computed one by hand."""
+    import numpy as np
+    from scipy import stats as scipy_stats
+
+    from workbench.statistical_test_kernels import one_sample_t_test, paired_t_test
+
+    rng = np.random.default_rng(106)
+    first, second = rng.normal(30, 9, 68), rng.normal(27, 9, 68)
+    paired = paired_t_test(first.tolist(), second.tolist())
+    expected = scipy_stats.ttest_rel(first, second).confidence_interval(0.95)
+    assert paired["confidence_interval"]["lower"] == pytest.approx(expected.low, rel=1e-12)
+    assert paired["confidence_interval"]["upper"] == pytest.approx(expected.high, rel=1e-12)
+    assert paired["confidence_interval"]["estimate"] == pytest.approx(paired["effect_size"]["value"], rel=1e-12)
+    one = one_sample_t_test(first.tolist(), population_mean=25.0)
+    expected = scipy_stats.ttest_1samp(first, 25.0).confidence_interval(0.95)
+    assert (one["confidence_interval"]["lower"], one["confidence_interval"]["upper"]) == pytest.approx(
+        (expected.low, expected.high), rel=1e-12)
+    assert "confidence_interval" not in paired_t_test([1.0, 2.0], [0.0, 1.0])

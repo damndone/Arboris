@@ -2,18 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
-  Handle,
   Panel,
-  Position,
   useReactFlow,
   useNodesState,
 } from "reactflow";
-import type { Node as RFNode, Edge as RFEdge } from "reactflow";
+import type { Node as RFNode, Edge as RFEdge, NodeChange } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
 import "../tokens/lineage.css";
 import { GraphNode } from "./GraphNode";
 import { GraphTooltip } from "./GraphTooltip";
+import { VariableGroupNode } from "./VariableGroupNode";
 import { AutoFitOnResize } from "./AutoFitOnResize";
 import type {
   GraphViewModel,
@@ -23,7 +22,6 @@ import type {
 import { foldNodeClusters, type GroupNode } from "../folding";
 import { rolesByVariable, primaryRole } from "./variableRoles";
 import { roleEdgeStyle, suppressAggregateEdges, isRoleOp } from "./roleEdges";
-import { roleAbbrev, roleColorVar, roleLabel, type Role } from "../roles";
 import {
   readHiddenGraphNodeIds,
   useWorkbenchOptional,
@@ -74,10 +72,8 @@ export function waitingReviewsCount(model: GraphViewModel): number {
   return n;
 }
 
-// V1.5.1 T4' — layout mode. "free" is the default (user-arranged after
-// initial seed). "LR" / "TB" run dagre with that rankdir on demand and
-// snap nodes to the result. Switching back to "free" preserves the most
-// recent positions (via useNodesState ownership; see HF5 comment below).
+// Horizontal is the initial arrangement. Manual keeps the current
+// positions and edge direction until the user requests another arrangement.
 export type LayoutMode = "free" | "LR" | "TB";
 export const DEFAULT_LAYOUT: LayoutMode = "LR";
 
@@ -132,10 +128,6 @@ function CanvasToolbar({
         role="group"
         aria-label="Canvas layout"
       >
-        {/* V1.5.1 T4' — Free is the default (per user 2026-05-25).
-         * Horizontal/Vertical click forces a fresh dagre re-layout with
-         * that rankdir; clicking Free again stops forced re-layouts
-         * (positions are preserved by useNodesState below). */}
         {layoutBtn("free", "Manual", "Manual layout — drag nodes anywhere")}
         {layoutBtn("LR", "Horizontal", "Horizontal flow (left → right)")}
         {layoutBtn("TB", "Vertical", "Vertical flow (top → bottom)")}
@@ -190,106 +182,7 @@ function CanvasLegend() {
   );
 }
 
-// v1.6.8 corrective pass — expanded variable clusters are rendered as one
-// contained panel node. The panel lists variable names/roles inside the card,
-// while the main graph layout still sees only one group node.
-function VarContainerNode({
-  data,
-}: {
-  data: {
-    label: string;
-    gid: string;
-    members: Array<{ id: string; title: string; summary: string | null; role?: Role }>;
-    handleAxis?: "vertical" | "horizontal";
-    selectedMemberId?: string | null;
-    state?: "selected" | "focus" | "focus-upstream" | "related" | "dim";
-    onSelectMember?: (nodeId: string) => void;
-    onToggleGroup?: (groupId: string) => void;
-  };
-}) {
-  const toggle = () => data.onToggleGroup?.(data.gid);
-  const targetPosition = data.handleAxis === "vertical" ? Position.Top : Position.Left;
-  const sourcePosition = data.handleAxis === "vertical" ? Position.Bottom : Position.Right;
-  const handleStyle = {
-    background: "transparent",
-    border: 0,
-    width: 1,
-    height: 1,
-    minWidth: 1,
-    minHeight: 1,
-  };
-  return (
-    <div
-      className="ln-var-container ln-var-group-panel"
-      data-testid="var-container"
-      data-group-id={data.gid}
-      data-state={data.state}
-      aria-label={data.label}
-      onClick={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <Handle
-        type="target"
-        position={targetPosition}
-        isConnectable={false}
-        style={handleStyle}
-      />
-      <div data-testid="var-group-panel">
-        <button
-          type="button"
-          className="ln-var-container__header nodrag"
-          data-testid="var-container-toggle"
-          aria-label={`Collapse ${data.label}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggle();
-          }}
-        >
-          {data.label}
-        </button>
-        <div className="ln-var-group-panel__grid">
-          {data.members.map((member) => (
-            <button
-              key={member.id}
-              type="button"
-              className="ln-var-chip nodrag"
-              data-testid={`var-chip-${member.id}`}
-              data-selected={data.selectedMemberId === member.id ? "true" : undefined}
-              aria-label={`Open ${member.title}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                data.onSelectMember?.(member.id);
-              }}
-            >
-              {member.role && (
-                <span
-                  className="ln-var-chip__role"
-                  title={roleLabel(member.role)}
-                  style={{ ["--role-color" as string]: roleColorVar(member.role) }}
-                >
-                  {roleAbbrev(member.role)}
-                </span>
-              )}
-              <span className="ln-var-chip__name">{member.title}</span>
-              {member.summary && (
-                <span className="ln-var-chip__meta">{member.summary}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-      <Handle
-        type="source"
-        position={sourcePosition}
-        isConnectable={false}
-        style={handleStyle}
-      />
-    </div>
-  );
-}
-
-const nodeTypes = { lineageNode: GraphNode, varContainer: VarContainerNode };
+const nodeTypes = { lineageNode: GraphNode, varContainer: VariableGroupNode };
 
 interface GraphCanvasProps {
   model: GraphViewModel;
@@ -299,7 +192,7 @@ interface GraphCanvasProps {
   /** Blank-canvas selection is a first-class scope change for the Agent. */
   onPaneClick?: () => void;
   onExpandGroup: (groupId: string) => void;
-  /** V1.5.1 T4' — controlled layout. Defaults to "free" when omitted. */
+  /** Controlled layout. Defaults to Horizontal when omitted. */
   layout?: LayoutMode;
   onLayoutChange?: (mode: LayoutMode) => void;
   /** V1.5.2 P4 — right-click on a node. Receives the node id + the
@@ -340,12 +233,19 @@ function layoutDagre<T extends RFNode>(
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir, nodesep: 40, ranksep: 60 });
   g.setDefaultEdgeLabel(() => ({}));
-  nodes.forEach((n) => g.setNode(n.id, { width: 240, height: 80 }));
+  nodes.forEach((n) => {
+    const preview = (n.data.node as GraphViewNode | undefined)?.cardPreview;
+    const width = typeof n.style?.width === "number" ? n.style.width : 240;
+    const height = typeof n.style?.height === "number"
+      ? n.style.height
+      : preview ? 80 + 15 * preview.lines.length : 80;
+    g.setNode(n.id, { width, height });
+  });
   edges.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
   return nodes.map((n) => {
     const pos = g.node(n.id);
-    return { ...n, position: { x: pos.x - 120, y: pos.y - 40 } };
+    return { ...n, position: { x: pos.x - pos.width / 2, y: pos.y - pos.height / 2 } };
   });
 }
 
@@ -388,7 +288,7 @@ export function GraphCanvas({
   const graphCleanupVersion = workbench?.state.graphCleanupVersion ?? 0;
   // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
   // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
-  // `layoutVersion` increments on every user click so the seedNodes
+  // `layoutVersion` increments on every automatic layout click so the seedNodes
   // useMemo re-runs even when nothing else changed — that's how a
   // "Horizontal" or "Vertical" click forces a fresh dagre snap.
   const [layoutLocal, setLayoutLocal] = useState<LayoutMode>(DEFAULT_LAYOUT);
@@ -437,6 +337,7 @@ export function GraphCanvas({
       lastAutomaticLayoutRef.current = layout;
     }
   }, [layout]);
+  const rankdir = layout === "free" ? lastAutomaticLayoutRef.current : layout;
   const visibleNodes = useMemo(
     () => model.nodes.filter((node) => !hiddenNodeIds.has(node.id)),
     [hiddenNodeIds, model.nodes],
@@ -603,14 +504,6 @@ export function GraphCanvas({
       },
     );
 
-    // V1.5.1 T4' — rankdir derives from layout mode. "free" still seeds
-    // with LR dagre so first paint is sensible; once seeded, HF5's
-    // useNodesState ownership lets the user drag freely without snap-back.
-    // Clicking Horizontal/Vertical bumps layoutVersion, which re-runs this
-    // useMemo and produces a fresh dagre snap.
-    const automaticLayout =
-      layout === "free" ? lastAutomaticLayoutRef.current : layout;
-    const rankdir: "TB" | "LR" = automaticLayout === "TB" ? "TB" : "LR";
     const layouted = layoutDagre(
       [...realNodes, ...groupNodes, ...expandedGroupNodes],
       uniqEdges,
@@ -622,27 +515,27 @@ export function GraphCanvas({
       rfEdges: uniqEdges,
       memberToGroup,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleNodes, visibleEdges, expandedGroups, layout, layoutVersion]);
+    // Deliberately partial dependency list.
+  }, [visibleNodes, visibleEdges, expandedGroups, rankdir, layoutVersion]);
 
-  // V1.5.0.1 HF5: useNodesState lets React Flow own the live position
-  // state, so node drag mutations stick. We re-seed from layoutDagre
-  // ONLY when the graph identity changes (i.e., the set of node ids
-  // changes). Selection changes do NOT re-seed.
-  //
-  // V1.5.1 T4': also re-seed when the user clicks a Layout button
-  // (Free/Horizontal/Vertical). layoutVersion ticks on every click; we
-  // fold it into the seed key so a re-layout actually replaces
-  // positions even though node ids are stable.
+  // Keep live positions through selection changes and the switch to Manual.
+  // A new graph or an explicit automatic arrangement supplies a fresh seed.
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(seedNodes);
   const lastSeedKey = useRef<string>("");
   useEffect(() => {
-    const key = `v${layoutVersion}:${layout}:${seedNodes.map((n) => `${n.id}:${n.type ?? ""}`).join("|")}`;
+    const key = `${model.runId}:v${layoutVersion}:${rankdir}:${seedNodes.map((n) => `${n.id}:${n.type ?? ""}`).join("|")}`;
     if (key !== lastSeedKey.current) {
       setRfNodes(seedNodes);
       lastSeedKey.current = key;
     }
-  }, [seedNodes, setRfNodes, layout, layoutVersion]);
+  }, [seedNodes, setRfNodes, model.runId, rankdir, layoutVersion]);
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChange(changes);
+    // React Flow emits a position only for movement, including keyboard moves.
+    if (layout !== "free" && changes.some((change) => change.type === "position" && change.position)) {
+      handleLayout("free");
+    }
+  }, [onNodesChange, layout, handleLayout]);
 
   // T8.5: tri-state highlight + selected flag overlaid on top of the
   // RF-owned node state. Re-runs cheaply on selection change without
@@ -650,10 +543,7 @@ export function GraphCanvas({
   // V1.5.1 T4': handleAxis flips edge anchor sides so LR layout edges
   // come out the right side (not bottom) — kills the S-curve look the
   // user flagged 2026-05-25.
-  const handleAxis =
-    (layout === "free" ? lastAutomaticLayoutRef.current : layout) === "TB"
-      ? "vertical"
-      : "horizontal";
+  const handleAxis = rankdir === "TB" ? "vertical" : "horizontal";
   const decoratedNodes = useMemo(() => {
     const visibleSelectedId =
       selectedNodeId === null
@@ -826,23 +716,18 @@ export function GraphCanvas({
       data-testid="graph-canvas-root"
       data-graph="true"
       data-layout-mode={layout}
-      data-nodes-draggable={layout === "free" ? "true" : "false"}
       style={{ width: "100%", height: "100%", minHeight: 0 }}
     >
       <ReactFlow
         nodes={decoratedNodes}
         edges={decoratedEdges}
         nodeTypes={nodeTypes}
-        // V1.5.0.1 HF5: free node drag matches the prototype's contract
-        // (uiux/app.jsx TWEAK_DEFAULTS layout=free; uiux/panels.jsx empty
-        // drawer hint "drag = rearrange"). Positions are owned by RF state
-        // via useNodesState above; dagre is the initial seed only.
-        nodesDraggable={layout === "free"}
+        nodesDraggable
         // V1.5.0.1 HF5: pin edge type to RF's bezier default so a future
         // RF upgrade can't silently switch us to step / smoothstep.
         // Matches uiux/app.jsx TWEAK_DEFAULTS edgeStyle="bezier".
         defaultEdgeOptions={{ type: "default" }}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         nodesConnectable={false}
         elementsSelectable={true}
         onNodeClick={(_, n) => {

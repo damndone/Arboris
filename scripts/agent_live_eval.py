@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from workbench.jsonl_store import jsonl_lines
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _seed_source_run  # noqa: E402
 from workbench.llm.config import load_llm_config  # noqa: E402
@@ -78,7 +79,7 @@ def _session_messages(root: Path, session_id: str) -> list[dict]:
     path = root / "workbench" / "agent-sessions" / f"{session_id}.jsonl"
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in jsonl_lines(path.read_text(encoding="utf-8")) if line.strip()]
 
 
 def _tool_calls(entries: list[dict]) -> list[dict]:

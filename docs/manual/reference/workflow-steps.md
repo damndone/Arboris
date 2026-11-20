@@ -8,7 +8,7 @@ Reported percentiles: 1, 5, 10, 25, 50, 75, 90, 95, 99.
 
 ## `categorical.cramers_v`
 
-Run the frozen categorical statistical operation through its typed, bounded adapter.
+Categorical method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -18,7 +18,7 @@ Run the frozen categorical statistical operation through its typed, bounded adap
 
 ## `categorical.mcnemar`
 
-Run the frozen categorical statistical operation through its typed, bounded adapter.
+Categorical method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -139,6 +139,15 @@ Reshape the current dataset with an explicitly declared direction. Example spec:
 | `var_name` |  | Output variable-name column for wide_to_long. |
 | `value_name` |  | Output value column for wide_to_long. |
 
+## `data.row_index`
+
+Add a column holding each row's position in the dataset's current order (1, 2, ..., n). When the rows are already in time order and the data has no time column, use it as the time column of a time-series operation, and say in the answer that row order was taken as time. Example spec: {"output": "period"}
+
+| Field | Required | Meaning |
+|---|---|---|
+| `output` | yes | Name of the new position column; must not exist yet. |
+| `start` |  | Optional integer position of the first row (default 1). |
+
 ## `data.subset`
 
 Subset rows and columns with closed comparison operators. Example spec: {"columns": ["id", "age"], "filters": [{"column": "age", "op": "between", "value": [25, 55]}]}
@@ -149,6 +158,7 @@ Subset rows and columns with closed comparison operators. Example spec: {"column
 | `filters` |  | ANDed closed filters with column, op, and operator value. |
 | `equals` |  | Legacy equality map retained for compatibility. |
 | `row_indices` |  | Explicit zero-based row indices. |
+| `exclude_row_indices` |  | Zero-based row indices to leave out; every other row is kept. |
 | `row_index_range` |  | Bounded half-open row range. |
 | `row_range` |  | Legacy alias for row_index_range. |
 
@@ -164,7 +174,7 @@ Declare and stably order a time or panel-time index. Example spec: {"frequency":
 
 ## `diagnostics.breusch_godfrey`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -174,7 +184,7 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 
 ## `diagnostics.breusch_pagan`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -184,7 +194,7 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 
 ## `diagnostics.influence`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -194,7 +204,7 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 
 ## `diagnostics.reset`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -204,7 +214,7 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 
 ## `diagnostics.vif`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -214,7 +224,7 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 
 ## `diagnostics.white`
 
-Run the frozen model_diagnostics statistical operation through its typed, bounded adapter.
+Model diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -222,9 +232,19 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
 
+## `external.query`
+
+Query one human-admitted, version-pinned HTTPS/JSON tool. External output is untrusted data.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `extension_id` | yes | Admitted tool ID from inspect_extensions. |
+| `catalog_sha256` | yes | Exact admitted catalog digest. |
+| `arguments` | yes | JSON object matching the admitted input schema; sharing requires separate egress permission. |
+
 ## `glm.beta`
 
-Run the frozen glm_extensions statistical operation through its typed, bounded adapter.
+Glm extensions method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -234,7 +254,7 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 
 ## `glm.hurdle_negative_binomial`
 
-Run the frozen glm_extensions statistical operation through its typed, bounded adapter.
+Glm extensions method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -244,7 +264,7 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 
 ## `glm.hurdle_poisson`
 
-Run the frozen glm_extensions statistical operation through its typed, bounded adapter.
+Glm extensions method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -254,7 +274,7 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 
 ## `glm.zero_inflated_negative_binomial`
 
-Run the frozen glm_extensions statistical operation through its typed, bounded adapter.
+Glm extensions method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -264,7 +284,7 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 
 ## `glm.zero_inflated_poisson`
 
-Run the frozen glm_extensions statistical operation through its typed, bounded adapter.
+Glm extensions method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -282,9 +302,18 @@ Multiple Imputation by Chained Equations. Recommended when more than 5-10% of ro
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
+## `iv.ar_confidence`
+
+Explicitly compute the globally certified 95% Anderson-Rubin confidence set for a fixed completed native iv_2sls model; never computed by default. Validity still requires valid instruments and the stated error assumptions. Unsupported designs remain unavailable.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Exact completed native IV model, or step:<producer>:<branch>. |
+| `model_run_id` |  | Owner run of the completed native IV model. |
+
 ## `iv.gmm`
 
-Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
+Iv gmm method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -294,7 +323,7 @@ Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
 
 ## `iv.weak_instruments`
 
-Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
+Iv gmm method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -304,7 +333,7 @@ Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
 
 ## `matching.att`
 
-Run the frozen matching statistical operation through its typed, bounded adapter.
+Matching method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -314,7 +343,7 @@ Run the frozen matching statistical operation through its typed, bounded adapter
 
 ## `matching.balance`
 
-Run the frozen matching statistical operation through its typed, bounded adapter.
+Matching method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -324,7 +353,7 @@ Run the frozen matching statistical operation through its typed, bounded adapter
 
 ## `meta.combine`
 
-Run the frozen meta_analysis statistical operation through its typed, bounded adapter.
+Meta analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -334,7 +363,7 @@ Run the frozen meta_analysis statistical operation through its typed, bounded ad
 
 ## `meta.effect_size`
 
-Run the frozen meta_analysis statistical operation through its typed, bounded adapter.
+Meta analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -344,7 +373,7 @@ Run the frozen meta_analysis statistical operation through its typed, bounded ad
 
 ## `missing_data.rubin_pool`
 
-Run the frozen missing_data statistical operation through its typed, bounded adapter.
+Missing data method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -354,7 +383,7 @@ Run the frozen missing_data statistical operation through its typed, bounded ada
 
 ## `missingness.profile`
 
-Run the frozen missing_data statistical operation through its typed, bounded adapter.
+Missing data method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -393,6 +422,7 @@ Estimate one or more models from the source table.
 | Field | Required | Meaning |
 |---|---|---|
 | `model_family` | yes | Registered workflow-executable model family: anova, cs_did, dcdh, did, glm:binomial, glm:negative_binomial, glm:poisson, iv_2sls, linear_mixed_effects, logit, multinomial_logit, negative_binomial, ols, ordinal_logit, panel_ols, poisson, probit, quantile_regression, sa_did, survival_cox. Every branch in one step uses this same family. |
+| `estimation_engine` |  | Optional run-level engine shared by all branches: reference (default) or fast. Fast is experimental; resource acceptance pending. It is offered for numeric iv_2sls with robust HC0 or unadjusted covariance and is not bit-identical to reference. Uncovered IV inputs use reference with a recorded reason. Built-engine integrity, self-check and numerical failures are errors. Omit this field to preserve the default execution identity. |
 | `covariance` |  | Default covariance for every branch. panel_ols and did cluster by entity when omitted (CR1, t(G-1), as Stata's xtreg, fe vce(robust)); to cluster at the level where treatment was assigned, name that column in model_options.cluster. robust (not clustered) is inconsistent with a fixed number of periods; offer it only to reproduce earlier work. |
 | `model_options` |  | Family-owned JSON options. Only the selected model family's declared option fields are accepted; do not copy options from another family. |
 | `entity_col` |  | Panel entity column. panel_ols requires entity_col or time_col; clustered panel covariance requires entity_col. |
@@ -472,7 +502,7 @@ Run White's heteroskedasticity test on a completed OLS branch. The auxiliary reg
 
 ## `multiple_comparisons.games_howell`
 
-Run the frozen multiple_comparisons statistical operation through its typed, bounded adapter.
+Multiple comparisons method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -482,7 +512,7 @@ Run the frozen multiple_comparisons statistical operation through its typed, bou
 
 ## `multiple_comparisons.scheffe`
 
-Run the frozen multiple_comparisons statistical operation through its typed, bounded adapter.
+Multiple comparisons method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -492,7 +522,7 @@ Run the frozen multiple_comparisons statistical operation through its typed, bou
 
 ## `multivariate.clustering`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -502,7 +532,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.correspondence`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -512,7 +542,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.cronbach_alpha`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -522,7 +552,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.discriminant`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -532,7 +562,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.efa`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -542,7 +572,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.manova`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -552,7 +582,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.mca`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -562,7 +592,7 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 
 ## `multivariate.pca`
 
-Run the frozen multivariate statistical operation through its typed, bounded adapter.
+Multivariate method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -570,9 +600,19 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
 
+## `network.centrality`
+
+Node centrality of one unweighted network: degree, closeness (1 / sum of shortest-path lengths, plus normalized forms), betweenness and, undirected, eigenvector. Input is an adjacency matrix (column_bindings.matrix_columns in row order, optional label_column naming each row's node) or an edge list (source_column, target_column); options.input_form says which, options.nodes limits the reported nodes.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
 ## `nonparametric.friedman`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -582,7 +622,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.kendall`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -592,7 +632,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.kruskal_wallis`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -602,7 +642,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.mann_whitney`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -612,7 +652,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.robust_summary`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -622,7 +662,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.spearman`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -632,7 +672,7 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 
 ## `nonparametric.wilcoxon_signed_rank`
 
-Run the frozen nonparametric statistical operation through its typed, bounded adapter.
+Nonparametric method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -698,7 +738,7 @@ Jointly test linear restrictions on a completed model's coefficients (Wald). Rea
 
 ## `power_analysis.sensitivity_grid`
 
-Run the frozen power_analysis statistical operation through its typed, bounded adapter.
+Power analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -708,13 +748,103 @@ Run the frozen power_analysis statistical operation through its typed, bounded a
 
 ## `power_analysis.solve`
 
-Run the frozen power_analysis statistical operation through its typed, bounded adapter.
+Power analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `prediction.native_cart`
+
+Fit a bounded C++ CART classifier and compare held-out probabilities with training prevalence.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_cart_regression`
+
+Fit a C++ squared-error CART tree and score its held-out predictions against the training mean.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_elastic_net`
+
+Fit C++ Elastic Net with a certified first-order convergence check and a reserved test suffix.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_forest_apply`
+
+Apply a saved C++ regression or binary forest to new data without refitting. Classifiers add probability and 0/1 labels at probability >= 0.5.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_logistic`
+
+Fit native L2-penalized binary probabilities and evaluate them against the training prevalence.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_random_forest_classification`
+
+Fit a seeded C++ binary classification forest and evaluate held-out probabilities.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_random_forest_regression`
+
+Fit a seeded C++ regression forest and compare held-out predictions with the training mean.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_ridge`
+
+Fit C++ Ridge with an unpenalized intercept and evaluate a reserved suffix against a mean baseline.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `prediction.native_ridge_selection`
+
+Choose the ridge penalty on a validation block, then refit and score on a separate holdout.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `prediction.prediction_lasso`
 
@@ -746,9 +876,69 @@ L2-regularized linear prediction. Execute the bounded out-of-sample prediction p
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
+## `quant.min_variance`
+
+Estimate historical long-only weights using a completed trailing covariance window and an explicit shrinkage choice.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `quant.min_variance_walk_forward`
+
+Evaluate a fixed rolling minimum-variance policy and an equal-weight benchmark with the same fees.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `quant.replay`
+
+Replay a simulated long-only allocation in Rust with explicit signal timing and trading costs.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `quant.replay_fee_comparison`
+
+Compare two one-way fees on identical simulated targets, returns, and execution times.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `quant.replay_tail_risk`
+
+Measure realized historical VaR and expected shortfall from fee-inclusive simulated returns.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `quant.rolling_risk`
+
+Calculate native rolling volatility and latest-window covariance from aligned dated returns.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
 ## `repeated_measures_anova.mixed_design`
 
-Run the frozen repeated_measures_anova statistical operation through its typed, bounded adapter.
+Repeated measures anova method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -758,7 +948,7 @@ Run the frozen repeated_measures_anova statistical operation through its typed, 
 
 ## `repeated_measures_anova.repeated_only`
 
-Run the frozen repeated_measures_anova statistical operation through its typed, bounded adapter.
+Repeated measures anova method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -772,6 +962,9 @@ Assemble the completed steps into a report.
 
 | Field | Required | Meaning |
 |---|---|---|
+| `result_refs` |  | Exact existing source-bound results to include: {run_id, artifact_id, role}, where role is primary, sensitivity, or diagnostic. No refit is needed to report completed models. |
+| `specification_curve` |  | Render all model members of a frozen prior workflow; retain failures and native uncertainty. |
+| `research_review` |  | Attach a saved isolated review, retaining its original verdict and checking whether its evidence is unchanged. |
 | `report_contract` |  | Report contract identifier. |
 | `required_steps` |  | step_ids that must have completed before composing. |
 | `formats` |  | Output formats to emit. |
@@ -810,7 +1003,7 @@ Resample prediction-training data with Undersample.
 
 ## `resampling.bootstrap`
 
-Run the frozen resampling statistical operation through its typed, bounded adapter.
+Resampling method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -820,7 +1013,7 @@ Run the frozen resampling statistical operation through its typed, bounded adapt
 
 ## `resampling.permutation`
 
-Run the frozen resampling statistical operation through its typed, bounded adapter.
+Resampling method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -830,7 +1023,7 @@ Run the frozen resampling statistical operation through its typed, bounded adapt
 
 ## `roc.calibration`
 
-Run the frozen roc_diagnostics statistical operation through its typed, bounded adapter.
+Roc diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -840,7 +1033,7 @@ Run the frozen roc_diagnostics statistical operation through its typed, bounded 
 
 ## `roc.curve`
 
-Run the frozen roc_diagnostics statistical operation through its typed, bounded adapter.
+Roc diagnostics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -850,7 +1043,7 @@ Run the frozen roc_diagnostics statistical operation through its typed, bounded 
 
 ## `spatial.geary_c`
 
-Run the frozen spatial_statistics statistical operation through its typed, bounded adapter.
+Spatial statistics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -860,7 +1053,7 @@ Run the frozen spatial_statistics statistical operation through its typed, bound
 
 ## `spatial.getis_ord_g`
 
-Run the frozen spatial_statistics statistical operation through its typed, bounded adapter.
+Spatial statistics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -870,7 +1063,7 @@ Run the frozen spatial_statistics statistical operation through its typed, bound
 
 ## `spatial.moran_i`
 
-Run the frozen spatial_statistics statistical operation through its typed, bounded adapter.
+Spatial statistics method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -891,7 +1084,7 @@ Derive boolean group-membership columns from percentile thresholds.
 
 ## `statistical.derive_numeric`
 
-Create numeric columns with a small server-defined transform vocabulary. Expressions, formulas, code, and overwrite behavior are not accepted.
+Create numeric columns with a small server-defined transform vocabulary. Expressions, formulas, code, and overwrite behavior are not accepted; for a ratio, an interaction or a recode use data.feature_recipe.
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -916,13 +1109,13 @@ One exploration over the source table: summarize / summarize_detail / misstable 
 | `operation` | yes | summarize \| summarize_detail \| misstable \| tabulate \| corr. summarize/summarize_detail cover numeric columns and list the others as non_numeric_columns; tabulate gives frequency tables for any column (use it for categorical variables). |
 | `selected_columns` |  | List of column names to analyse. NOT `columns`. |
 | `filters` |  | List of {column, operator, value}; combined with AND. |
-| `options` |  | Operation options. Grouping lives HERE as options.group_by (a column name), never at the top level. options.group_values is optional and defaults to every observed value of that column. |
+| `options` |  | Operation options. Grouping lives HERE as options.group_by (a column name), never at the top level. options.group_values is optional and defaults to every observed value of that column. tabulate with group_by gives one frequency table per group, which is a cross-tab. For tabulate, options.frequency_weight names explicit nonnegative integer counts; counts/percentages then refer to represented individuals, not stored rows. Never infer weights from column names. |
 | `plots` |  | List of {x_column, y_column}; presence makes this a scatter step. |
 | `missing_policy` |  | listwise \| variablewise. |
 
 ## `survival.kaplan_meier`
 
-Run the frozen survival_analysis statistical operation through its typed, bounded adapter.
+Survival analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -932,7 +1125,7 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 
 ## `survival.log_rank`
 
-Run the frozen survival_analysis statistical operation through its typed, bounded adapter.
+Survival analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -942,7 +1135,7 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 
 ## `survival.rmst`
 
-Run the frozen survival_analysis statistical operation through its typed, bounded adapter.
+Survival analysis method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -952,7 +1145,7 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 
 ## `synthetic_control.fit`
 
-Run the frozen synthetic_control statistical operation through its typed, bounded adapter.
+Synthetic control method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -962,7 +1155,7 @@ Run the frozen synthetic_control statistical operation through its typed, bounde
 
 ## `synthetic_control.placebo`
 
-Run the frozen synthetic_control statistical operation through its typed, bounded adapter.
+Synthetic control method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1022,7 +1215,17 @@ Fisher exact test of independence, for tables too sparse for the chi-square appr
 
 ## `test.nonparametric`
 
-Mann-Whitney U and Kruskal-Wallis rank tests, for group differences without a normality assumption.
+Mann-Whitney U and Kruskal-Wallis rank tests, for group differences without a normality assumption. Wilcoxon signed-rank for pairs is test.evidence.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `test.proportions`
+
+Two independent proportions (Stata prtest, csi): rate difference with its Wald interval and the z test, risk ratio and odds ratio with log-scale intervals. Takes one binary outcome per row, or counted rows (events with trials or non-events).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1042,7 +1245,7 @@ Spearman and Kendall rank correlation, for monotonic association that is not lin
 
 ## `test.t_tests`
 
-Welch two-sample t-test of a numeric outcome across a binary group.
+Welch two-sample t-test of a numeric outcome across a binary group. Two paired measurements are test.evidence with options.paired_columns.
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1052,7 +1255,7 @@ Welch two-sample t-test of a numeric outcome across a binary group.
 
 ## `time_series.acf`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1062,7 +1265,7 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 
 ## `time_series.adf`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1072,67 +1275,297 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 
 ## `time_series.arima`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.arima_residual_check`
+
+Fit nonseasonal ARIMA with an explicit Ljung–Box check on the full fit's standardized innovations.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.cointegration`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.correlogram`
+
+Inspect native sample autocorrelation and partial autocorrelation before choosing lag orders.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.ets_trend`
+
+Forecast additive errors and trend with optional damping at supplied smoothing coefficients.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.ets_trend_estimate`
+
+Estimate one or both additive trend smoothing coefficients at a declared damping factor.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.figarch_fixed`
+
+Filter fractional conditional variance and forecast with supplied coefficients and a finite lag window.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.granger`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.holt_winters_additive`
+
+Forecast a regular seasonal series with additive Holt-Winters at supplied smoothing parameters.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.holt_winters_fit_alpha`
+
+Select additive Holt-Winters level smoothing on the training prefix, then score the untouched holdout.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.holt_winters_fit_joint`
+
+Jointly fit the level, trend and seasonal smoothing coefficients for an additive seasonal forecast.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.irf`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.johansen_rank`
+
+Compute Johansen trace and maximum-eigenvalue statistics for each candidate rank.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.kpss`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.local_level`
+
+Filter a regular series and forecast with a Rust local-level Gaussian model.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.local_level_fit`
+
+Estimate the common noise scale of a local-level Gaussian model in Rust at a declared Q/R ratio.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.markov_switching`
+
+Estimate two Gaussian mean regimes with a shared variance and forecast their mixture distribution.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_arfima`
+
+Fit or fix fractional differencing in an exact finite-sample Gaussian model.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_arima`
+
+Fit a nonseasonal Gaussian AR, MA, ARMA or ARIMA and check forecasts against an optional held-out suffix.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_arimax`
+
+Estimate regression with nonseasonal ARIMA errors and predict under supplied future predictors.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_egarch`
+
+Fit asymmetric Gaussian log variance with a single future conditional variance forecast.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_igarch`
+
+Fit an integrated Gaussian variance model and report finite-horizon conditional variances.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_sarima`
+
+Fit a Gaussian multiplicative seasonal ARIMA with residual checks and an optional fixed-origin holdout.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_sarimax`
+
+Estimate regression with seasonal ARIMA errors and predict under supplied future predictors.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_var`
+
+Fit a joint VAR, predict each series and optionally inspect Granger tests or reduced-form innovation responses.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_vecm`
+
+Fit a bivariate Johansen VECM at a declared cointegration rank of one and forecast both levels.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
+## `time_series.native_volatility`
+
+Fit ARCH(1), GARCH(1,1), or GJR-GARCH(1,1,1) and forecast conditional innovation variance.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.pacf`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `time_series.stationarity_statistic`
+
+Compute a fixed-lag ADF unit root statistic or KPSS level stationarity statistic on one complete regular series.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.var`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -1140,9 +1573,29 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
 
+## `time_series.varma11_fixed_ma`
+
+Estimate the bivariate AR matrix with a supplied shared diagonal MA coefficient.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
+
 ## `time_series.vecm`
 
-Run the frozen time_series statistical operation through its typed, bounded adapter.
+Time series method (typed adapter).
+
+| Field | Required | Meaning |
+|---|---|---|
+| `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
+
+## `treatment_effects.estimate`
+
+Treatment effects method (typed adapter).
 
 | Field | Required | Meaning |
 |---|---|---|

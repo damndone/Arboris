@@ -49,3 +49,40 @@ def test_summarize_all_columns_by_default_no_longer_fails_on_text() -> None:
 
     result = execute_exploration(_frame(), ExplorationSpec(operation="summarize", selected_columns=()))
     assert "region" in result["non_numeric_columns"]
+
+
+def test_explicit_frequency_counts_match_expanded_data_without_expansion():
+    compressed = pd.DataFrame({'category': ['a', 'b', None, 'c'], 'count': [8, 2, 3, 0]})
+    spec = ExplorationSpec(operation='tabulate', selected_columns=('category',),
+                           options={'frequency_weight': 'count'})
+    weighted = execute_exploration(compressed, spec)
+    expanded = compressed.loc[compressed.index.repeat(compressed['count'])]
+    unweighted = execute_exploration(expanded, ExplorationSpec(operation='tabulate', selected_columns=('category',)))
+    assert weighted['rows'] == unweighted['rows']
+    assert weighted['variables'] == unweighted['variables']
+    assert weighted['frequency_weight'] == 'count'
+    assert weighted['source_row_count'] == 4 and weighted['weighted_count'] == 13
+    assert execute_exploration(compressed, ExplorationSpec(operation='tabulate', selected_columns=('category',)))['rows'][0]['count'] == 1
+
+
+@pytest.mark.parametrize('counts', [[1, -1], [1, .5], [1, None], [0, 0], [1, float('inf')], [2**53, 1]])
+def test_invalid_frequencies_are_errors_not_row_counts(counts):
+    frame = pd.DataFrame({'value': ['a', 'b'], 'count': counts})
+    with pytest.raises(StatisticalExplorationValidationError, match='frequency'):
+        execute_exploration(frame, ExplorationSpec(operation='tabulate', selected_columns=('value',),
+                                                  options={'frequency_weight': 'count'}))
+
+
+def test_frequency_request_cannot_be_silently_ignored_by_another_operation():
+    with pytest.raises(StatisticalExplorationValidationError, match='frequency'):
+        ExplorationSpec(operation='corr', selected_columns=('x', 'y'), options={'frequency_weight': 'count'})
+
+
+def test_frequency_filters_and_duplicate_index_do_not_change_the_counting_unit():
+    from workbench.statistical_exploration import FilterSpec
+    frame = pd.DataFrame({'bin': ['b', 'a', 'b'], 'count': [4, 5, 1]}, index=[0, 0, 1])
+    spec = ExplorationSpec(operation='tabulate', selected_columns=('bin',),
+                           filters=(FilterSpec('bin', 'eq', 'b'),), options={'frequency_weight': 'count'})
+    result = execute_exploration(frame, spec)
+    assert result['weighted_count'] == 5 and result['filtered_row_count'] == 2
+    assert result['rows'][0]['count'] == 5 and result['rows'][0]['percent'] == 100

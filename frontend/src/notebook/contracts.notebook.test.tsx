@@ -107,6 +107,19 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
     expect(result.workflow_execution?.failed_steps).toEqual([]);
   });
 
+  it("reads server-owned capability completion refs without inventing an artifact validation aggregate", () => {
+    const receipt = { dispatch_status: "completed", attempt_id: "attempt.custom", receipt_ref: "receipt.custom",
+      completion_ref: "a".repeat(64), artifact_validation_ref: "b".repeat(64), object_graph_ref: "c".repeat(64),
+      assessment_ref: "d".repeat(64), output_bundle_ref: "e".repeat(64), attestation_ref: "f".repeat(64) };
+    const payload = { option_id: "opt_custom", option_revision: 1, run_id: "run_custom", execution_status: "succeeded",
+      committed: true, capability_execution: receipt };
+    const result = parseNotebookExecutionResult(payload);
+    expect(result.capability_execution).toEqual(receipt);
+    expect(result.artifact_validation).toBeUndefined();
+    expect(() => parseNotebookExecutionResult({ ...payload, capability_execution: { ...receipt, raw_payload: {} } })).toThrow("unknown field");
+    expect(() => parseNotebookExecutionResult({ ...payload, capability_execution: { ...receipt, receipt_ref: 42 } })).toThrow();
+  });
+
   it("reads bounded workflow failure codes without accepting provider error prose", () => {
     const result = parseNotebookExecutionResult({
       option_id: "opt_failed_workflow",
@@ -370,6 +383,13 @@ describe("contracts — v1.1 evidence, decision, and materialization records", (
       dataset_upload_sha256: "sha256:uploaded-dataset",
     };
     expect(() => parseOptionMaterialization(raw)).toThrow("rerun_child");
+  });
+
+  it("reads the capability binding pin on a v1.1 materialization", () => {
+    const payload = { ...readV11Fixture("option_materialization_genesis_v1"), contract_version: "1.1", capability_resolution_binding_ref: "a".repeat(64) };
+    expect(parseOptionMaterialization(payload).capability_resolution_binding_ref).toBe("a".repeat(64));
+    expect(() => parseOptionMaterialization({ ...payload, capability_resolution_binding_ref: "" })).toThrow();
+    expect(() => parseOptionMaterialization({ ...payload, contract_version: "1.0" })).toThrow();
   });
 
   it("rejects a genesis materialization with a source pin", () => {

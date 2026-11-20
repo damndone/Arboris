@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
@@ -57,12 +58,16 @@ def build_prediction_identity(
     *,
     model_type: str,
     model_id: str,
+    specification: Mapping[str, Any],
 ) -> PredictionIdentityV1:
     """Build stable identities without using opaque split-reference fields.
 
     ``SampleSpecV1.transformation_hash`` intentionally excludes its SplitPlan.
-    The prediction layer adds the effective SplitPlan and model identity, so a
-    changed split parameter cannot reuse a prior prediction identity.
+    The prediction layer adds the effective SplitPlan, the model identity and the
+    full prediction specification (target, ordered features, estimator and its
+    parameters, imputation, control seed), so any setting that changes the
+    computation changes the identity. Schema version 2: version-1 identities left
+    the specification out (2026-11-06 risk review, finding 8) and never match.
     """
 
     sample_spec.validate()
@@ -72,12 +77,13 @@ def build_prediction_identity(
     prediction_identity_hash = _content_hash(
         {
             "payload_schema": "workbench.prediction.prediction-identity",
-            "schema_version": 1,
+            "schema_version": 2,
             "transformation_identity_hash": transformation_identity_hash,
             "evaluation_identity_hash": evaluation_identity_hash,
             "split_plan": sample_spec.split_plan.to_dict(),
             "model_type": model_type,
             "model_id": model_id,
+            "specification": dict(specification),
         }
     )
     run_identity_hash = _content_hash(

@@ -1,10 +1,4 @@
-"""Deterministic, read-only devline retrospective generation.
-
-``events.jsonl`` remains the sole source of process facts.  This module first
-uses the event log verifier and only then renders a Markdown derivative.  The
-derivative has no clock, random identifier, or mutable event input, so the
-same verified history produces the same bytes.
-"""
+"""Render a deterministic retrospective from the anchored devline history."""
 
 from __future__ import annotations
 
@@ -18,14 +12,7 @@ import stat
 from typing import Any
 import uuid
 
-from .events import (
-    EventValidationError,
-    ZERO_SHA256,
-    canonical_event_bytes,
-    validate_event,
-    validate_line_id,
-    verify_log,
-)
+from .events import EventValidationError, read_verified_events, validate_line_id
 
 
 _FAILURE_TYPES = frozenset({"FAILURE", "ERROR", "GAP"})
@@ -55,23 +42,16 @@ def render_retrospective(devlines_root: Path, line_id: str) -> str:
     """Return a byte-stable retrospective for one verified development line."""
 
     validate_line_id(line_id)
-    events = _read_verified_events(devlines_root, line_id)
+    events = read_verified_events(devlines_root, line_id)
     goal = _read_goal(devlines_root, line_id)
     metrics = _metrics(events)
     return _render(line_id, goal, events, metrics)
 
 
-def read_verified_events(devlines_root: Path, line_id: str) -> list[dict[str, Any]]:
-    """Return the stable, hash-verified event snapshot used by derivations."""
-
-    validate_line_id(line_id)
-    return _read_verified_events(devlines_root, line_id)
-
-
 def verify_completed_retrospective(devlines_root: Path, line_id: str) -> None:
     """Require a completed line's derived report to match its verified log."""
 
-    events = _read_verified_events(devlines_root, line_id)
+    events = read_verified_events(devlines_root, line_id)
     if _final_state(events) not in {"COMPLETED", "CLOSED"}:
         return
     expected = render_retrospective(devlines_root, line_id).encode("utf-8")
@@ -82,54 +62,6 @@ def verify_completed_retrospective(devlines_root: Path, line_id: str) -> None:
         os.close(line_fd)
     if actual != expected:
         raise EventValidationError("completed RETROSPECTIVE.md does not match verified events")
-
-
-def _read_verified_events(devlines_root: Path, line_id: str) -> list[dict[str, Any]]:
-    """Read a stable snapshot only after formal chain/anchor verification.
-
-    ``events.py`` deliberately owns the log validation rules.  We invoke its
-    public verifier before and after the no-follow snapshot, then validate the
-    snapshot again with its public event contract.  A concurrent controlled
-    append causes the second verifier to observe a different count/tail and we
-    retry once rather than deriving a report from a mixed history.
-    """
-
-    for _attempt in range(2):
-        before = verify_log(devlines_root, line_id)
-        line_fd = _open_line_directory(devlines_root, line_id)
-        try:
-            data = _read_child(line_fd, "events.jsonl")
-        finally:
-            os.close(line_fd)
-        events = _parse_verified_snapshot(data)
-        after = verify_log(devlines_root, line_id)
-        if before == after and before["event_count"] == len(events):
-            return events
-    raise EventValidationError("events.jsonl changed while retrospective snapshot was read")
-
-
-def _parse_verified_snapshot(data: bytes) -> list[dict[str, Any]]:
-    if not data:
-        return []
-    if not data.endswith(b"\n"):
-        raise EventValidationError("events.jsonl is truncated: missing trailing newline")
-    previous = ZERO_SHA256
-    events: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for line_number, raw_line in enumerate(data.splitlines(), start=1):
-        try:
-            event = json.loads(raw_line.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
-        except (UnicodeDecodeError, json.JSONDecodeError, EventValidationError) as error:
-            raise EventValidationError(f"events.jsonl line {line_number} is not valid canonical JSON") from error
-        if not isinstance(event, dict) or canonical_event_bytes(event) != raw_line:
-            raise EventValidationError(f"events.jsonl line {line_number} is not canonical JSON")
-        validated = validate_event(event, previous_sha256=previous)
-        if validated != event or event["event_id"] in seen_ids:
-            raise EventValidationError(f"events.jsonl line {line_number} failed validation")
-        seen_ids.add(event["event_id"])
-        previous = event["event_sha256"]
-        events.append(event)
-    return events
 
 
 def _read_goal(devlines_root: Path, line_id: str) -> str:

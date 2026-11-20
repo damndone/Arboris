@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
-from . import __version__
+from . import __version__, native_io
 from .domain import ArtifactRecord
 from .artifact_index import artifact_index_transaction
 from .predictive_research.schema import PayloadContractError, default_v1_prediction_registry
@@ -67,6 +67,10 @@ def write_bytes_durable(path: Path, data: bytes) -> None:
 
 
 def write_json(path: Path, payload: Any) -> None:
+    data = native_io.json_bytes(payload, indent=2, ensure_ascii=False)
+    if data is not None and os.linesep == "\n":
+        write_bytes_durable(path, data)
+        return
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     write_text_durable(path, text)
 
@@ -79,6 +83,50 @@ def initialize_artifact_index(run_root: Path) -> None:
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+_SAMPLE_LIST_CLOSE = "\n    ]"
+
+
+def _without_sample_list(text: str, key: str, following: str) -> str | None:
+    """``text`` minus the ``analysis_sample[key]`` list, or None if the layout is not the writer's.
+
+    In the writer's indent-2 layout a raw newline only occurs between tokens, so the opening
+    line is the top-level key and the first four-space ``]`` line closes the list.
+    """
+    opening = f'\n  "analysis_sample": {{\n    "{key}": ['
+    start = text.find(opening)
+    if start < 0 or text.startswith("]", start + len(opening)):
+        return None
+    close = text.find(_SAMPLE_LIST_CLOSE, start + len(opening))
+    after = close + len(_SAMPLE_LIST_CLOSE)
+    successor = f',\n    "{following}": '
+    if close < 0 or not text.startswith(successor, after):
+        return None
+    return text[:start] + f'\n  "analysis_sample": {{\n    "{following}": ' + text[after + len(successor):]
+
+
+def read_model_result_without_row_set(path: Path) -> Any:
+    """A stored model result, decoded without its ``analysis_sample.row_set`` list.
+
+    Results keep that list for v1.9.0 byte identity, but readers derive it from
+    ``row_order`` (``ols_contract.analysis_sample_row_set``); decoding it costs about
+    60 MiB of string objects per 1,000,000 rows. Any other layout is decoded whole.
+    """
+    text = path.read_text(encoding="utf-8")
+    return json.loads(_without_sample_list(text, "row_set", "row_order") or text)
+
+
+def read_model_result_without_sample_rows(path: Path) -> Any:
+    """A stored model result whose ``analysis_sample`` keeps only its fingerprint.
+
+    For readers that use no row of the sample: a 1M-row OLS result decodes about
+    120 MiB of row-ID strings otherwise (2026-11-09: the report's survey-design facts
+    raised the default 1M-row OLS peak footprint by 60-110 MiB in most runs).
+    """
+    text = path.read_text(encoding="utf-8")
+    text = _without_sample_list(text, "row_set", "row_order") or text
+    return json.loads(_without_sample_list(text, "row_order", "fingerprint") or text)
 
 
 def sha256_file(path: Path) -> str:

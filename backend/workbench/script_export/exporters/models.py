@@ -347,7 +347,8 @@ def iv_2sls(step,ctx):
     if l=='python':
         ctx.packages.add('linearmodels');lines+=array_helper(ctx)
         f=p['y']+' ~ 1 + '+(' + '.join(p.get('x',[]))+' + ' if p.get('x') else '')+'['+' + '.join(endog)+' ~ '+' + '.join(instruments)+']'
-        lines += ['from linearmodels.iv import IV2SLS',f'wb_fit = IV2SLS.from_formula({f!r},data={d}).fit(cov_type={covariance!r},debiased=False)',f'{result} = wb_array_model(wb_fit.params,wb_fit.cov,wb_fit.nobs,None,"z",sample=list(wb_fit.model.dependent.rows))']
+        required=list(dict.fromkeys([p['y'],*p.get('x',[]),*endog,*instruments]))
+        lines += ['from linearmodels.iv import IV2SLS',f'wb_frame = {d}.dropna(subset={required!r})',f'wb_fit = IV2SLS.from_formula({f!r},data=wb_frame).fit(cov_type={covariance!r},debiased=False)',f'{result} = wb_array_model(wb_fit.params,wb_fit.cov,wb_fit.nobs,None,"z",sample=list(wb_fit.model.dependent.rows))']
     elif l=='r':
         ctx.packages.add('fixest');f=p['y']+' ~ '+(' + '.join(p.get('x',[])) or '1')+' | 0 | '+' + '.join(endog)+' ~ '+' + '.join(instruments)
         required=list(dict.fromkeys([p['y'],*p.get('x',[]),*endog,*instruments]))

@@ -1,0 +1,295 @@
+{
+  "environment": {
+    "R": "R version 4.6.0 (2026-04-24)",
+    "car": "3.1.5",
+    "sandwich": "3.1.1"
+  },
+  "cases": {
+    "q1": {
+      "source": "tests/fixtures/agent_completion/iv_ar/q1.csv",
+      "q": 1,
+      "tests": [
+        {
+          "b": -10000,
+          "hc0_chi_square": 410.971852527367,
+          "homoskedastic_f": 356.584529832583
+        },
+        {
+          "b": -10,
+          "hc0_chi_square": 292.645945205191,
+          "homoskedastic_f": 266.771706071655
+        },
+        {
+          "b": -1,
+          "hc0_chi_square": 21.1144402964309,
+          "homoskedastic_f": 32.395742376257
+        },
+        {
+          "b": 0,
+          "hc0_chi_square": 4.20307563363671,
+          "homoskedastic_f": 6.9889387055549
+        },
+        {
+          "b": 1,
+          "hc0_chi_square": 0.288713487713938,
+          "homoskedastic_f": 0.507928167466994
+        },
+        {
+          "b": 1.5,
+          "hc0_chi_square": 3.26952493842882,
+          "homoskedastic_f": 5.84510638228777
+        },
+        {
+          "b": 2,
+          "hc0_chi_square": 9.27029420891793,
+          "homoskedastic_f": 16.6950109201365
+        },
+        {
+          "b": 4,
+          "hc0_chi_square": 55.4492222823974,
+          "homoskedastic_f": 95.4591022850454
+        },
+        {
+          "b": 10,
+          "hc0_chi_square": 219.266698954788,
+          "homoskedastic_f": 279.410880873703
+        },
+        {
+          "b": 10000,
+          "hc0_chi_square": 410.860674602325,
+          "homoskedastic_f": 356.640829448199
+        }
+      ],
+      "local_boundaries": [0.0348479642264571, 1.56053057525208]
+    },
+    "q2": {
+      "source": "tests/fixtures/agent_completion/iv_ar/q2.csv",
+      "q": 2,
+      "tests": [
+        {
+          "b": -10000,
+          "hc0_chi_square": 763.062040079154,
+          "homoskedastic_f": 341.805577243555
+        },
+        {
+          "b": -10,
+          "hc0_chi_square": 605.919684484942,
+          "homoskedastic_f": 285.28442428528
+        },
+        {
+          "b": -1,
+          "hc0_chi_square": 126.875205115949,
+          "homoskedastic_f": 62.662282912838
+        },
+        {
+          "b": 0,
+          "hc0_chi_square": 50.5039370132606,
+          "homoskedastic_f": 24.9634049971883
+        },
+        {
+          "b": 1,
+          "hc0_chi_square": 5.47221567697557,
+          "homoskedastic_f": 2.65437333331526
+        },
+        {
+          "b": 1.5,
+          "hc0_chi_square": 0.0468056263709629,
+          "homoskedastic_f": 0.0342396107409169
+        },
+        {
+          "b": 2,
+          "hc0_chi_square": 7.05504607401167,
+          "homoskedastic_f": 3.63019171921124
+        },
+        {
+          "b": 4,
+          "hc0_chi_square": 132.255029890142,
+          "homoskedastic_f": 64.9904700846482
+        },
+        {
+          "b": 10,
+          "hc0_chi_square": 540.622937403193,
+          "homoskedastic_f": 246.703734502335
+        },
+        {
+          "b": 10000,
+          "hc0_chi_square": 763.101329634163,
+          "homoskedastic_f": 341.798412024766
+        }
+      ],
+      "local_boundaries": [0.97807392477579, 1.95773481081923]
+    },
+    "q3": {
+      "source": "tests/fixtures/agent_completion/iv_ar/q3.csv",
+      "q": 3,
+      "tests": [
+        {
+          "b": -10000,
+          "hc0_chi_square": 1346.67594217259,
+          "homoskedastic_f": 442.377800853747
+        },
+        {
+          "b": -10,
+          "hc0_chi_square": 1021.99596267066,
+          "homoskedastic_f": 379.83896137561
+        },
+        {
+          "b": -1,
+          "hc0_chi_square": 211.329064514173,
+          "homoskedastic_f": 73.2509815618447
+        },
+        {
+          "b": 0,
+          "hc0_chi_square": 78.3969659792923,
+          "homoskedastic_f": 24.5981328791761
+        },
+        {
+          "b": 1,
+          "hc0_chi_square": 4.83814074787447,
+          "homoskedastic_f": 1.14666898462817
+        },
+        {
+          "b": 1.5,
+          "hc0_chi_square": 6.15373886220446,
+          "homoskedastic_f": 1.92150782781388
+        },
+        {
+          "b": 2,
+          "hc0_chi_square": 37.6697454841561,
+          "homoskedastic_f": 10.9533842078758
+        },
+        {
+          "b": 4,
+          "hc0_chi_square": 386.670638665628,
+          "homoskedastic_f": 100.160326196335
+        },
+        {
+          "b": 10,
+          "hc0_chi_square": 1147.41154161834,
+          "homoskedastic_f": 320.52979365684
+        },
+        {
+          "b": 10000,
+          "hc0_chi_square": 1346.99517912358,
+          "homoskedastic_f": 442.339095696274
+        }
+      ],
+      "local_boundaries": [0.90529049914553, 1.54691583392268]
+    },
+    "q4": {
+      "source": "tests/fixtures/agent_completion/iv_ar/q4.csv",
+      "q": 4,
+      "tests": [
+        {
+          "b": -10000,
+          "hc0_chi_square": 1434.76190188885,
+          "homoskedastic_f": 409.948480265634
+        },
+        {
+          "b": -10,
+          "hc0_chi_square": 1572.89990747172,
+          "homoskedastic_f": 360.480775069271
+        },
+        {
+          "b": -1,
+          "hc0_chi_square": 297.020636649522,
+          "homoskedastic_f": 65.4963097422844
+        },
+        {
+          "b": 0,
+          "hc0_chi_square": 95.192259293857,
+          "homoskedastic_f": 22.7933325511754
+        },
+        {
+          "b": 1,
+          "hc0_chi_square": 6.83653781086455,
+          "homoskedastic_f": 1.74026703900173
+        },
+        {
+          "b": 1.5,
+          "hc0_chi_square": 5.78937827235644,
+          "homoskedastic_f": 1.2386091640599
+        },
+        {
+          "b": 2,
+          "hc0_chi_square": 28.9592162684112,
+          "homoskedastic_f": 7.21254900545258
+        },
+        {
+          "b": 4,
+          "hc0_chi_square": 261.958731673919,
+          "homoskedastic_f": 74.4919487584023
+        },
+        {
+          "b": 10,
+          "hc0_chi_square": 878.915125364683,
+          "homoskedastic_f": 268.042290310568
+        },
+        {
+          "b": 10000,
+          "hc0_chi_square": 1433.90301729055,
+          "homoskedastic_f": 409.855217630615
+        }
+      ],
+      "local_boundaries": [0.921270254741539, 1.62477210970882]
+    },
+    "distant": {
+      "source": "tests/fixtures/agent_completion/iv_ar/distant.csv",
+      "q": 2,
+      "tests": [
+        {
+          "b": 2000,
+          "hc0_chi_square": 763.062040079154,
+          "homoskedastic_f": 341.805577243555
+        },
+        {
+          "b": 11990,
+          "hc0_chi_square": 605.919684484942,
+          "homoskedastic_f": 285.28442428528
+        },
+        {
+          "b": 11999,
+          "hc0_chi_square": 126.875205115949,
+          "homoskedastic_f": 62.662282912838
+        },
+        {
+          "b": 12000,
+          "hc0_chi_square": 50.5039370132606,
+          "homoskedastic_f": 24.9634049971883
+        },
+        {
+          "b": 12001,
+          "hc0_chi_square": 5.47221567697557,
+          "homoskedastic_f": 2.65437333331526
+        },
+        {
+          "b": 12001.5,
+          "hc0_chi_square": 0.0468056263709629,
+          "homoskedastic_f": 0.0342396107409169
+        },
+        {
+          "b": 12002,
+          "hc0_chi_square": 7.05504607401167,
+          "homoskedastic_f": 3.63019171921124
+        },
+        {
+          "b": 12004,
+          "hc0_chi_square": 132.255029890142,
+          "homoskedastic_f": 64.9904700846482
+        },
+        {
+          "b": 12010,
+          "hc0_chi_square": 540.622937403193,
+          "homoskedastic_f": 246.703734502335
+        },
+        {
+          "b": 22000,
+          "hc0_chi_square": 763.101329634163,
+          "homoskedastic_f": 341.798412024766
+        }
+      ],
+      "local_boundaries": [12000.9780739248, 12001.9577348108]
+    }
+  },
+  "definition": "Native car::linearHypothesis(lm(y-b*x ~ w+Z), vcov.=sandwich::vcovHC(type=HC0), test=Chisq); independent point and local boundary oracle, not global topology proof"
+}

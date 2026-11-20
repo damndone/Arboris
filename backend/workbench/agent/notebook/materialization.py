@@ -54,6 +54,7 @@ from .errors import (
 )
 from .freshness import assert_executable
 from .evidence import MAX_SOURCE_ROWS
+from .proposal import OptionRevisionPins
 
 if TYPE_CHECKING:
     from .service import NotebookService
@@ -148,14 +149,19 @@ class NotebookOptionMaterializer:
         trace: TraceWriter | None = None,
         materialization_id: str | None = None,
         draft_id: str | None = None,
+        pins: OptionRevisionPins | None = None,
     ) -> MaterializationResult:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        if pins is not None:
+            pins.require_current(
+                current, message="materialization request does not match the current option revision"
+            )
+        self.service._assert_current_recommendation_source(notebook_id, current)
+        self.service._assert_current_capability_binding(current)
         self.service._assert_current_memory_default_sources(view, context)
         binding_ref = getattr(current, "capability_resolution_binding_ref", None)
-        if binding_ref is not None:
-            self.service._assert_current_capability_binding(current)
         if not isinstance(current, NotebookOptionRevisionV11):
             self.service.assert_materializable(notebook_id, option_id)
         if view.lifecycle_status not in {"selected", "materialized", "executed"}:

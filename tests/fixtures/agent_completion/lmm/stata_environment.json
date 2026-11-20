@@ -1,0 +1,1 @@
+{"stata_version":"18","os":"Unix","command":"stata-mp -bq do generate_residuals.do REPO_ROOT","tolerance":{"rtol":0.000002,"atol":0.000002},"definition":"predict fitted; predict residuals; y - predict xb. Not rstandard."}
