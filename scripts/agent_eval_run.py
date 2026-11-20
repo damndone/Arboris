@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from agent_eval.recorder import provider_tape  # noqa: E402
 from agent_eval.runner import Policy, run_conversation  # noqa: E402
-from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks  # noqa: E402
+from agent_eval.external import ExternalTask, blade_tasks, qrdata_fresh, qrdata_subset, replication_tasks  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
 from agent_eval.budget import BudgetStop, FreeRouteGuard, NvidiaFreeEndpointGuard, RoundBudget, TaskStop  # noqa: E402
@@ -210,7 +210,8 @@ def main() -> int:
             return 86
     selected = {item for item in args.tasks.split(",") if item}
     suite = {"dev": dev_tasks, "heldout": heldout_tasks,
-             "external": lambda: [*qrdata_subset(), *blade_tasks(), *replication_tasks()]}[args.suite]()
+             "external": lambda: [*qrdata_subset(), *blade_tasks(), *replication_tasks(),
+                                  *(qrdata_fresh() if selected else [])]}[args.suite]()
     tasks = [task for task in suite if not selected or task.id in selected]
     if selected - {task.id for task in tasks}:
         print(f"unknown task ids: {sorted(selected - {t.id for t in tasks})}", file=sys.stderr)
@@ -218,8 +219,8 @@ def main() -> int:
     if args.nvidia_free_round == "dev8" and (not selected or not selected <= {
             "iv_weak.goal", "panel_fe.specific", "leverage.goal", "survival.open"}):
         parser.error("NVIDIA dev8 accepts only explicit subsets of iv_weak.goal,panel_fe.specific,leverage.goal,survival.open")
-    if args.nvidia_free_round == "qrdata40" and (not selected or not selected <= {task.id for task in qrdata_subset()}):
-        parser.error("NVIDIA qrdata40 accepts only explicit subsets of the original frozen QRData40 tasks")
+    if args.nvidia_free_round == "qrdata40" and (not selected or not selected <= {task.id for task in [*qrdata_subset(), *qrdata_fresh()]}):
+        parser.error("NVIDIA qrdata40 accepts only explicit subsets of the frozen QRData40 tasks or the fresh QRData tasks")
 
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)

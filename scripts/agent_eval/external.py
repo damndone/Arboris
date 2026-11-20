@@ -122,6 +122,23 @@ def qrdata_subset(per_cell: int = 10, per_source: int = 4, seed: int = 20261017)
     return chosen
 
 
+def qrdata_fresh(per_cell: int = 5, per_source: int = 2, seed: int = 20261101) -> list[ExternalTask]:
+    """QRData tasks outside the 40 used to find and fix faults, so a fix can be judged on data it never saw."""
+    used = {task.id for task in qrdata_subset()}
+    cells: dict[tuple[str, str], int] = {}
+    sources: dict[tuple[str, str, str], int] = {}
+    chosen = []
+    for task in qrdata_subset(per_cell=10 ** 6, per_source=10 ** 6, seed=seed):
+        cell = (str(task.reference["category"]), str(task.question_type))
+        source = (*cell, str(task.reference["source"]))
+        if task.id in used or cells.get(cell, 0) >= per_cell or sources.get(source, 0) >= per_source:
+            continue
+        cells[cell] = cells.get(cell, 0) + 1
+        sources[source] = sources.get(source, 0) + 1
+        chosen.append(task)
+    return chosen
+
+
 def blade_tasks() -> list[ExternalTask]:
     tasks = []
     for name in BLADE_DATASETS:
