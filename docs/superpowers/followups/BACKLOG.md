@@ -15,12 +15,40 @@
 
 ---
 
-## 0.0 最新：v1.9.0 已发布（2026-10-14）
+## 0.0 最新：v1.9.1 已发布（2026-11-20）
+
+**v1.9.1 = Agent 两种执行模式、可见计划、随时纠正**，已发布（main squash `10e3a175`，tag `v1.9.1`，冻结点 `de0dfba3`）。按 [发版规则](../plans/2026-11-20-v1.9.1-release-rules.md)：硬门全部通过，预注册的正式评测指标没有跑完，照实写入发布说明，不宣称达到。
+
+- 发布说明：`docs/releases/v1.9.1-release-notes.md`；完成报告 `docs/releases/v1.9.1-completion.md`。
+- 下一版开工交接：`handoffs/2026-11-20-next-version-kickoff.md`。
+- 本文件 2026-11-20 快照：`archive/followups/BACKLOG-2026-11-20-v1.9.1-snapshot.md`。
+
+### 0.0.1 v1.9.1 遗留（新增）
+
+| ID | 级别 | 内容 | 现状 / 建议 |
+|---|---|---|---|
+| V191-M5-FORMAL | P | 正式评测未跑：开发集 198 位置（Ask/Auto 各 99）、pass³ 18 情境、留出 21 题（只跑一次）、外部（BLADE、DiscoveryBench、红牌、Huntington-Klein）、Agent 论文复现、消融 | v1.9.2 第一个里程碑；夜间自动循环分批跑；正式准入要求空闲 ≥ 25 GiB |
+| V191-NUDGE-ZERO | P | 安全底线“用户需要说继续 0”未达（哨兵见完成报告） | 列为 v1.9.2 硬门，用夜间哨兵集测 |
+| V191-PROMPT-SIZE | P | 每任务 prompt 中位远超 ≤300k；未命中缓存中位超 ≤60k | 历史压缩、工具定义瘦身；以录制回放量化后再真跑 |
+| V191-REFUSALS | P | 工具被拒率 QRData 哨兵 11.5%（门槛 ≤3%），参数格式错误为主 | 逐类做可执行纠错提示；每类一条回归测试 |
+| V191-PLAN-BINDING-FRICTION | W | Ask 模式下“提案须绑定到计划中未完成步骤”的规则让模型多写 `proposal_ref` 等字段，产生额外拒绝 | 由服务端绑定，不要求模型传引用 |
+| V191-RESOURCE-UNDECIDED | W | 面板与可选 IV 的 footprint 比值置信区间跨过 1.05（未判定，非退步） | 下一版加 tracemalloc 峰值与写盘字节两项确定性硬门；空闲机器夜间测 |
+| V191-FINISH-REQUEST | W | 具体问题的完成恢复靠措辞判断“要做完” | 改为服务端直接绑定计算结果，不经模型往返 |
+| V191-NO-MODE-BUDGET | W | 不带执行模式、等待额度 300 s 时首个请求被拒（直接 API） | 无模式预算高于最大等待额度 |
+| V191-FIGURE-SMALL-CELLS | W | 图表摘要单观测段即该行，无小样本抑制；ARMA-GARCH 前端图表包未按图分类 | 外发分类补齐 |
+| V191-STRUCTURE-AUDIT | W | 结构审查开放项：临时兼容转发、旧提案入口、`agent/` 经 `_read_artifacts_index` 读产物索引 | 见 `evaluations/2026-11-17-v1.9.1-structure-audit.md` |
+| V191-PRIVATE-IMPORTS | W | 跨包导入下划线名字 547 处（lint 基线只拦新增） | 逐包导出公共名字，基线只降 |
+| V191-HANDOFF-CHECK | W | `handoff_check.py` 只在执行前读 HEAD 与 clean；判据扫描整份日志且未核对命令 | 复用 gate 的起止树摘要，绑定清单允许的命令 |
+| V191-MANUAL-LONG-CANCEL | W | 原生长计算中断（同步合同阶段）未达 ≤1 s | 可取消分块或受控 worker 边界 |
+| V191-COMMENT-DEBT | W | 老代码约 4,181 行注释 | 单独成批 |
+| V191-OS-NOTIFY | U | 关窗后的系统通知可见性未在真机验证（M2 #18） | 真机场景一起验 |
+
+## 0.0（旧）v1.9.0 已发布（2026-10-14）
 
 **v1.9.0 = 研究工作区重做 + Agent 增强**，已发布（main squash `402d2d3e`，tag `v1.9.0`）；**v1.8.13**（手动能力后端）同日单独发布（`c81fc89f`，未重跑 gate，说明里写明）。
 
 - 发布说明：`docs/releases/v1.9.0-release-notes.md`、`docs/releases/v1.8.13-release-notes.md`；完成报告 `docs/releases/v1.9.0-completion.md`。
-- 下一版开工交接：`handoffs/2026-10-15-next-version-kickoff.md`（候选、开工流程、坑）。
+- 下一版开工交接：`archive/handoff/2026-10-15-next-version-kickoff.md`（已归档；候选、开工流程、坑）。
 - 本文件 2026-10-15 快照：`archive/followups/BACKLOG-2026-10-15-v1.9.0-snapshot.md`。
 
 ### 0.0.1 v1.9.0 遗留（新增）
