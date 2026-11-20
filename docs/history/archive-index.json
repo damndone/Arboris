@@ -1424,15 +1424,21 @@
    "name": "workbench-v1.8.10",
    "path": ".worktrees/workbench-v1.8.10",
    "branch": "workbench-v1.8.10",
-   "head": "bea7e2a0948f9a3d78dde900286d670a55c61fc7",
+   "head": "292f3a5a17b48711a3ff525f65f338cf07606f15",
    "release_tags": [
     "v1.8.10"
    ],
    "worktree_tag": "archive/worktree/workbench-v1.8.10",
-   "leftover_files": [],
+   "leftover_files": [
+    ".claude/launch.json",
+    "local/devline-events/eval-a.json",
+    "local/devline-events/step8.json",
+    "local/devline-events/survey-df.json"
+   ],
    "deleted_tracked": [],
-   "leftovers_tag": null,
-   "kept": true
+   "leftovers_tag": "archive/leftovers/workbench-v1.8.10",
+   "kept": false,
+   "removed": "2026-11-20"
   },
   {
    "name": "codex-v1810-evaluation",
