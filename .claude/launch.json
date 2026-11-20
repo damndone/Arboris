@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend-v1810",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "VITE_API_PROXY_TARGET=http://127.0.0.1:8030",
+        "VITE_WORKBENCH_ASK_AI=1",
+        "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.10/frontend/node_modules/.bin/vite",
+        "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.10/frontend",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5190"
+      ],
+      "port": 5190
+    },
+    {
+      "name": "backend-v1810",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.10/backend && set -a && source ~/.config/econometrics-workbench/llm.env && set +a && exec /Users/jiayuanren/项目规划/.venv/bin/python -m uvicorn workbench.api:app --host 127.0.0.1 --port 8030"
+      ],
+      "port": 8030
+    }
+  ]
+}
