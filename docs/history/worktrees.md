@@ -149,3 +149,26 @@
 
 可能含 Stata 许可证页眉，不推送。恢复：在对应目录下 `tar -xzf <压缩包>`。
 
+
+## 2026-11-20 附属工作目录清理（v1.9.1 发版后）
+
+用户 2026-11-20 同意清理 v1.9.1 期间的评测检出与子会话工作目录。做法：先核对每个提交都能从 main 或 `workbench-v1.9.1` 分支找到；未提交的改动存成 tag 并推送；被忽略的文件（证据、原生构建产物、`.claude` 设置）在同一卷内改名移到主仓库 `local/archive/worktrees-20261120/<名字>/`，移动前后逐个文件核对 SHA-256，清单在各目录的 `manifest.jsonl` 与 `README.json`；最后移除工作目录。**分支一个都没删**（`claude/*` 只在本机）。共移动 3.0 GB，没有删除任何证据。
+
+| 工作目录 | 提交 | 分支 | 未提交改动 | 被忽略文件的去处 |
+|---|---|---|---|---|
+| `.worktrees/eval-heldout-base` | `79dc2aae` | —（detached） | 2 个暂存文件（QRData 新题集草稿，后由 `c0693c47` 正式提交）→ `archive/leftovers/eval-heldout-base`（已推送） | `local/archive/worktrees-20261120/eval-heldout-base/` |
+| `.worktrees/eval-v191-columns` | `dfe879ed` | — | 无 | `…/eval-v191-columns/` |
+| `.worktrees/eval-v191-repaired` | `79dc2aae` | — | 无 | `…/eval-v191-repaired/` |
+| `.worktrees/eval-v191-reports` | `c0693c47` | — | 无 | `…/eval-v191-reports/` |
+| `.claude/worktrees/v191-agent-pipeline-7d233a` | `10852136` | `claude/v191-agent-pipeline-7d233a` | 无 | `…/v191-agent-pipeline-7d233a/`（含 `local/perf-evidence`、`perf-inputs`、`test-evidence`） |
+| `.claude/worktrees/v191-agent-speed-9cf112` | `d5de0eab` | `claude/v191-agent-speed-9cf112` | 无 | `…/v191-agent-speed-9cf112/`（含 `local/agent-speed-20261103`） |
+| `.claude/worktrees/v191-native-io-5353c1` | `bdf4b65c` | `claude/v191-native-io-5353c1` | 无 | `…/v191-native-io-5353c1/` |
+| `.claude/worktrees/v191-native-io-5353c1/local/ab-baseline-a6f22557` | `a6f22557` | — | 无 | `…/ab-baseline-a6f22557/` |
+| `.claude/worktrees/v191-native-math-798d80` | `b36f14c7` | `claude/v191-native-math-798d80` | 无 | `…/v191-native-math-798d80/`（含 `local/perf-evidence/native-math-20261103`） |
+| `.claude/worktrees/v191-native-math-798d80/local/ab-baseline-33f60afb` | `33f60afb` | — | 无 | `…/ab-baseline-33f60afb/` |
+| `.claude/worktrees/v191-native-stats-ba9cec` | `a6f22557` | `claude/v191-native-stats-ba9cec` | 无 | `…/v191-native-stats-ba9cec/` |
+| `.claude/worktrees/zealous-cray-ba9ac4` | `59b52231` | `claude/zealous-cray-ba9ac4` | 无 | `…/zealous-cray-ba9ac4/` |
+
+评测记录里写的“本 worktree 的 `local/…`”（例如 `2026-11-03-agent-speed.md`、`2026-11-03-native-math-speedups.md`、`2026-11-03-v1.9.1-agent-pipeline-performance.md`），现在在上表对应目录下的同名相对路径。
+
+**保留的检出**：`.worktrees/eval-v190-baseline`（v1.9.0 基线，`scripts/perf_native_io.py` 的默认 `--baseline-repo`，v1.9.2 的“≤ 1.05 倍 v1.9.0”资源门要用）和 `.worktrees/eval-v191-frozen`（v1.9.1 冻结点 `de0dfba3`，v1.9.1 完成报告引用的 gate 证据在其中，v1.9.2 的 v2 性能目标以它为对照）。
